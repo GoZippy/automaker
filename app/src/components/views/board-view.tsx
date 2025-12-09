@@ -404,6 +404,7 @@ export function BoardView() {
         startedAt: f.startedAt,
         imagePaths: f.imagePaths,
         skipTests: f.skipTests,
+        summary: f.summary,
       }));
       await api.writeFile(
         `${currentProject.path}/.automaker/feature_list.json`,

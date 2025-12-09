@@ -19,14 +19,15 @@ class McpServerFactory {
       tools: [
         tool(
           "UpdateFeatureStatus",
-          "Update the status of a feature in the feature list. Use this tool instead of directly modifying feature_list.json to safely update feature status. IMPORTANT: If the feature has skipTests=true, you should NOT mark it as verified - instead it will automatically go to waiting_approval status for manual review.",
+          "Update the status of a feature in the feature list. Use this tool instead of directly modifying feature_list.json to safely update feature status. IMPORTANT: If the feature has skipTests=true, you should NOT mark it as verified - instead it will automatically go to waiting_approval status for manual review. Always include a summary of what was done.",
           {
             featureId: z.string().describe("The ID of the feature to update"),
-            status: z.enum(["backlog", "in_progress", "verified"]).describe("The new status for the feature. Note: If skipTests=true, verified will be converted to waiting_approval automatically.")
+            status: z.enum(["backlog", "in_progress", "verified"]).describe("The new status for the feature. Note: If skipTests=true, verified will be converted to waiting_approval automatically."),
+            summary: z.string().optional().describe("A brief summary of what was implemented/changed. This will be displayed on the Kanban card. Example: 'Added dark mode toggle. Modified: settings.tsx, theme-provider.tsx'")
           },
           async (args) => {
             try {
-              console.log(`[McpServerFactory] UpdateFeatureStatus tool called: featureId=${args.featureId}, status=${args.status}`);
+              console.log(`[McpServerFactory] UpdateFeatureStatus tool called: featureId=${args.featureId}, status=${args.status}, summary=${args.summary || "(none)"}`);
 
               // Load the feature to check skipTests flag
               const features = await featureLoader.loadFeatures(projectPath);
@@ -43,12 +44,12 @@ class McpServerFactory {
                 finalStatus = "waiting_approval";
               }
 
-              // Call the provided callback to update feature status
-              await updateFeatureStatusCallback(args.featureId, finalStatus, projectPath);
+              // Call the provided callback to update feature status with summary
+              await updateFeatureStatusCallback(args.featureId, finalStatus, projectPath, args.summary);
 
               const statusMessage = finalStatus !== args.status
-                ? `Successfully updated feature ${args.featureId} to status "${finalStatus}" (converted from "${args.status}" because skipTests=true)`
-                : `Successfully updated feature ${args.featureId} to status "${finalStatus}"`;
+                ? `Successfully updated feature ${args.featureId} to status "${finalStatus}" (converted from "${args.status}" because skipTests=true)${args.summary ? ` with summary: "${args.summary}"` : ""}`
+                : `Successfully updated feature ${args.featureId} to status "${finalStatus}"${args.summary ? ` with summary: "${args.summary}"` : ""}`;
 
               return {
                 content: [{

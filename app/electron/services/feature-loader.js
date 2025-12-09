@@ -32,8 +32,12 @@ class FeatureLoader {
 
   /**
    * Update feature status in .automaker/feature_list.json
+   * @param {string} featureId - The ID of the feature to update
+   * @param {string} status - The new status
+   * @param {string} projectPath - Path to the project
+   * @param {string} [summary] - Optional summary of what was done
    */
-  async updateFeatureStatus(featureId, status, projectPath) {
+  async updateFeatureStatus(featureId, status, projectPath, summary) {
     const features = await this.loadFeatures(projectPath);
     const feature = features.find((f) => f.id === featureId);
 
@@ -44,6 +48,11 @@ class FeatureLoader {
 
     // Update the status field
     feature.status = status;
+
+    // Update the summary field if provided
+    if (summary) {
+      feature.summary = summary;
+    }
 
     // Save back to file
     const featuresPath = path.join(
@@ -72,11 +81,14 @@ class FeatureLoader {
       if (f.startedAt !== undefined) {
         featureData.startedAt = f.startedAt;
       }
+      if (f.summary !== undefined) {
+        featureData.summary = f.summary;
+      }
       return featureData;
     });
 
     await fs.writeFile(featuresPath, JSON.stringify(toSave, null, 2), "utf-8");
-    console.log(`[FeatureLoader] Updated feature ${featureId}: status=${status}`);
+    console.log(`[FeatureLoader] Updated feature ${featureId}: status=${status}${summary ? `, summary="${summary}"` : ""}`);
   }
 
   /**

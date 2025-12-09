@@ -61,6 +61,7 @@ export interface Feature {
   imagePaths?: FeatureImagePath[]; // Paths to temp files for agent context
   startedAt?: string; // ISO timestamp for when the card moved to in_progress
   skipTests?: boolean; // When true, skip TDD approach and require manual verification
+  summary?: string; // Summary of what was done/modified by the agent
 }
 
 export interface AppState {
