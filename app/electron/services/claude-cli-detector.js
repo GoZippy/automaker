@@ -536,6 +536,7 @@ class ClaudeCliDetector {
     const platform = process.platform;
     const preferPty =
       (platform === "win32" ||
+        platform === "darwin" ||
         process.env.CLAUDE_AUTH_FORCE_PTY === "1") &&
       process.env.CLAUDE_AUTH_DISABLE_PTY !== "1";
 
