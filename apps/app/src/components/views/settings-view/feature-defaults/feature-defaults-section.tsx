@@ -118,7 +118,7 @@ export function FeatureDefaultsSection({
           <div className="space-y-1.5">
             <Label
               htmlFor="use-worktrees"
-              className="text-foreground cursor-not-allowed font-medium flex items-center gap-2"
+              className="text-foreground font-medium flex items-center gap-2"
             >
               <GitBranch className="w-4 h-4 text-brand-500" />
               Enable Git Worktree Isolation
