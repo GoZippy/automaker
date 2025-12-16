@@ -84,7 +84,8 @@ export interface AgentAPI {
     sessionId: string,
     message: string,
     workingDirectory?: string,
-    imagePaths?: string[]
+    imagePaths?: string[],
+    model?: string
   ) => Promise<{
     success: boolean;
     error?: string;

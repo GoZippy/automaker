@@ -7,12 +7,16 @@ interface UseBoardColumnFeaturesProps {
   features: Feature[];
   runningAutoTasks: string[];
   searchQuery: string;
+  currentWorktreePath: string | null; // Currently selected worktree path
+  projectPath: string | null; // Main project path (for main worktree)
 }
 
 export function useBoardColumnFeatures({
   features,
   runningAutoTasks,
   searchQuery,
+  currentWorktreePath,
+  projectPath,
 }: UseBoardColumnFeaturesProps) {
   // Memoize column features to prevent unnecessary re-renders
   const columnFeaturesMap = useMemo(() => {
@@ -34,16 +38,37 @@ export function useBoardColumnFeatures({
         )
       : features;
 
+    // Determine the effective worktree path for filtering
+    // If currentWorktreePath is null, we're on the main worktree (use projectPath)
+    const effectiveWorktreePath = currentWorktreePath || projectPath;
+
     filteredFeatures.forEach((f) => {
       // If feature has a running agent, always show it in "in_progress"
       const isRunning = runningAutoTasks.includes(f.id);
+
+      // Check if feature matches the current worktree
+      // Features without a worktreePath are considered unassigned (backlog items)
+      // Features with a worktreePath should only show if it matches the selected worktree
+      const matchesWorktree = !f.worktreePath || f.worktreePath === effectiveWorktreePath;
+
       if (isRunning) {
-        map.in_progress.push(f);
+        // Only show running tasks if they match the current worktree
+        if (matchesWorktree) {
+          map.in_progress.push(f);
+        }
       } else {
         // Otherwise, use the feature's status (fallback to backlog for unknown statuses)
         const status = f.status as ColumnId;
-        if (map[status]) {
-          map[status].push(f);
+
+        // Backlog items are always visible (they have no worktree assigned)
+        // For other statuses, filter by worktree
+        if (status === "backlog") {
+          map.backlog.push(f);
+        } else if (map[status]) {
+          // Only show if matches current worktree or has no worktree assigned
+          if (matchesWorktree) {
+            map[status].push(f);
+          }
         } else {
           // Unknown status, default to backlog
           map.backlog.push(f);
@@ -59,7 +84,7 @@ export function useBoardColumnFeatures({
     });
 
     return map;
-  }, [features, runningAutoTasks, searchQuery]);
+  }, [features, runningAutoTasks, searchQuery, currentWorktreePath, projectPath]);
 
   const getColumnFeatures = useCallback(
     (columnId: ColumnId) => {

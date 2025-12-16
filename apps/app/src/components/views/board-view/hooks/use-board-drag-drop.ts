@@ -14,6 +14,8 @@ interface UseBoardDragDropProps {
     updates: Partial<Feature>
   ) => Promise<void>;
   handleStartImplementation: (feature: Feature) => Promise<boolean>;
+  currentWorktreePath: string | null; // Currently selected worktree path
+  projectPath: string | null; // Main project path
 }
 
 export function useBoardDragDrop({
@@ -22,9 +24,14 @@ export function useBoardDragDrop({
   runningAutoTasks,
   persistFeatureUpdate,
   handleStartImplementation,
+  currentWorktreePath,
+  projectPath,
 }: UseBoardDragDropProps) {
   const [activeFeature, setActiveFeature] = useState<Feature | null>(null);
   const { moveFeature } = useAppStore();
+
+  // Determine the effective worktree path for assigning to features
+  const effectiveWorktreePath = currentWorktreePath || projectPath;
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -97,6 +104,10 @@ export function useBoardDragDrop({
       if (draggedFeature.status === "backlog") {
         // From backlog
         if (targetStatus === "in_progress") {
+          // Assign the current worktree to this feature when moving to in_progress
+          if (effectiveWorktreePath) {
+            await persistFeatureUpdate(featureId, { worktreePath: effectiveWorktreePath });
+          }
           // Use helper function to handle concurrency check and start implementation
           await handleStartImplementation(draggedFeature);
         } else {
@@ -123,10 +134,11 @@ export function useBoardDragDrop({
         } else if (targetStatus === "backlog") {
           // Allow moving waiting_approval cards back to backlog
           moveFeature(featureId, "backlog");
-          // Clear justFinishedAt timestamp when moving back to backlog
+          // Clear justFinishedAt timestamp and worktreePath when moving back to backlog
           persistFeatureUpdate(featureId, {
             status: "backlog",
             justFinishedAt: undefined,
+            worktreePath: undefined,
           });
           toast.info("Feature moved to backlog", {
             description: `Moved to Backlog: ${draggedFeature.description.slice(
@@ -166,7 +178,8 @@ export function useBoardDragDrop({
         } else if (targetStatus === "backlog") {
           // Allow moving skipTests cards back to backlog
           moveFeature(featureId, "backlog");
-          persistFeatureUpdate(featureId, { status: "backlog" });
+          // Clear worktreePath when moving back to backlog
+          persistFeatureUpdate(featureId, { status: "backlog", worktreePath: undefined });
           toast.info("Feature moved to backlog", {
             description: `Moved to Backlog: ${draggedFeature.description.slice(
               0,
@@ -189,7 +202,8 @@ export function useBoardDragDrop({
         } else if (targetStatus === "backlog") {
           // Allow moving verified cards back to backlog
           moveFeature(featureId, "backlog");
-          persistFeatureUpdate(featureId, { status: "backlog" });
+          // Clear worktreePath when moving back to backlog
+          persistFeatureUpdate(featureId, { status: "backlog", worktreePath: undefined });
           toast.info("Feature moved to backlog", {
             description: `Moved to Backlog: ${draggedFeature.description.slice(
               0,
@@ -205,6 +219,7 @@ export function useBoardDragDrop({
       moveFeature,
       persistFeatureUpdate,
       handleStartImplementation,
+      effectiveWorktreePath,
     ]
   );
 

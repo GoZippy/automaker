@@ -62,6 +62,7 @@ export function BoardView() {
     setKanbanCardDetailLevel,
     specCreatingForProject,
     setSpecCreatingForProject,
+    getCurrentWorktree,
   } = useAppStore();
   const shortcuts = useKeyboardShortcutsConfig();
   const {
@@ -298,12 +299,17 @@ export function BoardView() {
   });
 
   // Use drag and drop hook
+  // Get current worktree path for filtering features and assigning to cards
+  const currentWorktreePath = currentProject ? getCurrentWorktree(currentProject.path) : null;
+
   const { activeFeature, handleDragStart, handleDragEnd } = useBoardDragDrop({
     features: hookFeatures,
     currentProject,
     runningAutoTasks,
     persistFeatureUpdate,
     handleStartImplementation,
+    currentWorktreePath,
+    projectPath: currentProject?.path || null,
   });
 
   // Use column features hook
@@ -311,6 +317,8 @@ export function BoardView() {
     features: hookFeatures,
     runningAutoTasks,
     searchQuery,
+    currentWorktreePath,
+    projectPath: currentProject?.path || null,
   });
 
   // Use background hook

@@ -393,7 +393,8 @@ export interface ElectronAPI {
       sessionId: string,
       message: string,
       workingDirectory?: string,
-      imagePaths?: string[]
+      imagePaths?: string[],
+      model?: string
     ) => Promise<{ success: boolean; error?: string }>;
     getHistory: (sessionId: string) => Promise<{
       success: boolean;
