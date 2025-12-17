@@ -36,7 +36,7 @@ import { DeleteWorktreeDialog } from "./board-view/dialogs/delete-worktree-dialo
 import { CommitWorktreeDialog } from "./board-view/dialogs/commit-worktree-dialog";
 import { CreatePRDialog } from "./board-view/dialogs/create-pr-dialog";
 import { CreateBranchDialog } from "./board-view/dialogs/create-branch-dialog";
-import { WorktreeSelector } from "./board-view/components";
+import { WorktreePanel } from "./board-view/worktree-panel";
 import { COLUMNS } from "./board-view/constants";
 import {
   useBoardFeatures,
@@ -433,8 +433,8 @@ export function BoardView() {
         isMounted={isMounted}
       />
 
-      {/* Worktree Selector */}
-      <WorktreeSelector
+      {/* Worktree Panel */}
+      <WorktreePanel
         refreshTrigger={worktreeRefreshKey}
         projectPath={currentProject.path}
         onCreateWorktree={() => setShowCreateWorktreeDialog(true)}
