@@ -2,6 +2,15 @@ import React, { useState, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { ImageIcon, X, Upload } from 'lucide-react';
 import type { ImageAttachment } from '@/store/app-store';
+import {
+  fileToBase64,
+  generateImageId,
+  formatFileSize,
+  validateImageFile,
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_MAX_FILE_SIZE,
+  DEFAULT_MAX_FILES,
+} from '@/lib/image-utils';
 
 interface ImageDropZoneProps {
   onImagesSelected: (images: ImageAttachment[]) => void;
@@ -13,12 +22,9 @@ interface ImageDropZoneProps {
   images?: ImageAttachment[]; // Optional controlled images prop
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
 export function ImageDropZone({
   onImagesSelected,
-  maxFiles = 5,
+  maxFiles = DEFAULT_MAX_FILES,
   maxFileSize = DEFAULT_MAX_FILE_SIZE,
   className,
   children,
@@ -53,16 +59,10 @@ export function ImageDropZone({
       const errors: string[] = [];
 
       for (const file of Array.from(files)) {
-        // Validate file type
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          errors.push(`${file.name}: Unsupported file type. Please use JPG, PNG, GIF, or WebP.`);
-          continue;
-        }
-
-        // Validate file size
-        if (file.size > maxFileSize) {
-          const maxSizeMB = maxFileSize / (1024 * 1024);
-          errors.push(`${file.name}: File too large. Maximum size is ${maxSizeMB}MB.`);
+        // Validate file
+        const validation = validateImageFile(file, maxFileSize);
+        if (!validation.isValid) {
+          errors.push(validation.error!);
           continue;
         }
 
@@ -75,7 +75,7 @@ export function ImageDropZone({
         try {
           const base64 = await fileToBase64(file);
           const imageAttachment: ImageAttachment = {
-            id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateImageId(),
             data: base64,
             mimeType: file.type,
             filename: file.name,
@@ -89,7 +89,6 @@ export function ImageDropZone({
 
       if (errors.length > 0) {
         console.warn('Image upload errors:', errors);
-        // You could show these errors to the user via a toast or notification
       }
 
       if (newImages.length > 0) {
@@ -281,27 +280,4 @@ export function ImageDropZone({
       )}
     </div>
   );
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-      } else {
-        reject(new Error('Failed to read file as base64'));
-      }
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }

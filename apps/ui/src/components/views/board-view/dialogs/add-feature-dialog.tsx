@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -7,18 +6,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { HotkeyButton } from "@/components/ui/hotkey-button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { CategoryAutocomplete } from "@/components/ui/category-autocomplete";
+} from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { HotkeyButton } from '@/components/ui/hotkey-button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { CategoryAutocomplete } from '@/components/ui/category-autocomplete';
 import {
   DescriptionImageDropZone,
   FeatureImagePath as DescriptionImagePath,
+  FeatureTextFilePath as DescriptionTextFilePath,
   ImagePreviewMap,
-} from "@/components/ui/description-image-dropzone";
+} from '@/components/ui/description-image-dropzone';
 import {
   MessageSquare,
   Settings2,
@@ -26,10 +26,10 @@ import {
   FlaskConical,
   Sparkles,
   ChevronDown,
-} from "lucide-react";
-import { toast } from "sonner";
-import { getElectronAPI } from "@/lib/electron";
-import { modelSupportsThinking } from "@/lib/utils";
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { getElectronAPI } from '@/lib/electron';
+import { modelSupportsThinking } from '@/lib/utils';
 import {
   useAppStore,
   AgentModel,
@@ -37,7 +37,7 @@ import {
   FeatureImage,
   AIProfile,
   PlanningMode,
-} from "@/store/app-store";
+} from '@/store/app-store';
 import {
   ModelSelector,
   ThinkingLevelSelector,
@@ -46,14 +46,14 @@ import {
   PrioritySelector,
   BranchSelector,
   PlanningModeSelector,
-} from "../shared";
+} from '../shared';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { useNavigate } from "@tanstack/react-router";
+} from '@/components/ui/dropdown-menu';
+import { useNavigate } from '@tanstack/react-router';
 
 interface AddFeatureDialogProps {
   open: boolean;
@@ -65,6 +65,7 @@ interface AddFeatureDialogProps {
     steps: string[];
     images: FeatureImage[];
     imagePaths: DescriptionImagePath[];
+    textFilePaths: DescriptionTextFilePath[];
     skipTests: boolean;
     model: AgentModel;
     thinkingLevel: ThinkingLevel;
@@ -92,7 +93,7 @@ export function AddFeatureDialog({
   branchSuggestions,
   branchCardCounts,
   defaultSkipTests,
-  defaultBranch = "main",
+  defaultBranch = 'main',
   currentBranch,
   isMaximized,
   showProfilesOnly,
@@ -101,27 +102,29 @@ export function AddFeatureDialog({
   const navigate = useNavigate();
   const [useCurrentBranch, setUseCurrentBranch] = useState(true);
   const [newFeature, setNewFeature] = useState({
-    title: "",
-    category: "",
-    description: "",
-    steps: [""],
+    title: '',
+    category: '',
+    description: '',
+    steps: [''],
     images: [] as FeatureImage[],
     imagePaths: [] as DescriptionImagePath[],
+    textFilePaths: [] as DescriptionTextFilePath[],
     skipTests: false,
-    model: "opus" as AgentModel,
-    thinkingLevel: "none" as ThinkingLevel,
-    branchName: "",
+    model: 'opus' as AgentModel,
+    thinkingLevel: 'none' as ThinkingLevel,
+    branchName: '',
     priority: 2 as number, // Default to medium priority
   });
-  const [newFeaturePreviewMap, setNewFeaturePreviewMap] =
-    useState<ImagePreviewMap>(() => new Map());
+  const [newFeaturePreviewMap, setNewFeaturePreviewMap] = useState<ImagePreviewMap>(
+    () => new Map()
+  );
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [descriptionError, setDescriptionError] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancementMode, setEnhancementMode] = useState<
-    "improve" | "technical" | "simplify" | "acceptance"
-  >("improve");
-  const [planningMode, setPlanningMode] = useState<PlanningMode>("skip");
+    'improve' | 'technical' | 'simplify' | 'acceptance'
+  >('improve');
+  const [planningMode, setPlanningMode] = useState<PlanningMode>('skip');
   const [requirePlanApproval, setRequirePlanApproval] = useState(false);
 
   // Get enhancement model, planning mode defaults, and worktrees setting from store
@@ -144,10 +147,10 @@ export function AddFeatureDialog({
       setNewFeature((prev) => ({
         ...prev,
         skipTests: defaultSkipTests,
-        branchName: defaultBranch || "",
+        branchName: defaultBranch || '',
         // Use default profile's model/thinkingLevel if set, else fallback to defaults
-        model: defaultProfile?.model ?? "opus",
-        thinkingLevel: defaultProfile?.thinkingLevel ?? "none",
+        model: defaultProfile?.model ?? 'opus',
+        thinkingLevel: defaultProfile?.thinkingLevel ?? 'none',
       }));
       setUseCurrentBranch(true);
       setPlanningMode(defaultPlanningMode);
@@ -171,22 +174,20 @@ export function AddFeatureDialog({
 
     // Validate branch selection when "other branch" is selected
     if (useWorktrees && !useCurrentBranch && !newFeature.branchName.trim()) {
-      toast.error("Please select a branch name");
+      toast.error('Please select a branch name');
       return;
     }
 
-    const category = newFeature.category || "Uncategorized";
+    const category = newFeature.category || 'Uncategorized';
     const selectedModel = newFeature.model;
     const normalizedThinking = modelSupportsThinking(selectedModel)
       ? newFeature.thinkingLevel
-      : "none";
+      : 'none';
 
     // Use current branch if toggle is on
     // If currentBranch is provided (non-primary worktree), use it
     // Otherwise (primary worktree), use empty string which means "unassigned" (show only on primary)
-    const finalBranchName = useCurrentBranch
-      ? currentBranch || ""
-      : newFeature.branchName || "";
+    const finalBranchName = useCurrentBranch ? currentBranch || '' : newFeature.branchName || '';
 
     onAdd({
       title: newFeature.title,
@@ -195,6 +196,7 @@ export function AddFeatureDialog({
       steps: newFeature.steps.filter((s) => s.trim()),
       images: newFeature.images,
       imagePaths: newFeature.imagePaths,
+      textFilePaths: newFeature.textFilePaths,
       skipTests: newFeature.skipTests,
       model: selectedModel,
       thinkingLevel: normalizedThinking,
@@ -206,17 +208,18 @@ export function AddFeatureDialog({
 
     // Reset form
     setNewFeature({
-      title: "",
-      category: "",
-      description: "",
-      steps: [""],
+      title: '',
+      category: '',
+      description: '',
+      steps: [''],
       images: [],
       imagePaths: [],
+      textFilePaths: [],
       skipTests: defaultSkipTests,
-      model: "opus",
+      model: 'opus',
       priority: 2,
-      thinkingLevel: "none",
-      branchName: "",
+      thinkingLevel: 'none',
+      branchName: '',
     });
     setUseCurrentBranch(true);
     setPlanningMode(defaultPlanningMode);
@@ -251,13 +254,13 @@ export function AddFeatureDialog({
       if (result?.success && result.enhancedText) {
         const enhancedText = result.enhancedText;
         setNewFeature((prev) => ({ ...prev, description: enhancedText }));
-        toast.success("Description enhanced!");
+        toast.success('Description enhanced!');
       } else {
-        toast.error(result?.error || "Failed to enhance description");
+        toast.error(result?.error || 'Failed to enhance description');
       }
     } catch (error) {
-      console.error("Enhancement failed:", error);
-      toast.error("Failed to enhance description");
+      console.error('Enhancement failed:', error);
+      toast.error('Failed to enhance description');
     } finally {
       setIsEnhancing(false);
     }
@@ -267,16 +270,11 @@ export function AddFeatureDialog({
     setNewFeature({
       ...newFeature,
       model,
-      thinkingLevel: modelSupportsThinking(model)
-        ? newFeature.thinkingLevel
-        : "none",
+      thinkingLevel: modelSupportsThinking(model) ? newFeature.thinkingLevel : 'none',
     });
   };
 
-  const handleProfileSelect = (
-    model: AgentModel,
-    thinkingLevel: ThinkingLevel
-  ) => {
+  const handleProfileSelect = (model: AgentModel, thinkingLevel: ThinkingLevel) => {
     setNewFeature({
       ...newFeature,
       model,
@@ -306,14 +304,9 @@ export function AddFeatureDialog({
       >
         <DialogHeader>
           <DialogTitle>Add New Feature</DialogTitle>
-          <DialogDescription>
-            Create a new feature card for the Kanban board.
-          </DialogDescription>
+          <DialogDescription>Create a new feature card for the Kanban board.</DialogDescription>
         </DialogHeader>
-        <Tabs
-          defaultValue="prompt"
-          className="py-4 flex-1 min-h-0 flex flex-col"
-        >
+        <Tabs defaultValue="prompt" className="py-4 flex-1 min-h-0 flex flex-col">
           <TabsList className="w-full grid grid-cols-3 mb-4">
             <TabsTrigger value="prompt" data-testid="tab-prompt">
               <MessageSquare className="w-4 h-4 mr-2" />
@@ -330,10 +323,7 @@ export function AddFeatureDialog({
           </TabsList>
 
           {/* Prompt Tab */}
-          <TabsContent
-            value="prompt"
-            className="space-y-4 overflow-y-auto cursor-default"
-          >
+          <TabsContent value="prompt" className="space-y-4 overflow-y-auto cursor-default">
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <DescriptionImageDropZone
@@ -345,8 +335,10 @@ export function AddFeatureDialog({
                   }
                 }}
                 images={newFeature.imagePaths}
-                onImagesChange={(images) =>
-                  setNewFeature({ ...newFeature, imagePaths: images })
+                onImagesChange={(images) => setNewFeature({ ...newFeature, imagePaths: images })}
+                textFiles={newFeature.textFilePaths}
+                onTextFilesChange={(textFiles) =>
+                  setNewFeature({ ...newFeature, textFilePaths: textFiles })
                 }
                 placeholder="Describe the feature..."
                 previewMap={newFeaturePreviewMap}
@@ -360,47 +352,32 @@ export function AddFeatureDialog({
               <Input
                 id="title"
                 value={newFeature.title}
-                onChange={(e) =>
-                  setNewFeature({ ...newFeature, title: e.target.value })
-                }
+                onChange={(e) => setNewFeature({ ...newFeature, title: e.target.value })}
                 placeholder="Leave blank to auto-generate"
               />
             </div>
             <div className="flex w-fit items-center gap-3 select-none cursor-default">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-[200px] justify-between"
-                  >
-                    {enhancementMode === "improve" && "Improve Clarity"}
-                    {enhancementMode === "technical" && "Add Technical Details"}
-                    {enhancementMode === "simplify" && "Simplify"}
-                    {enhancementMode === "acceptance" &&
-                      "Add Acceptance Criteria"}
+                  <Button variant="outline" size="sm" className="w-[200px] justify-between">
+                    {enhancementMode === 'improve' && 'Improve Clarity'}
+                    {enhancementMode === 'technical' && 'Add Technical Details'}
+                    {enhancementMode === 'simplify' && 'Simplify'}
+                    {enhancementMode === 'acceptance' && 'Add Acceptance Criteria'}
                     <ChevronDown className="w-4 h-4 ml-2" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuItem
-                    onClick={() => setEnhancementMode("improve")}
-                  >
+                  <DropdownMenuItem onClick={() => setEnhancementMode('improve')}>
                     Improve Clarity
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setEnhancementMode("technical")}
-                  >
+                  <DropdownMenuItem onClick={() => setEnhancementMode('technical')}>
                     Add Technical Details
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setEnhancementMode("simplify")}
-                  >
+                  <DropdownMenuItem onClick={() => setEnhancementMode('simplify')}>
                     Simplify
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setEnhancementMode("acceptance")}
-                  >
+                  <DropdownMenuItem onClick={() => setEnhancementMode('acceptance')}>
                     Add Acceptance Criteria
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -422,9 +399,7 @@ export function AddFeatureDialog({
               <Label htmlFor="category">Category (optional)</Label>
               <CategoryAutocomplete
                 value={newFeature.category}
-                onChange={(value) =>
-                  setNewFeature({ ...newFeature, category: value })
-                }
+                onChange={(value) => setNewFeature({ ...newFeature, category: value })}
                 suggestions={categorySuggestions}
                 placeholder="e.g., Core, UI, API"
                 data-testid="feature-category-input"
@@ -435,9 +410,7 @@ export function AddFeatureDialog({
                 useCurrentBranch={useCurrentBranch}
                 onUseCurrentBranchChange={setUseCurrentBranch}
                 branchName={newFeature.branchName}
-                onBranchNameChange={(value) =>
-                  setNewFeature({ ...newFeature, branchName: value })
-                }
+                onBranchNameChange={(value) => setNewFeature({ ...newFeature, branchName: value })}
                 branchSuggestions={branchSuggestions}
                 branchCardCounts={branchCardCounts}
                 currentBranch={currentBranch}
@@ -448,25 +421,18 @@ export function AddFeatureDialog({
             {/* Priority Selector */}
             <PrioritySelector
               selectedPriority={newFeature.priority}
-              onPrioritySelect={(priority) =>
-                setNewFeature({ ...newFeature, priority })
-              }
+              onPrioritySelect={(priority) => setNewFeature({ ...newFeature, priority })}
               testIdPrefix="priority"
             />
           </TabsContent>
 
           {/* Model Tab */}
-          <TabsContent
-            value="model"
-            className="space-y-4 overflow-y-auto cursor-default"
-          >
+          <TabsContent value="model" className="space-y-4 overflow-y-auto cursor-default">
             {/* Show Advanced Options Toggle */}
             {showProfilesOnly && (
               <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    Simple Mode Active
-                  </p>
+                  <p className="text-sm font-medium text-foreground">Simple Mode Active</p>
                   <p className="text-xs text-muted-foreground">
                     Only showing AI profiles. Advanced model tweaking is hidden.
                   </p>
@@ -478,7 +444,7 @@ export function AddFeatureDialog({
                   data-testid="show-advanced-options-toggle"
                 >
                   <Settings2 className="w-4 h-4 mr-2" />
-                  {showAdvancedOptions ? "Hide" : "Show"} Advanced
+                  {showAdvancedOptions ? 'Hide' : 'Show'} Advanced
                 </Button>
               </div>
             )}
@@ -492,23 +458,19 @@ export function AddFeatureDialog({
               showManageLink
               onManageLinkClick={() => {
                 onOpenChange(false);
-                navigate({ to: "/profiles" });
+                navigate({ to: '/profiles' });
               }}
             />
 
             {/* Separator */}
-            {aiProfiles.length > 0 &&
-              (!showProfilesOnly || showAdvancedOptions) && (
-                <div className="border-t border-border" />
-              )}
+            {aiProfiles.length > 0 && (!showProfilesOnly || showAdvancedOptions) && (
+              <div className="border-t border-border" />
+            )}
 
             {/* Claude Models Section */}
             {(!showProfilesOnly || showAdvancedOptions) && (
               <>
-                <ModelSelector
-                  selectedModel={newFeature.model}
-                  onModelSelect={handleModelSelect}
-                />
+                <ModelSelector selectedModel={newFeature.model} onModelSelect={handleModelSelect} />
                 {newModelAllowsThinking && (
                   <ThinkingLevelSelector
                     selectedLevel={newFeature.thinkingLevel}
@@ -522,10 +484,7 @@ export function AddFeatureDialog({
           </TabsContent>
 
           {/* Options Tab */}
-          <TabsContent
-            value="options"
-            className="space-y-4 overflow-y-auto cursor-default"
-          >
+          <TabsContent value="options" className="space-y-4 overflow-y-auto cursor-default">
             {/* Planning Mode Section */}
             <PlanningModeSelector
               mode={planningMode}
@@ -542,9 +501,7 @@ export function AddFeatureDialog({
             {/* Testing Section */}
             <TestingTabContent
               skipTests={newFeature.skipTests}
-              onSkipTestsChange={(skipTests) =>
-                setNewFeature({ ...newFeature, skipTests })
-              }
+              onSkipTestsChange={(skipTests) => setNewFeature({ ...newFeature, skipTests })}
               steps={newFeature.steps}
               onStepsChange={(steps) => setNewFeature({ ...newFeature, steps })}
             />
@@ -556,12 +513,10 @@ export function AddFeatureDialog({
           </Button>
           <HotkeyButton
             onClick={handleAdd}
-            hotkey={{ key: "Enter", cmdCtrl: true }}
+            hotkey={{ key: 'Enter', cmdCtrl: true }}
             hotkeyActive={open}
             data-testid="confirm-add-feature"
-            disabled={
-              useWorktrees && !useCurrentBranch && !newFeature.branchName.trim()
-            }
+            disabled={useWorktrees && !useCurrentBranch && !newFeature.branchName.trim()}
           >
             Add Feature
           </HotkeyButton>

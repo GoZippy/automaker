@@ -1,6 +1,14 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { ImageIcon, X, Upload } from 'lucide-react';
+import {
+  fileToBase64,
+  generateImageId,
+  ACCEPTED_IMAGE_TYPES,
+  DEFAULT_MAX_FILE_SIZE,
+  DEFAULT_MAX_FILES,
+  validateImageFile,
+} from '@/lib/image-utils';
 
 export interface FeatureImage {
   id: string;
@@ -19,13 +27,10 @@ interface FeatureImageUploadProps {
   disabled?: boolean;
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
 export function FeatureImageUpload({
   images,
   onImagesChange,
-  maxFiles = 5,
+  maxFiles = DEFAULT_MAX_FILES,
   maxFileSize = DEFAULT_MAX_FILE_SIZE,
   className,
   disabled = false,
@@ -33,21 +38,6 @@ export function FeatureImageUpload({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-        } else {
-          reject(new Error('Failed to read file as base64'));
-        }
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  };
 
   const processFiles = useCallback(
     async (files: FileList) => {
@@ -58,16 +48,10 @@ export function FeatureImageUpload({
       const errors: string[] = [];
 
       for (const file of Array.from(files)) {
-        // Validate file type
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          errors.push(`${file.name}: Unsupported file type. Please use JPG, PNG, GIF, or WebP.`);
-          continue;
-        }
-
-        // Validate file size
-        if (file.size > maxFileSize) {
-          const maxSizeMB = maxFileSize / (1024 * 1024);
-          errors.push(`${file.name}: File too large. Maximum size is ${maxSizeMB}MB.`);
+        // Validate file
+        const validation = validateImageFile(file, maxFileSize);
+        if (!validation.isValid) {
+          errors.push(validation.error!);
           continue;
         }
 
@@ -80,7 +64,7 @@ export function FeatureImageUpload({
         try {
           const base64 = await fileToBase64(file);
           const imageAttachment: FeatureImage = {
-            id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            id: generateImageId(),
             data: base64,
             mimeType: file.type,
             filename: file.name,

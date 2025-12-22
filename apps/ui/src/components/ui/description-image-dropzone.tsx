@@ -1,18 +1,38 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { ImageIcon, X, Loader2 } from 'lucide-react';
+import { ImageIcon, X, Loader2, FileText } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { getElectronAPI } from '@/lib/electron';
-import { useAppStore, type FeatureImagePath } from '@/store/app-store';
+import { useAppStore, type FeatureImagePath, type FeatureTextFilePath } from '@/store/app-store';
+import {
+  sanitizeFilename,
+  fileToBase64,
+  fileToText,
+  isTextFile,
+  isImageFile,
+  validateTextFile,
+  getTextFileMimeType,
+  generateFileId,
+  ACCEPTED_IMAGE_TYPES,
+  ACCEPTED_TEXT_EXTENSIONS,
+  DEFAULT_MAX_FILE_SIZE,
+  DEFAULT_MAX_TEXT_FILE_SIZE,
+  formatFileSize,
+} from '@/lib/image-utils';
 
 // Map to store preview data by image ID (persisted across component re-mounts)
 export type ImagePreviewMap = Map<string, string>;
+
+// Re-export for convenience
+export type { FeatureImagePath, FeatureTextFilePath };
 
 interface DescriptionImageDropZoneProps {
   value: string;
   onChange: (value: string) => void;
   images: FeatureImagePath[];
   onImagesChange: (images: FeatureImagePath[]) => void;
+  textFiles?: FeatureTextFilePath[];
+  onTextFilesChange?: (textFiles: FeatureTextFilePath[]) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -25,14 +45,13 @@ interface DescriptionImageDropZoneProps {
   error?: boolean; // Show error state with red border
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
 export function DescriptionImageDropZone({
   value,
   onChange,
   images,
   onImagesChange,
+  textFiles = [],
+  onTextFilesChange,
   placeholder = 'Describe the feature...',
   className,
   disabled = false,
@@ -81,21 +100,6 @@ export function DescriptionImageDropZone({
     [currentProject?.path]
   );
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-        } else {
-          reject(new Error('Failed to read file as base64'));
-        }
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  };
-
   const saveImageToTemp = useCallback(
     async (base64Data: string, filename: string, mimeType: string): Promise<string | null> => {
       try {
@@ -129,59 +133,98 @@ export function DescriptionImageDropZone({
 
       setIsProcessing(true);
       const newImages: FeatureImagePath[] = [];
+      const newTextFiles: FeatureTextFilePath[] = [];
       const newPreviews = new Map(previewImages);
       const errors: string[] = [];
 
+      // Calculate total current files
+      const currentTotalFiles = images.length + textFiles.length;
+
       for (const file of Array.from(files)) {
-        // Validate file type
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          errors.push(`${file.name}: Unsupported file type. Please use JPG, PNG, GIF, or WebP.`);
-          continue;
-        }
-
-        // Validate file size
-        if (file.size > maxFileSize) {
-          const maxSizeMB = maxFileSize / (1024 * 1024);
-          errors.push(`${file.name}: File too large. Maximum size is ${maxSizeMB}MB.`);
-          continue;
-        }
-
-        // Check if we've reached max files
-        if (newImages.length + images.length >= maxFiles) {
-          errors.push(`Maximum ${maxFiles} images allowed.`);
-          break;
-        }
-
-        try {
-          const base64 = await fileToBase64(file);
-          const tempPath = await saveImageToTemp(base64, file.name, file.type);
-
-          if (tempPath) {
-            const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-            const imagePathRef: FeatureImagePath = {
-              id: imageId,
-              path: tempPath,
-              filename: file.name,
-              mimeType: file.type,
-            };
-            newImages.push(imagePathRef);
-            // Store preview for display
-            newPreviews.set(imageId, base64);
-          } else {
-            errors.push(`${file.name}: Failed to save image.`);
+        // Check if it's a text file
+        if (isTextFile(file)) {
+          const validation = validateTextFile(file, DEFAULT_MAX_TEXT_FILE_SIZE);
+          if (!validation.isValid) {
+            errors.push(validation.error!);
+            continue;
           }
-        } catch {
-          errors.push(`${file.name}: Failed to process image.`);
+
+          // Check if we've reached max files
+          const totalFiles = newImages.length + newTextFiles.length + currentTotalFiles;
+          if (totalFiles >= maxFiles) {
+            errors.push(`Maximum ${maxFiles} files allowed.`);
+            break;
+          }
+
+          try {
+            const content = await fileToText(file);
+            const sanitizedName = sanitizeFilename(file.name);
+            const textFilePath: FeatureTextFilePath = {
+              id: generateFileId(),
+              path: '', // Text files don't need to be saved to disk
+              filename: sanitizedName,
+              mimeType: getTextFileMimeType(file.name),
+              content,
+            };
+            newTextFiles.push(textFilePath);
+          } catch {
+            errors.push(`${file.name}: Failed to read text file.`);
+          }
+        }
+        // Check if it's an image file
+        else if (isImageFile(file)) {
+          // Validate file size
+          if (file.size > maxFileSize) {
+            const maxSizeMB = maxFileSize / (1024 * 1024);
+            errors.push(`${file.name}: File too large. Maximum size is ${maxSizeMB}MB.`);
+            continue;
+          }
+
+          // Check if we've reached max files
+          const totalFiles = newImages.length + newTextFiles.length + currentTotalFiles;
+          if (totalFiles >= maxFiles) {
+            errors.push(`Maximum ${maxFiles} files allowed.`);
+            break;
+          }
+
+          try {
+            const base64 = await fileToBase64(file);
+            const sanitizedName = sanitizeFilename(file.name);
+            const tempPath = await saveImageToTemp(base64, sanitizedName, file.type);
+
+            if (tempPath) {
+              const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+              const imagePathRef: FeatureImagePath = {
+                id: imageId,
+                path: tempPath,
+                filename: sanitizedName,
+                mimeType: file.type,
+              };
+              newImages.push(imagePathRef);
+              // Store preview for display
+              newPreviews.set(imageId, base64);
+            } else {
+              errors.push(`${file.name}: Failed to save image.`);
+            }
+          } catch {
+            errors.push(`${file.name}: Failed to process image.`);
+          }
+        } else {
+          errors.push(`${file.name}: Unsupported file type. Use images, .txt, or .md files.`);
         }
       }
 
       if (errors.length > 0) {
-        console.warn('Image upload errors:', errors);
+        console.warn('File upload errors:', errors);
       }
 
       if (newImages.length > 0) {
         onImagesChange([...images, ...newImages]);
         setPreviewImages(newPreviews);
+      }
+
+      if (newTextFiles.length > 0 && onTextFilesChange) {
+        onTextFilesChange([...textFiles, ...newTextFiles]);
       }
 
       setIsProcessing(false);
@@ -190,9 +233,11 @@ export function DescriptionImageDropZone({
       disabled,
       isProcessing,
       images,
+      textFiles,
       maxFiles,
       maxFileSize,
       onImagesChange,
+      onTextFilesChange,
       previewImages,
       saveImageToTemp,
     ]
@@ -263,6 +308,15 @@ export function DescriptionImageDropZone({
     [images, onImagesChange]
   );
 
+  const removeTextFile = useCallback(
+    (fileId: string) => {
+      if (onTextFilesChange) {
+        onTextFilesChange(textFiles.filter((file) => file.id !== fileId));
+      }
+    },
+    [textFiles, onTextFilesChange]
+  );
+
   // Handle paste events to detect and process images from clipboard
   // Works across all OS (Windows, Linux, macOS)
   const handlePaste = useCallback(
@@ -314,11 +368,11 @@ export function DescriptionImageDropZone({
         ref={fileInputRef}
         type="file"
         multiple
-        accept={ACCEPTED_IMAGE_TYPES.join(',')}
+        accept={[...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_TEXT_EXTENSIONS].join(',')}
         onChange={handleFileSelect}
         className="hidden"
         disabled={disabled}
-        data-testid="description-image-input"
+        data-testid="description-file-input"
       />
 
       {/* Drop zone wrapper */}
@@ -338,7 +392,7 @@ export function DescriptionImageDropZone({
           >
             <div className="flex flex-col items-center gap-2 text-blue-400">
               <ImageIcon className="w-8 h-8" />
-              <span className="text-sm font-medium">Drop images here</span>
+              <span className="text-sm font-medium">Drop files here</span>
             </div>
           </div>
         )}
@@ -359,7 +413,7 @@ export function DescriptionImageDropZone({
 
       {/* Hint text */}
       <p className="text-xs text-muted-foreground mt-1">
-        Paste, drag and drop images, or{' '}
+        Paste, drag and drop files, or{' '}
         <button
           type="button"
           onClick={handleBrowseClick}
@@ -368,29 +422,33 @@ export function DescriptionImageDropZone({
         >
           browse
         </button>{' '}
-        to attach context images
+        to attach context (images, .txt, .md)
       </p>
 
       {/* Processing indicator */}
       {isProcessing && (
         <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
           <Loader2 className="w-4 h-4 animate-spin" />
-          <span>Saving images...</span>
+          <span>Processing files...</span>
         </div>
       )}
 
-      {/* Image previews */}
-      {images.length > 0 && (
-        <div className="mt-3 space-y-2" data-testid="description-image-previews">
+      {/* File previews (images and text files) */}
+      {(images.length > 0 || textFiles.length > 0) && (
+        <div className="mt-3 space-y-2" data-testid="description-file-previews">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-foreground">
-              {images.length} image{images.length > 1 ? 's' : ''} attached
+              {images.length + textFiles.length} file
+              {images.length + textFiles.length > 1 ? 's' : ''} attached
             </p>
             <button
               type="button"
               onClick={() => {
                 onImagesChange([]);
                 setPreviewImages(new Map());
+                if (onTextFilesChange) {
+                  onTextFilesChange([]);
+                }
               }}
               className="text-xs text-muted-foreground hover:text-foreground"
               disabled={disabled}
@@ -399,6 +457,7 @@ export function DescriptionImageDropZone({
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
+            {/* Image previews */}
             {images.map((image) => (
               <div
                 key={image.id}
@@ -442,6 +501,38 @@ export function DescriptionImageDropZone({
                 {/* Filename tooltip on hover */}
                 <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <p className="text-[10px] text-white truncate">{image.filename}</p>
+                </div>
+              </div>
+            ))}
+            {/* Text file previews */}
+            {textFiles.map((file) => (
+              <div
+                key={file.id}
+                className="relative group rounded-md border border-muted bg-muted/50 overflow-hidden"
+                data-testid={`description-text-file-preview-${file.id}`}
+              >
+                {/* Text file icon */}
+                <div className="w-16 h-16 flex items-center justify-center bg-zinc-800">
+                  <FileText className="w-6 h-6 text-muted-foreground" />
+                </div>
+                {/* Remove button */}
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeTextFile(file.id);
+                    }}
+                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    data-testid={`remove-description-text-file-${file.id}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+                {/* Filename and size tooltip on hover */}
+                <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <p className="text-[10px] text-white truncate">{file.filename}</p>
+                  <p className="text-[9px] text-white/70">{formatFileSize(file.content.length)}</p>
                 </div>
               </div>
             ))}

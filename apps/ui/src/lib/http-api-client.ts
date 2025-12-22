@@ -962,6 +962,25 @@ export class HttpApiClient implements ElectronAPI {
   claude = {
     getUsage: (): Promise<ClaudeUsageResponse> => this.get('/api/claude/usage'),
   };
+
+  // Context API
+  context = {
+    describeImage: (
+      imagePath: string
+    ): Promise<{
+      success: boolean;
+      description?: string;
+      error?: string;
+    }> => this.post('/api/context/describe-image', { imagePath }),
+
+    describeFile: (
+      filePath: string
+    ): Promise<{
+      success: boolean;
+      description?: string;
+      error?: string;
+    }> => this.post('/api/context/describe-file', { filePath }),
+  };
 }
 
 // Singleton instance

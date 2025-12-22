@@ -4,6 +4,7 @@ import type { Project, TrashedProject } from '@/lib/electron';
 import type {
   Feature as BaseFeature,
   FeatureImagePath,
+  FeatureTextFilePath,
   AgentModel,
   PlanningMode,
   ThinkingLevel,
@@ -194,12 +195,21 @@ export interface ImageAttachment {
   size?: number; // file size in bytes - optional for messages from server
 }
 
+export interface TextFileAttachment {
+  id: string;
+  content: string; // text content of the file
+  mimeType: string; // e.g., "text/plain", "text/markdown"
+  filename: string;
+  size: number; // file size in bytes
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   images?: ImageAttachment[];
+  textFiles?: TextFileAttachment[];
 }
 
 export interface ChatSession {
@@ -213,7 +223,15 @@ export interface ChatSession {
 }
 
 // Re-export for backward compatibility
-export type { FeatureImagePath, AgentModel, PlanningMode, ThinkingLevel, ModelProvider, AIProfile };
+export type {
+  FeatureImagePath,
+  FeatureTextFilePath,
+  AgentModel,
+  PlanningMode,
+  ThinkingLevel,
+  ModelProvider,
+  AIProfile,
+};
 
 // UI-specific: base64-encoded images (not in shared types)
 export interface FeatureImage {
@@ -228,11 +246,15 @@ export interface FeatureImage {
 export type ClaudeModel = AgentModel;
 
 // UI-specific Feature extension with UI-only fields and stricter types
-export interface Feature extends Omit<BaseFeature, 'steps' | 'imagePaths' | 'status'> {
+export interface Feature extends Omit<
+  BaseFeature,
+  'steps' | 'imagePaths' | 'textFilePaths' | 'status'
+> {
   steps: string[]; // Required in UI (not optional)
   status: 'backlog' | 'in_progress' | 'waiting_approval' | 'verified' | 'completed';
   images?: FeatureImage[]; // UI-specific base64 images
   imagePaths?: FeatureImagePath[]; // Stricter type than base (no string | union)
+  textFilePaths?: FeatureTextFilePath[]; // Text file attachments for context
   justFinishedAt?: string; // UI-specific: ISO timestamp when agent just finished
   prUrl?: string; // UI-specific: Pull request URL
 }
@@ -465,9 +487,7 @@ export type ClaudeUsage = {
 };
 
 // Response type for Claude usage API (can be success or error)
-export type ClaudeUsageResponse =
-  | ClaudeUsage
-  | { error: string; message?: string };
+export type ClaudeUsageResponse = ClaudeUsage | { error: string; message?: string };
 
 /**
  * Check if Claude usage is at its limit (any of: session >= 100%, weekly >= 100%, OR cost >= limit)
@@ -1129,9 +1149,7 @@ export const useAppStore = create<AppState & AppActions>()(
       },
 
       addFeature: (feature) => {
-        const id =
-          feature.id ||
-          `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const id = feature.id || `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const featureWithId = { ...feature, id } as unknown as Feature;
         set({ features: [...get().features, featureWithId] });
         return featureWithId;
@@ -2178,10 +2196,11 @@ export const useAppStore = create<AppState & AppActions>()(
       // Claude Usage Tracking actions
       setClaudeRefreshInterval: (interval: number) => set({ claudeRefreshInterval: interval }),
       setClaudeUsageLastUpdated: (timestamp: number) => set({ claudeUsageLastUpdated: timestamp }),
-      setClaudeUsage: (usage: ClaudeUsage | null) => set({
-        claudeUsage: usage,
-        claudeUsageLastUpdated: usage ? Date.now() : null,
-      }),
+      setClaudeUsage: (usage: ClaudeUsage | null) =>
+        set({
+          claudeUsage: usage,
+          claudeUsageLastUpdated: usage ? Date.now() : null,
+        }),
 
       // Reset
       reset: () => set(initialState),

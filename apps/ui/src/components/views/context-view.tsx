@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { HotkeyButton } from '@/components/ui/hotkey-button';
 import { Card } from '@/components/ui/card';
 import {
-  Plus,
   RefreshCw,
   FileText,
   Image as ImageIcon,
@@ -14,9 +15,12 @@ import {
   Upload,
   File,
   BookOpen,
-  EditIcon,
   Eye,
   Pencil,
+  FilePlus,
+  FileUp,
+  Loader2,
+  MoreVertical,
 } from 'lucide-react';
 import {
   useKeyboardShortcuts,
@@ -34,13 +38,26 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { sanitizeFilename } from '@/lib/image-utils';
 import { Markdown } from '../ui/markdown';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Textarea } from '@/components/ui/textarea';
 
 interface ContextFile {
   name: string;
   type: 'text' | 'image';
   content?: string;
   path: string;
+  description?: string;
+}
+
+interface ContextMetadata {
+  files: Record<string, { description: string }>;
 }
 
 export function ContextView() {
@@ -52,24 +69,44 @@ export function ContextView() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [editedContent, setEditedContent] = useState('');
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [renameFileName, setRenameFileName] = useState('');
-  const [newFileName, setNewFileName] = useState('');
-  const [newFileType, setNewFileType] = useState<'text' | 'image'>('text');
-  const [uploadedImageData, setUploadedImageData] = useState<string | null>(null);
-  const [newFileContent, setNewFileContent] = useState('');
   const [isDropHovering, setIsDropHovering] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
+
+  // Create Markdown modal state
+  const [isCreateMarkdownOpen, setIsCreateMarkdownOpen] = useState(false);
+  const [newMarkdownName, setNewMarkdownName] = useState('');
+  const [newMarkdownDescription, setNewMarkdownDescription] = useState('');
+  const [newMarkdownContent, setNewMarkdownContent] = useState('');
+
+  // Track files with generating descriptions (async)
+  const [generatingDescriptions, setGeneratingDescriptions] = useState<Set<string>>(new Set());
+
+  // Edit description modal state
+  const [isEditDescriptionOpen, setIsEditDescriptionOpen] = useState(false);
+  const [editDescriptionValue, setEditDescriptionValue] = useState('');
+  const [editDescriptionFileName, setEditDescriptionFileName] = useState('');
+
+  // File input ref for import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get images directory path
+  const getImagesPath = useCallback(() => {
+    if (!currentProject) return null;
+    return `${currentProject.path}/.automaker/images`;
+  }, [currentProject]);
 
   // Keyboard shortcuts for this view
   const contextShortcuts: KeyboardShortcut[] = useMemo(
     () => [
       {
         key: shortcuts.addContextFile,
-        action: () => setIsAddDialogOpen(true),
-        description: 'Add new context file',
+        action: () => setIsCreateMarkdownOpen(true),
+        description: 'Create new markdown file',
       },
     ],
     [shortcuts]
@@ -94,6 +131,41 @@ export function ContextView() {
     return imageExtensions.includes(ext);
   };
 
+  // Load context metadata
+  const loadMetadata = useCallback(async (): Promise<ContextMetadata> => {
+    const contextPath = getContextPath();
+    if (!contextPath) return { files: {} };
+
+    try {
+      const api = getElectronAPI();
+      const metadataPath = `${contextPath}/context-metadata.json`;
+      const result = await api.readFile(metadataPath);
+      if (result.success && result.content) {
+        return JSON.parse(result.content);
+      }
+    } catch {
+      // Metadata file doesn't exist yet
+    }
+    return { files: {} };
+  }, [getContextPath]);
+
+  // Save context metadata
+  const saveMetadata = useCallback(
+    async (metadata: ContextMetadata) => {
+      const contextPath = getContextPath();
+      if (!contextPath) return;
+
+      try {
+        const api = getElectronAPI();
+        const metadataPath = `${contextPath}/context-metadata.json`;
+        await api.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+      } catch (error) {
+        console.error('Failed to save metadata:', error);
+      }
+    },
+    [getContextPath]
+  );
+
   // Load context files
   const loadContextFiles = useCallback(async () => {
     const contextPath = getContextPath();
@@ -106,15 +178,19 @@ export function ContextView() {
       // Ensure context directory exists
       await api.mkdir(contextPath);
 
+      // Load metadata for descriptions
+      const metadata = await loadMetadata();
+
       // Read directory contents
       const result = await api.readdir(contextPath);
       if (result.success && result.entries) {
         const files: ContextFile[] = result.entries
-          .filter((entry) => entry.isFile)
+          .filter((entry) => entry.isFile && entry.name !== 'context-metadata.json')
           .map((entry) => ({
             name: entry.name,
             type: isImageFile(entry.name) ? 'image' : 'text',
             path: `${contextPath}/${entry.name}`,
+            description: metadata.files[entry.name]?.description,
           }));
         setContextFiles(files);
       }
@@ -123,7 +199,7 @@ export function ContextView() {
     } finally {
       setIsLoading(false);
     }
-  }, [getContextPath]);
+  }, [getContextPath, loadMetadata]);
 
   useEffect(() => {
     loadContextFiles();
@@ -176,43 +252,232 @@ export function ContextView() {
     setHasChanges(true);
   };
 
-  // Add new context file
-  const handleAddFile = async () => {
+  // Generate description for a file
+  const generateDescription = async (
+    filePath: string,
+    fileName: string,
+    isImage: boolean
+  ): Promise<string | undefined> => {
+    try {
+      const httpClient = getHttpApiClient();
+      const result = isImage
+        ? await httpClient.context.describeImage(filePath)
+        : await httpClient.context.describeFile(filePath);
+
+      if (result.success && result.description) {
+        return result.description;
+      }
+
+      const message =
+        result.error || `Automaker couldn't generate a description for “${fileName}”.`;
+      toast.error('Failed to generate description', { description: message });
+    } catch (error) {
+      console.error('Failed to generate description:', error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'An unexpected error occurred while generating the description.';
+      toast.error('Failed to generate description', { description: message });
+    }
+    return undefined;
+  };
+
+  // Generate description in background and update metadata
+  const generateDescriptionAsync = useCallback(
+    async (filePath: string, fileName: string, isImage: boolean) => {
+      // Add to generating set
+      setGeneratingDescriptions((prev) => new Set(prev).add(fileName));
+
+      try {
+        const description = await generateDescription(filePath, fileName, isImage);
+
+        if (description) {
+          const metadata = await loadMetadata();
+          metadata.files[fileName] = { description };
+          await saveMetadata(metadata);
+
+          // Reload files to update UI with new description
+          await loadContextFiles();
+        }
+      } catch (error) {
+        console.error('Failed to generate description:', error);
+      } finally {
+        // Remove from generating set
+        setGeneratingDescriptions((prev) => {
+          const next = new Set(prev);
+          next.delete(fileName);
+          return next;
+        });
+      }
+    },
+    [loadMetadata, saveMetadata, loadContextFiles]
+  );
+
+  // Upload a file and generate description asynchronously
+  const uploadFile = async (file: globalThis.File) => {
     const contextPath = getContextPath();
-    if (!contextPath || !newFileName.trim()) return;
+    if (!contextPath) return;
+
+    setIsUploading(true);
+    setUploadingFileName(file.name);
 
     try {
       const api = getElectronAPI();
-      let filename = newFileName.trim();
+      const isImage = isImageFile(file.name);
 
-      // Add default extension if not provided
-      if (newFileType === 'text' && !filename.includes('.')) {
+      let filePath: string;
+      let fileName: string;
+      let imagePathForDescription: string | undefined;
+
+      if (isImage) {
+        // For images: sanitize filename, store in .automaker/images
+        fileName = sanitizeFilename(file.name);
+
+        // Read file as base64
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+
+        // Extract base64 data without the data URL prefix
+        const base64Data = dataUrl.split(',')[1] || dataUrl;
+
+        // Determine mime type from original file
+        const mimeType = file.type || 'image/png';
+
+        // Use saveImageToTemp to properly save as binary file in .automaker/images
+        const saveResult = await api.saveImageToTemp?.(
+          base64Data,
+          fileName,
+          mimeType,
+          currentProject!.path
+        );
+
+        if (!saveResult?.success || !saveResult.path) {
+          throw new Error(saveResult?.error || 'Failed to save image');
+        }
+
+        // The saved image path is used for description
+        imagePathForDescription = saveResult.path;
+
+        // Also save to context directory for display in the UI
+        // (as a data URL for inline display)
+        filePath = `${contextPath}/${fileName}`;
+        await api.writeFile(filePath, dataUrl);
+      } else {
+        // For non-images: keep original behavior
+        fileName = file.name;
+        filePath = `${contextPath}/${fileName}`;
+
+        const content = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.readAsText(file);
+        });
+
+        await api.writeFile(filePath, content);
+      }
+
+      // Reload files immediately (file appears in list without description)
+      await loadContextFiles();
+
+      // Start description generation in background (don't await)
+      // For images, use the path in the images directory
+      generateDescriptionAsync(imagePathForDescription || filePath, fileName, isImage);
+    } catch (error) {
+      console.error('Failed to upload file:', error);
+      toast.error('Failed to upload file', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setIsUploading(false);
+      setUploadingFileName(null);
+    }
+  };
+
+  // Handle file drop
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDropHovering(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    // Process files sequentially
+    for (const file of files) {
+      await uploadFile(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDropHovering(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDropHovering(false);
+  };
+
+  // Handle file import via button
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (const file of Array.from(files)) {
+      await uploadFile(file);
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle create markdown
+  const handleCreateMarkdown = async () => {
+    const contextPath = getContextPath();
+    if (!contextPath || !newMarkdownName.trim()) return;
+
+    try {
+      const api = getElectronAPI();
+      let filename = newMarkdownName.trim();
+
+      // Add .md extension if not provided
+      if (!filename.includes('.')) {
         filename += '.md';
       }
 
       const filePath = `${contextPath}/${filename}`;
 
-      if (newFileType === 'image' && uploadedImageData) {
-        // Write image data
-        await api.writeFile(filePath, uploadedImageData);
-      } else {
-        // Write text file with content (or empty if no content)
-        await api.writeFile(filePath, newFileContent);
+      // Write markdown file
+      await api.writeFile(filePath, newMarkdownContent);
+
+      // Save description if provided
+      if (newMarkdownDescription.trim()) {
+        const metadata = await loadMetadata();
+        metadata.files[filename] = { description: newMarkdownDescription.trim() };
+        await saveMetadata(metadata);
       }
 
-      // Only reload files on success
+      // Reload files
       await loadContextFiles();
+
+      // Reset and close modal
+      setIsCreateMarkdownOpen(false);
+      setNewMarkdownName('');
+      setNewMarkdownDescription('');
+      setNewMarkdownContent('');
     } catch (error) {
-      console.error('Failed to add file:', error);
-      // Optionally show error toast to user here
-    } finally {
-      // Close dialog and reset state
-      setIsAddDialogOpen(false);
-      setNewFileName('');
-      setNewFileType('text');
-      setUploadedImageData(null);
-      setNewFileContent('');
-      setIsDropHovering(false);
+      console.error('Failed to create markdown:', error);
     }
   };
 
@@ -223,6 +488,11 @@ export function ContextView() {
     try {
       const api = getElectronAPI();
       await api.deleteFile(selectedFile.path);
+
+      // Remove from metadata
+      const metadata = await loadMetadata();
+      delete metadata.files[selectedFile.name];
+      await saveMetadata(metadata);
 
       setIsDeleteDialogOpen(false);
       setSelectedFile(null);
@@ -269,6 +539,14 @@ export function ContextView() {
       // Delete old file
       await api.deleteFile(selectedFile.path);
 
+      // Update metadata
+      const metadata = await loadMetadata();
+      if (metadata.files[selectedFile.name]) {
+        metadata.files[newName] = metadata.files[selectedFile.name];
+        delete metadata.files[selectedFile.name];
+        await saveMetadata(metadata);
+      }
+
       setIsRenameDialogOpen(false);
       setRenameFileName('');
 
@@ -281,6 +559,7 @@ export function ContextView() {
         type: isImageFile(newName) ? 'image' : 'text',
         path: newPath,
         content: result.content,
+        description: metadata.files[newName]?.description,
       };
       setSelectedFile(renamedFile);
     } catch (error) {
@@ -288,98 +567,60 @@ export function ContextView() {
     }
   };
 
-  // Handle image upload
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Save edited description
+  const handleSaveDescription = async () => {
+    if (!editDescriptionFileName) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      setUploadedImageData(base64);
-      if (!newFileName) {
-        setNewFileName(file.name);
+    try {
+      const metadata = await loadMetadata();
+      metadata.files[editDescriptionFileName] = { description: editDescriptionValue.trim() };
+      await saveMetadata(metadata);
+
+      // Update selected file if it's the one being edited
+      if (selectedFile?.name === editDescriptionFileName) {
+        setSelectedFile({ ...selectedFile, description: editDescriptionValue.trim() });
       }
-    };
-    reader.readAsDataURL(file);
-  };
 
-  // Handle drag and drop for file upload
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+      // Reload files to update list
+      await loadContextFiles();
 
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-
-    const contextPath = getContextPath();
-    if (!contextPath) return;
-
-    const api = getElectronAPI();
-
-    for (const file of files) {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const content = event.target?.result as string;
-        const filePath = `${contextPath}/${file.name}`;
-        await api.writeFile(filePath, content);
-        await loadContextFiles();
-      };
-
-      if (isImageFile(file.name)) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
-      }
+      setIsEditDescriptionOpen(false);
+      setEditDescriptionValue('');
+      setEditDescriptionFileName('');
+    } catch (error) {
+      console.error('Failed to save description:', error);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Open edit description dialog
+  const handleEditDescription = (file: ContextFile) => {
+    setEditDescriptionFileName(file.name);
+    setEditDescriptionValue(file.description || '');
+    setIsEditDescriptionOpen(true);
   };
 
-  // Handle drag and drop for .txt and .md files in the add context dialog textarea
-  const handleTextAreaDrop = async (e: React.DragEvent<HTMLTextAreaElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDropHovering(false);
+  // Delete file from list (used by dropdown)
+  const handleDeleteFromList = async (file: ContextFile) => {
+    try {
+      const api = getElectronAPI();
+      await api.deleteFile(file.path);
 
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
+      // Remove from metadata
+      const metadata = await loadMetadata();
+      delete metadata.files[file.name];
+      await saveMetadata(metadata);
 
-    const file = files[0]; // Only handle the first file
-    const fileName = file.name.toLowerCase();
-
-    // Only accept .txt and .md files
-    if (!fileName.endsWith('.txt') && !fileName.endsWith('.md')) {
-      console.warn('Only .txt and .md files are supported for drag and drop');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setNewFileContent(content);
-
-      // Auto-fill filename if empty
-      if (!newFileName) {
-        setNewFileName(file.name);
+      // Clear selection if this was the selected file
+      if (selectedFile?.path === file.path) {
+        setSelectedFile(null);
+        setEditedContent('');
+        setHasChanges(false);
       }
-    };
-    reader.readAsText(file);
-  };
 
-  const handleTextAreaDragOver = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDropHovering(true);
-  };
-
-  const handleTextAreaDragLeave = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDropHovering(false);
+      await loadContextFiles();
+    } catch (error) {
+      console.error('Failed to delete file:', error);
+    }
   };
 
   if (!currentProject) {
@@ -403,6 +644,16 @@ export function ContextView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden content-bg" data-testid="context-view">
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFileInputChange}
+        data-testid="file-import-input"
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border bg-glass backdrop-blur-md">
         <div className="flex items-center gap-3">
@@ -415,26 +666,63 @@ export function ContextView() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleImportClick}
+            disabled={isUploading}
+            data-testid="import-file-button"
+          >
+            <FileUp className="w-4 h-4 mr-2" />
+            Import File
+          </Button>
           <HotkeyButton
             size="sm"
-            onClick={() => setIsAddDialogOpen(true)}
+            onClick={() => setIsCreateMarkdownOpen(true)}
             hotkey={shortcuts.addContextFile}
             hotkeyActive={false}
-            data-testid="add-context-file"
+            data-testid="create-markdown-button"
           >
-            <Plus className="w-4 h-4 mr-2" />
-            Add File
+            <FilePlus className="w-4 h-4 mr-2" />
+            Create Markdown
           </HotkeyButton>
         </div>
       </div>
 
       {/* Main content area with file list and editor */}
       <div
-        className="flex-1 flex overflow-hidden"
+        className={cn(
+          'flex-1 flex overflow-hidden relative',
+          isDropHovering && 'ring-2 ring-primary ring-inset'
+        )}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         data-testid="context-drop-zone"
       >
+        {/* Drop overlay */}
+        {isDropHovering && (
+          <div className="absolute inset-0 bg-primary/10 z-50 flex items-center justify-center pointer-events-none">
+            <div className="flex flex-col items-center text-primary">
+              <Upload className="w-12 h-12 mb-2" />
+              <span className="text-lg font-medium">Drop files to upload</span>
+              <span className="text-sm text-muted-foreground">
+                Files will be analyzed automatically
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Uploading overlay */}
+        {isUploading && (
+          <div className="absolute inset-0 bg-background/80 z-50 flex items-center justify-center">
+            <div className="flex flex-col items-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mb-2" />
+              <span className="text-sm font-medium">Uploading {uploadingFileName}...</span>
+            </div>
+          </div>
+        )}
+
         {/* Left Panel - File List */}
         <div className="w-64 border-r border-border flex flex-col overflow-hidden">
           <div className="p-3 border-b border-border">
@@ -449,47 +737,82 @@ export function ContextView() {
                 <p className="text-sm text-muted-foreground">
                   No context files yet.
                   <br />
-                  Drop files here or click Add File.
+                  Drop files here or use the buttons above.
                 </p>
               </div>
             ) : (
               <div className="space-y-1">
-                {contextFiles.map((file) => (
-                  <div
-                    key={file.path}
-                    className={cn(
-                      'group w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
-                      selectedFile?.path === file.path
-                        ? 'bg-primary/20 text-foreground border border-primary/30'
-                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                    )}
-                  >
-                    <button
-                      onClick={() => handleSelectFile(file)}
-                      className="flex-1 flex items-center gap-2 text-left min-w-0"
-                      data-testid={`context-file-${file.name}`}
-                    >
-                      {file.type === 'image' ? (
-                        <ImageIcon className="w-4 h-4 flex-shrink-0" />
-                      ) : (
-                        <FileText className="w-4 h-4 flex-shrink-0" />
+                {contextFiles.map((file) => {
+                  const isGenerating = generatingDescriptions.has(file.name);
+                  return (
+                    <div
+                      key={file.path}
+                      className={cn(
+                        'group w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
+                        selectedFile?.path === file.path
+                          ? 'bg-primary/20 text-foreground border border-primary/30'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                       )}
-                      <span className="truncate text-sm">{file.name}</span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenameFileName(file.name);
-                        setSelectedFile(file);
-                        setIsRenameDialogOpen(true);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded transition-opacity"
-                      data-testid={`rename-context-file-${file.name}`}
                     >
-                      <Pencil className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        onClick={() => handleSelectFile(file)}
+                        className="flex-1 flex items-center gap-2 text-left min-w-0"
+                        data-testid={`context-file-${file.name}`}
+                      >
+                        {file.type === 'image' ? (
+                          <ImageIcon className="w-4 h-4 flex-shrink-0" />
+                        ) : (
+                          <FileText className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <span className="truncate text-sm block">{file.name}</span>
+                          {isGenerating ? (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Generating description...
+                            </span>
+                          ) : file.description ? (
+                            <span className="truncate text-xs text-muted-foreground block">
+                              {file.description}
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            onClick={(e) => e.stopPropagation()}
+                            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded transition-opacity"
+                            data-testid={`context-file-menu-${file.name}`}
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setRenameFileName(file.name);
+                              setSelectedFile(file);
+                              setIsRenameDialogOpen(true);
+                            }}
+                            data-testid={`rename-context-file-${file.name}`}
+                          >
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteFromList(file)}
+                            className="text-red-500 focus:text-red-500"
+                            data-testid={`delete-context-file-${file.name}`}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -501,13 +824,13 @@ export function ContextView() {
             <>
               {/* File toolbar */}
               <div className="flex items-center justify-between p-3 border-b border-border bg-card">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   {selectedFile.type === 'image' ? (
-                    <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                    <ImageIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                   ) : (
-                    <FileText className="w-4 h-4 text-muted-foreground" />
+                    <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                   )}
-                  <span className="text-sm font-medium">{selectedFile.name}</span>
+                  <span className="text-sm font-medium truncate">{selectedFile.name}</span>
                 </div>
                 <div className="flex gap-2">
                   {selectedFile.type === 'text' && isMarkdownFile(selectedFile.name) && (
@@ -519,7 +842,7 @@ export function ContextView() {
                     >
                       {isPreviewMode ? (
                         <>
-                          <EditIcon className="w-4 h-4 mr-2" />
+                          <Pencil className="w-4 h-4 mr-2" />
                           Edit
                         </>
                       ) : (
@@ -553,8 +876,42 @@ export function ContextView() {
                 </div>
               </div>
 
+              {/* Description section */}
+              <div className="px-4 pt-4 pb-2">
+                <div className="bg-muted/50 rounded-lg p-3 border border-border">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Description
+                      </span>
+                      {generatingDescriptions.has(selectedFile.name) ? (
+                        <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Generating description with AI...</span>
+                        </div>
+                      ) : selectedFile.description ? (
+                        <p className="text-sm mt-1">{selectedFile.description}</p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-1 italic">
+                          No description. Click edit to add one.
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleEditDescription(selectedFile)}
+                      className="flex-shrink-0"
+                      data-testid="edit-description-button"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
               {/* Content area */}
-              <div className="flex-1 overflow-hidden p-4">
+              <div className="flex-1 overflow-hidden px-4 pb-4">
                 {selectedFile.type === 'image' ? (
                   <div
                     className="h-full flex items-center justify-center bg-card rounded-lg"
@@ -596,142 +953,76 @@ export function ContextView() {
         </div>
       </div>
 
-      {/* Add File Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+      {/* Create Markdown Dialog */}
+      <Dialog open={isCreateMarkdownOpen} onOpenChange={setIsCreateMarkdownOpen}>
         <DialogContent
-          data-testid="add-context-dialog"
+          data-testid="create-markdown-dialog"
           className="w-[60vw] max-w-[60vw] max-h-[80vh] flex flex-col"
         >
           <DialogHeader>
-            <DialogTitle>Add Context File</DialogTitle>
-            <DialogDescription>Add a new text or image file to the context.</DialogDescription>
+            <DialogTitle>Create Markdown Context</DialogTitle>
+            <DialogDescription>
+              Create a new markdown file to add context for AI prompts.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="flex gap-2">
-              <Button
-                variant={newFileType === 'text' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setNewFileType('text')}
-                data-testid="add-text-type"
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Text
-              </Button>
-              <Button
-                variant={newFileType === 'image' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setNewFileType('image')}
-                data-testid="add-image-type"
-              >
-                <ImageIcon className="w-4 h-4 mr-2" />
-                Image
-              </Button>
-            </div>
-
+          <div className="space-y-4 py-4 flex-1 overflow-auto">
             <div className="space-y-2">
-              <Label htmlFor="filename">File Name</Label>
+              <Label htmlFor="markdown-filename">File Name</Label>
               <Input
-                id="filename"
-                value={newFileName}
-                onChange={(e) => setNewFileName(e.target.value)}
-                placeholder={newFileType === 'text' ? 'context.md' : 'image.png'}
-                data-testid="new-file-name"
+                id="markdown-filename"
+                value={newMarkdownName}
+                onChange={(e) => setNewMarkdownName(e.target.value)}
+                placeholder="context-file.md"
+                data-testid="new-markdown-name"
               />
             </div>
 
-            {newFileType === 'text' && (
-              <div className="space-y-2">
-                <Label htmlFor="context-content">Context Content</Label>
-                <div
-                  className={cn(
-                    'relative rounded-lg transition-colors',
-                    isDropHovering && 'ring-2 ring-primary'
-                  )}
-                >
-                  <textarea
-                    id="context-content"
-                    value={newFileContent}
-                    onChange={(e) => setNewFileContent(e.target.value)}
-                    onDrop={handleTextAreaDrop}
-                    onDragOver={handleTextAreaDragOver}
-                    onDragLeave={handleTextAreaDragLeave}
-                    placeholder="Enter context content here or drag & drop a .txt or .md file..."
-                    className={cn(
-                      'w-full h-40 p-3 font-mono text-sm bg-background border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent',
-                      isDropHovering && 'border-primary bg-primary/10'
-                    )}
-                    spellCheck={false}
-                    data-testid="new-file-content"
-                  />
-                  {isDropHovering && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-primary/20 rounded-lg pointer-events-none">
-                      <div className="flex flex-col items-center text-primary">
-                        <Upload className="w-8 h-8 mb-2" />
-                        <span className="text-sm font-medium">Drop .txt or .md file here</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Drag & drop .txt or .md files to import their content
-                </p>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="markdown-description">
+                Description (for AI to understand the context)
+              </Label>
+              <Input
+                id="markdown-description"
+                value={newMarkdownDescription}
+                onChange={(e) => setNewMarkdownDescription(e.target.value)}
+                placeholder="e.g., Coding style guidelines for this project"
+                data-testid="new-markdown-description"
+              />
+            </div>
 
-            {newFileType === 'image' && (
-              <div className="space-y-2">
-                <Label>Upload Image</Label>
-                <div className="border-2 border-dashed border-border rounded-lg p-4 text-center">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    id="image-upload"
-                    data-testid="image-upload-input"
-                  />
-                  <label
-                    htmlFor="image-upload"
-                    className="cursor-pointer flex flex-col items-center"
-                  >
-                    {uploadedImageData ? (
-                      <img
-                        src={uploadedImageData}
-                        alt="Preview"
-                        className="max-w-32 max-h-32 object-contain mb-2"
-                      />
-                    ) : (
-                      <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                    )}
-                    <span className="text-sm text-muted-foreground">
-                      {uploadedImageData ? 'Click to change' : 'Click to upload'}
-                    </span>
-                  </label>
-                </div>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="markdown-content">Content</Label>
+              <textarea
+                id="markdown-content"
+                value={newMarkdownContent}
+                onChange={(e) => setNewMarkdownContent(e.target.value)}
+                placeholder="Enter your markdown content here..."
+                className="w-full h-60 p-3 font-mono text-sm bg-background border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+                spellCheck={false}
+                data-testid="new-markdown-content"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
-                setIsAddDialogOpen(false);
-                setNewFileName('');
-                setUploadedImageData(null);
-                setNewFileContent('');
-                setIsDropHovering(false);
+                setIsCreateMarkdownOpen(false);
+                setNewMarkdownName('');
+                setNewMarkdownDescription('');
+                setNewMarkdownContent('');
               }}
             >
               Cancel
             </Button>
             <HotkeyButton
-              onClick={handleAddFile}
-              disabled={!newFileName.trim() || (newFileType === 'image' && !uploadedImageData)}
+              onClick={handleCreateMarkdown}
+              disabled={!newMarkdownName.trim()}
               hotkey={{ key: 'Enter', cmdCtrl: true }}
-              hotkeyActive={isAddDialogOpen}
-              data-testid="confirm-add-file"
+              hotkeyActive={isCreateMarkdownOpen}
+              data-testid="confirm-create-markdown"
             >
-              Add File
+              Create
             </HotkeyButton>
           </DialogFooter>
         </DialogContent>
@@ -802,6 +1093,47 @@ export function ContextView() {
               data-testid="confirm-rename-file"
             >
               Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Description Dialog */}
+      <Dialog open={isEditDescriptionOpen} onOpenChange={setIsEditDescriptionOpen}>
+        <DialogContent data-testid="edit-description-dialog">
+          <DialogHeader>
+            <DialogTitle>Edit Description</DialogTitle>
+            <DialogDescription>
+              Update the description for "{editDescriptionFileName}". This helps AI understand the
+              context.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Description</Label>
+              <Textarea
+                id="edit-description"
+                value={editDescriptionValue}
+                onChange={(e) => setEditDescriptionValue(e.target.value)}
+                placeholder="e.g., API documentation for authentication endpoints..."
+                className="min-h-[100px]"
+                data-testid="edit-description-input"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsEditDescriptionOpen(false);
+                setEditDescriptionValue('');
+                setEditDescriptionFileName('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveDescription} data-testid="confirm-save-description">
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>

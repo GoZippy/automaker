@@ -16,11 +16,7 @@ export type {
 } from './provider.js';
 
 // Feature types
-export type {
-  Feature,
-  FeatureImagePath,
-  FeatureStatus,
-} from './feature.js';
+export type { Feature, FeatureImagePath, FeatureTextFilePath, FeatureStatus } from './feature.js';
 
 // Session types
 export type {
@@ -31,44 +27,23 @@ export type {
 } from './session.js';
 
 // Error types
-export type {
-  ErrorType,
-  ErrorInfo,
-} from './error.js';
+export type { ErrorType, ErrorInfo } from './error.js';
 
 // Image types
-export type {
-  ImageData,
-  ImageContentBlock,
-} from './image.js';
+export type { ImageData, ImageContentBlock } from './image.js';
 
 // Model types and constants
-export {
-  CLAUDE_MODEL_MAP,
-  DEFAULT_MODELS,
-  type ModelAlias,
-  type AgentModel,
-} from './model.js';
+export { CLAUDE_MODEL_MAP, DEFAULT_MODELS, type ModelAlias, type AgentModel } from './model.js';
 
 // Event types
-export type {
-  EventType,
-  EventCallback,
-} from './event.js';
+export type { EventType, EventCallback } from './event.js';
 
 // Spec types
-export type {
-  SpecOutput,
-} from './spec.js';
-export {
-  specOutputSchema,
-} from './spec.js';
+export type { SpecOutput } from './spec.js';
+export { specOutputSchema } from './spec.js';
 
 // Enhancement types
-export type {
-  EnhancementMode,
-  EnhancementExample,
-} from './enhancement.js';
+export type { EnhancementMode, EnhancementExample } from './enhancement.js';
 
 // Settings types and constants
 export type {
@@ -99,10 +74,7 @@ export {
 } from './settings.js';
 
 // Model display constants
-export type {
-  ModelOption,
-  ThinkingLevelOption,
-} from './model-display.js';
+export type { ModelOption, ThinkingLevelOption } from './model-display.js';
 export {
   CLAUDE_MODELS,
   THINKING_LEVELS,

@@ -12,6 +12,15 @@ export interface FeatureImagePath {
   [key: string]: unknown;
 }
 
+export interface FeatureTextFilePath {
+  id: string;
+  path: string;
+  filename: string;
+  mimeType: string;
+  content: string; // Text content of the file
+  [key: string]: unknown;
+}
+
 export interface Feature {
   id: string;
   title?: string;
@@ -26,6 +35,7 @@ export interface Feature {
   spec?: string;
   model?: string;
   imagePaths?: Array<string | FeatureImagePath | { path: string; [key: string]: unknown }>;
+  textFilePaths?: FeatureTextFilePath[];
   // Branch info - worktree path is derived at runtime from branchName
   branchName?: string; // Name of the feature branch (undefined = use current worktree)
   skipTests?: boolean;
@@ -45,7 +55,7 @@ export interface Feature {
   error?: string;
   summary?: string;
   startedAt?: string;
-  [key: string]: unknown;  // Keep catch-all for extensibility
+  [key: string]: unknown; // Keep catch-all for extensibility
 }
 
 export type FeatureStatus = 'pending' | 'running' | 'completed' | 'failed' | 'verified';

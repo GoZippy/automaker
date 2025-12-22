@@ -16,12 +16,26 @@ import {
   X,
   ImageIcon,
   ChevronDown,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useElectronAgent } from '@/hooks/use-electron-agent';
 import { SessionManager } from '@/components/session-manager';
 import { Markdown } from '@/components/ui/markdown';
-import type { ImageAttachment } from '@/store/app-store';
+import type { ImageAttachment, TextFileAttachment } from '@/store/app-store';
+import {
+  fileToBase64,
+  generateImageId,
+  generateFileId,
+  validateImageFile,
+  validateTextFile,
+  isTextFile,
+  isImageFile,
+  fileToText,
+  getTextFileMimeType,
+  DEFAULT_MAX_FILE_SIZE,
+  DEFAULT_MAX_FILES,
+} from '@/lib/image-utils';
 import {
   useKeyboardShortcuts,
   useKeyboardShortcutsConfig,
@@ -40,6 +54,7 @@ export function AgentView() {
   const shortcuts = useKeyboardShortcutsConfig();
   const [input, setInput] = useState('');
   const [selectedImages, setSelectedImages] = useState<ImageAttachment[]>([]);
+  const [selectedTextFiles, setSelectedTextFiles] = useState<TextFileAttachment[]>([]);
   const [showImageDropZone, setShowImageDropZone] = useState(false);
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -116,17 +131,23 @@ export function AgentView() {
   }, [currentProject?.path]);
 
   const handleSend = useCallback(async () => {
-    if ((!input.trim() && selectedImages.length === 0) || isProcessing) return;
+    if (
+      (!input.trim() && selectedImages.length === 0 && selectedTextFiles.length === 0) ||
+      isProcessing
+    )
+      return;
 
     const messageContent = input;
     const messageImages = selectedImages;
+    const messageTextFiles = selectedTextFiles;
 
     setInput('');
     setSelectedImages([]);
+    setSelectedTextFiles([]);
     setShowImageDropZone(false);
 
-    await sendMessage(messageContent, messageImages);
-  }, [input, selectedImages, isProcessing, sendMessage]);
+    await sendMessage(messageContent, messageImages, messageTextFiles);
+  }, [input, selectedImages, selectedTextFiles, isProcessing, sendMessage]);
 
   const handleImagesSelected = useCallback((images: ImageAttachment[]) => {
     setSelectedImages(images);
@@ -136,89 +157,109 @@ export function AgentView() {
     setShowImageDropZone(!showImageDropZone);
   }, [showImageDropZone]);
 
-  // Helper function to convert file to base64
-  const fileToBase64 = useCallback((file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-        } else {
-          reject(new Error('Failed to read file as base64'));
-        }
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  }, []);
-
-  // Process dropped files
+  // Process dropped files (images and text files)
   const processDroppedFiles = useCallback(
     async (files: FileList) => {
       if (isProcessing) return;
 
-      const ACCEPTED_IMAGE_TYPES = [
-        'image/jpeg',
-        'image/jpg',
-        'image/png',
-        'image/gif',
-        'image/webp',
-      ];
-      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-      const MAX_FILES = 5;
-
       const newImages: ImageAttachment[] = [];
+      const newTextFiles: TextFileAttachment[] = [];
       const errors: string[] = [];
 
       for (const file of Array.from(files)) {
-        // Validate file type
-        if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-          errors.push(`${file.name}: Unsupported file type. Please use JPG, PNG, GIF, or WebP.`);
-          continue;
-        }
+        // Check if it's a text file
+        if (isTextFile(file)) {
+          const validation = validateTextFile(file);
+          if (!validation.isValid) {
+            errors.push(validation.error!);
+            continue;
+          }
 
-        // Validate file size
-        if (file.size > MAX_FILE_SIZE) {
-          const maxSizeMB = MAX_FILE_SIZE / (1024 * 1024);
-          errors.push(`${file.name}: File too large. Maximum size is ${maxSizeMB}MB.`);
-          continue;
-        }
+          // Check if we've reached max files
+          const totalFiles =
+            newImages.length +
+            selectedImages.length +
+            newTextFiles.length +
+            selectedTextFiles.length;
+          if (totalFiles >= DEFAULT_MAX_FILES) {
+            errors.push(`Maximum ${DEFAULT_MAX_FILES} files allowed.`);
+            break;
+          }
 
-        // Check if we've reached max files
-        if (newImages.length + selectedImages.length >= MAX_FILES) {
-          errors.push(`Maximum ${MAX_FILES} images allowed.`);
-          break;
+          try {
+            const content = await fileToText(file);
+            const textFileAttachment: TextFileAttachment = {
+              id: generateFileId(),
+              content,
+              mimeType: getTextFileMimeType(file.name),
+              filename: file.name,
+              size: file.size,
+            };
+            newTextFiles.push(textFileAttachment);
+          } catch {
+            errors.push(`${file.name}: Failed to read text file.`);
+          }
         }
+        // Check if it's an image file
+        else if (isImageFile(file)) {
+          const validation = validateImageFile(file, DEFAULT_MAX_FILE_SIZE);
+          if (!validation.isValid) {
+            errors.push(validation.error!);
+            continue;
+          }
 
-        try {
-          const base64 = await fileToBase64(file);
-          const imageAttachment: ImageAttachment = {
-            id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            data: base64,
-            mimeType: file.type,
-            filename: file.name,
-            size: file.size,
-          };
-          newImages.push(imageAttachment);
-        } catch (error) {
-          errors.push(`${file.name}: Failed to process image.`);
+          // Check if we've reached max files
+          const totalFiles =
+            newImages.length +
+            selectedImages.length +
+            newTextFiles.length +
+            selectedTextFiles.length;
+          if (totalFiles >= DEFAULT_MAX_FILES) {
+            errors.push(`Maximum ${DEFAULT_MAX_FILES} files allowed.`);
+            break;
+          }
+
+          try {
+            const base64 = await fileToBase64(file);
+            const imageAttachment: ImageAttachment = {
+              id: generateImageId(),
+              data: base64,
+              mimeType: file.type,
+              filename: file.name,
+              size: file.size,
+            };
+            newImages.push(imageAttachment);
+          } catch {
+            errors.push(`${file.name}: Failed to process image.`);
+          }
+        } else {
+          errors.push(`${file.name}: Unsupported file type. Use images, .txt, or .md files.`);
         }
       }
 
       if (errors.length > 0) {
-        console.warn('Image upload errors:', errors);
+        console.warn('File upload errors:', errors);
       }
 
       if (newImages.length > 0) {
         setSelectedImages((prev) => [...prev, ...newImages]);
       }
+
+      if (newTextFiles.length > 0) {
+        setSelectedTextFiles((prev) => [...prev, ...newTextFiles]);
+      }
     },
-    [isProcessing, selectedImages, fileToBase64]
+    [isProcessing, selectedImages, selectedTextFiles]
   );
 
   // Remove individual image
   const removeImage = useCallback((imageId: string) => {
     setSelectedImages((prev) => prev.filter((img) => img.id !== imageId));
+  }, []);
+
+  // Remove individual text file
+  const removeTextFile = useCallback((fileId: string) => {
+    setSelectedTextFiles((prev) => prev.filter((file) => file.id !== fileId));
   }, []);
 
   // Drag and drop handlers for the input area
@@ -720,16 +761,19 @@ export function AgentView() {
               />
             )}
 
-            {/* Selected Images Preview - only show when ImageDropZone is hidden to avoid duplicate display */}
-            {selectedImages.length > 0 && !showImageDropZone && (
+            {/* Selected Files Preview - only show when ImageDropZone is hidden to avoid duplicate display */}
+            {(selectedImages.length > 0 || selectedTextFiles.length > 0) && !showImageDropZone && (
               <div className="mb-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-foreground">
-                    {selectedImages.length} image
-                    {selectedImages.length > 1 ? 's' : ''} attached
+                    {selectedImages.length + selectedTextFiles.length} file
+                    {selectedImages.length + selectedTextFiles.length > 1 ? 's' : ''} attached
                   </p>
                   <button
-                    onClick={() => setSelectedImages([])}
+                    onClick={() => {
+                      setSelectedImages([]);
+                      setSelectedTextFiles([]);
+                    }}
                     className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                     disabled={isProcessing}
                   >
@@ -737,6 +781,7 @@ export function AgentView() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {/* Image attachments */}
                   {selectedImages.map((image) => (
                     <div
                       key={image.id}
@@ -773,6 +818,35 @@ export function AgentView() {
                       )}
                     </div>
                   ))}
+                  {/* Text file attachments */}
+                  {selectedTextFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="group relative rounded-lg border border-border bg-muted/30 p-2 flex items-center gap-2 hover:border-primary/30 transition-colors"
+                    >
+                      {/* File icon */}
+                      <div className="w-8 h-8 rounded-md bg-muted flex-shrink-0 flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      {/* File info */}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-foreground truncate max-w-24">
+                          {file.filename}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatFileSize(file.size)}
+                        </p>
+                      </div>
+                      {/* Remove button */}
+                      <button
+                        onClick={() => removeTextFile(file.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                        disabled={isProcessing}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -792,7 +866,7 @@ export function AgentView() {
                 <Input
                   ref={inputRef}
                   placeholder={
-                    isDragOver ? 'Drop your images here...' : 'Describe what you want to build...'
+                    isDragOver ? 'Drop your files here...' : 'Describe what you want to build...'
                   }
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -803,14 +877,15 @@ export function AgentView() {
                   className={cn(
                     'h-11 bg-background border-border rounded-xl pl-4 pr-20 text-sm transition-all',
                     'focus:ring-2 focus:ring-primary/20 focus:border-primary/50',
-                    selectedImages.length > 0 && 'border-primary/30',
+                    (selectedImages.length > 0 || selectedTextFiles.length > 0) &&
+                      'border-primary/30',
                     isDragOver && 'border-primary bg-primary/5'
                   )}
                 />
-                {selectedImages.length > 0 && !isDragOver && (
+                {(selectedImages.length > 0 || selectedTextFiles.length > 0) && !isDragOver && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full font-medium">
-                    {selectedImages.length} image
-                    {selectedImages.length > 1 ? 's' : ''}
+                    {selectedImages.length + selectedTextFiles.length} file
+                    {selectedImages.length + selectedTextFiles.length > 1 ? 's' : ''}
                   </div>
                 )}
                 {isDragOver && (
@@ -821,7 +896,7 @@ export function AgentView() {
                 )}
               </div>
 
-              {/* Image Attachment Button */}
+              {/* File Attachment Button */}
               <Button
                 variant="outline"
                 size="icon"
@@ -830,9 +905,10 @@ export function AgentView() {
                 className={cn(
                   'h-11 w-11 rounded-xl border-border',
                   showImageDropZone && 'bg-primary/10 text-primary border-primary/30',
-                  selectedImages.length > 0 && 'border-primary/30 text-primary'
+                  (selectedImages.length > 0 || selectedTextFiles.length > 0) &&
+                    'border-primary/30 text-primary'
                 )}
-                title="Attach images"
+                title="Attach files (images, .txt, .md)"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
@@ -841,7 +917,11 @@ export function AgentView() {
               <Button
                 onClick={handleSend}
                 disabled={
-                  (!input.trim() && selectedImages.length === 0) || isProcessing || !isConnected
+                  (!input.trim() &&
+                    selectedImages.length === 0 &&
+                    selectedTextFiles.length === 0) ||
+                  isProcessing ||
+                  !isConnected
                 }
                 className="h-11 px-4 rounded-xl"
                 data-testid="send-message"
