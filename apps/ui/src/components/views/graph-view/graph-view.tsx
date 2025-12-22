@@ -9,6 +9,8 @@ interface GraphViewProps {
   currentWorktreePath: string | null;
   currentWorktreeBranch: string | null;
   projectPath: string | null;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
   onEditFeature: (feature: Feature) => void;
   onViewOutput: (feature: Feature) => void;
 }
@@ -19,6 +21,8 @@ export function GraphView({
   currentWorktreePath,
   currentWorktreeBranch,
   projectPath,
+  searchQuery,
+  onSearchQueryChange,
   onEditFeature,
   onViewOutput,
 }: GraphViewProps) {
@@ -79,6 +83,8 @@ export function GraphView({
       <GraphCanvas
         features={filteredFeatures}
         runningAutoTasks={runningAutoTasks}
+        searchQuery={searchQuery}
+        onSearchQueryChange={onSearchQueryChange}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         backgroundStyle={backgroundImageStyle}

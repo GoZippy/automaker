@@ -7,6 +7,8 @@ import { Feature } from '@/store/app-store';
 export interface DependencyEdgeData {
   sourceStatus: Feature['status'];
   targetStatus: Feature['status'];
+  isHighlighted?: boolean;
+  isDimmed?: boolean;
 }
 
 const getEdgeColor = (sourceStatus?: Feature['status'], targetStatus?: Feature['status']) => {
@@ -52,11 +54,17 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
     curvature: 0.25,
   });
 
-  const edgeColor = edgeData
-    ? getEdgeColor(edgeData.sourceStatus, edgeData.targetStatus)
-    : 'var(--border)';
+  const isHighlighted = edgeData?.isHighlighted ?? false;
+  const isDimmed = edgeData?.isDimmed ?? false;
 
-  const isCompleted = edgeData?.sourceStatus === 'completed' || edgeData?.sourceStatus === 'verified';
+  const edgeColor = isHighlighted
+    ? 'var(--brand-500)'
+    : edgeData
+      ? getEdgeColor(edgeData.sourceStatus, edgeData.targetStatus)
+      : 'var(--border)';
+
+  const isCompleted =
+    edgeData?.sourceStatus === 'completed' || edgeData?.sourceStatus === 'verified';
   const isInProgress = edgeData?.targetStatus === 'in_progress';
 
   return (
@@ -66,8 +74,9 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
         id={`${id}-bg`}
         path={edgePath}
         style={{
-          strokeWidth: 4,
+          strokeWidth: isHighlighted ? 6 : 4,
           stroke: 'var(--background)',
+          opacity: isDimmed ? 0.3 : 1,
         }}
       />
 
@@ -78,13 +87,20 @@ export const DependencyEdge = memo(function DependencyEdge(props: EdgeProps) {
         className={cn(
           'transition-all duration-300',
           animated && 'animated-edge',
-          isInProgress && 'edge-flowing'
+          isInProgress && 'edge-flowing',
+          isHighlighted && 'graph-edge-highlighted',
+          isDimmed && 'graph-edge-dimmed'
         )}
         style={{
-          strokeWidth: selected ? 3 : 2,
+          strokeWidth: isHighlighted ? 4 : selected ? 3 : isDimmed ? 1 : 2,
           stroke: edgeColor,
           strokeDasharray: isCompleted ? 'none' : '5 5',
-          filter: selected ? 'drop-shadow(0 0 3px var(--brand-500))' : 'none',
+          filter: isHighlighted
+            ? 'drop-shadow(0 0 6px var(--brand-500))'
+            : selected
+              ? 'drop-shadow(0 0 3px var(--brand-500))'
+              : 'none',
+          opacity: isDimmed ? 0.2 : 1,
         }}
       />
 

@@ -1036,6 +1036,8 @@ export function BoardView() {
             currentWorktreePath={currentWorktreePath}
             currentWorktreeBranch={currentWorktreeBranch}
             projectPath={currentProject?.path || null}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
             onEditFeature={(feature) => setEditingFeature(feature)}
             onViewOutput={handleViewOutput}
           />

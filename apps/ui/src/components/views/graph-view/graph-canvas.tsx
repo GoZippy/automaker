@@ -14,8 +14,20 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { Feature } from '@/store/app-store';
-import { TaskNode, DependencyEdge, GraphControls, GraphLegend } from './components';
-import { useGraphNodes, useGraphLayout, type TaskNodeData } from './hooks';
+import {
+  TaskNode,
+  DependencyEdge,
+  GraphControls,
+  GraphLegend,
+  GraphFilterControls,
+} from './components';
+import {
+  useGraphNodes,
+  useGraphLayout,
+  useGraphFilter,
+  type TaskNodeData,
+  type GraphFilterState,
+} from './hooks';
 import { cn } from '@/lib/utils';
 
 // Define custom node and edge types - using any to avoid React Flow's strict typing
@@ -32,6 +44,8 @@ const edgeTypes: any = {
 interface GraphCanvasProps {
   features: Feature[];
   runningAutoTasks: string[];
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
   onNodeClick?: (featureId: string) => void;
   onNodeDoubleClick?: (featureId: string) => void;
   backgroundStyle?: React.CSSProperties;
@@ -41,6 +55,8 @@ interface GraphCanvasProps {
 function GraphCanvasInner({
   features,
   runningAutoTasks,
+  searchQuery,
+  onSearchQueryChange,
   onNodeClick,
   onNodeDoubleClick,
   backgroundStyle,
@@ -49,10 +65,25 @@ function GraphCanvasInner({
   const [isLocked, setIsLocked] = useState(false);
   const [layoutDirection, setLayoutDirection] = useState<'LR' | 'TB'>('LR');
 
-  // Transform features to nodes and edges
+  // Filter state (category and negative toggle are local to graph view)
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [isNegativeFilter, setIsNegativeFilter] = useState(false);
+
+  // Combined filter state
+  const filterState: GraphFilterState = {
+    searchQuery,
+    selectedCategories,
+    isNegativeFilter,
+  };
+
+  // Calculate filter results
+  const filterResult = useGraphFilter(features, filterState);
+
+  // Transform features to nodes and edges with filter results
   const { nodes: initialNodes, edges: initialEdges } = useGraphNodes({
     features,
     runningAutoTasks,
+    filterResult,
   });
 
   // Apply layout
@@ -79,6 +110,13 @@ function GraphCanvasInner({
     },
     [runLayout]
   );
+
+  // Handle clear all filters
+  const handleClearFilters = useCallback(() => {
+    onSearchQueryChange('');
+    setSelectedCategories([]);
+    setIsNegativeFilter(false);
+  }, [onSearchQueryChange]);
 
   // Handle node click
   const handleNodeClick = useCallback(
@@ -156,6 +194,16 @@ function GraphCanvasInner({
           onToggleLock={() => setIsLocked(!isLocked)}
           onRunLayout={handleRunLayout}
           layoutDirection={layoutDirection}
+        />
+
+        <GraphFilterControls
+          filterState={filterState}
+          availableCategories={filterResult.availableCategories}
+          hasActiveFilter={filterResult.hasActiveFilter}
+          onSearchQueryChange={onSearchQueryChange}
+          onCategoriesChange={setSelectedCategories}
+          onNegativeFilterChange={setIsNegativeFilter}
+          onClearFilters={handleClearFilters}
         />
 
         <GraphLegend />

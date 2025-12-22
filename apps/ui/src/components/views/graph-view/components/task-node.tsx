@@ -72,13 +72,15 @@ const priorityConfig = {
   3: { label: 'Low', colorClass: 'bg-[var(--status-info)] text-white' },
 };
 
-export const TaskNode = memo(function TaskNode({
-  data,
-  selected,
-}: TaskNodeProps) {
+export const TaskNode = memo(function TaskNode({ data, selected }: TaskNodeProps) {
   const config = statusConfig[data.status] || statusConfig.backlog;
   const StatusIcon = config.icon;
   const priorityConf = data.priority ? priorityConfig[data.priority as 1 | 2 | 3] : null;
+
+  // Filter highlight states
+  const isMatched = data.isMatched ?? false;
+  const isHighlighted = data.isHighlighted ?? false;
+  const isDimmed = data.isDimmed ?? false;
 
   return (
     <>
@@ -89,39 +91,46 @@ export const TaskNode = memo(function TaskNode({
         className={cn(
           'w-3 h-3 !bg-border border-2 border-background',
           'transition-colors duration-200',
-          'hover:!bg-brand-500'
+          'hover:!bg-brand-500',
+          isDimmed && 'opacity-30'
         )}
       />
 
       <div
         className={cn(
           'min-w-[240px] max-w-[280px] rounded-xl border-2 bg-card shadow-md',
-          'transition-all duration-200',
+          'transition-all duration-300',
           config.borderClass,
           selected && 'ring-2 ring-brand-500 ring-offset-2 ring-offset-background',
           data.isRunning && 'animate-pulse-subtle',
-          data.error && 'border-[var(--status-error)]'
+          data.error && 'border-[var(--status-error)]',
+          // Filter highlight states
+          isMatched && 'graph-node-matched',
+          isHighlighted && !isMatched && 'graph-node-highlighted',
+          isDimmed && 'graph-node-dimmed'
         )}
       >
         {/* Header with status and actions */}
-        <div className={cn(
-          'flex items-center justify-between px-3 py-2 rounded-t-[10px]',
-          config.bgClass
-        )}>
+        <div
+          className={cn(
+            'flex items-center justify-between px-3 py-2 rounded-t-[10px]',
+            config.bgClass
+          )}
+        >
           <div className="flex items-center gap-2">
             <StatusIcon className={cn('w-4 h-4', config.colorClass)} />
-            <span className={cn('text-xs font-medium', config.colorClass)}>
-              {config.label}
-            </span>
+            <span className={cn('text-xs font-medium', config.colorClass)}>{config.label}</span>
           </div>
 
           <div className="flex items-center gap-1">
             {/* Priority badge */}
             {priorityConf && (
-              <span className={cn(
-                'text-[10px] font-bold px-1.5 py-0.5 rounded',
-                priorityConf.colorClass
-              )}>
+              <span
+                className={cn(
+                  'text-[10px] font-bold px-1.5 py-0.5 rounded',
+                  priorityConf.colorClass
+                )}
+              >
                 {data.priority === 1 ? 'H' : data.priority === 2 ? 'M' : 'L'}
               </span>
             )}
@@ -161,11 +170,7 @@ export const TaskNode = memo(function TaskNode({
             {/* Actions dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 hover:bg-background/50"
-                >
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-background/50">
                   <MoreHorizontal className="w-4 h-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -212,9 +217,7 @@ export const TaskNode = memo(function TaskNode({
           {data.isRunning && (
             <div className="mt-2 flex items-center gap-2">
               <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--status-in-progress)] rounded-full animate-progress-indeterminate"
-                />
+                <div className="h-full bg-[var(--status-in-progress)] rounded-full animate-progress-indeterminate" />
               </div>
               <span className="text-[10px] text-muted-foreground">Running...</span>
             </div>
@@ -240,7 +243,8 @@ export const TaskNode = memo(function TaskNode({
           'hover:!bg-brand-500',
           data.status === 'completed' || data.status === 'verified'
             ? '!bg-[var(--status-success)]'
-            : ''
+            : '',
+          isDimmed && 'opacity-30'
         )}
       />
     </>
