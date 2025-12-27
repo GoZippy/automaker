@@ -1,6 +1,6 @@
 # Phase 4: Setup Routes & Status Endpoints
 
-**Status:** `pending`
+**Status:** `completed`
 **Dependencies:** Phase 3 (Factory)
 **Estimated Effort:** Medium (API endpoints)
 
@@ -16,7 +16,7 @@ Create API endpoints for checking Cursor CLI status and managing configuration.
 
 ### Task 4.1: Create Cursor Status Route
 
-**Status:** `pending`
+**Status:** `completed`
 
 **File:** `apps/server/src/routes/setup/routes/cursor-status.ts`
 
@@ -74,7 +74,7 @@ export function createCursorStatusRoute(): Router {
 
 ### Task 4.2: Create Cursor Config Routes
 
-**Status:** `pending`
+**Status:** `completed`
 
 **File:** `apps/server/src/routes/setup/routes/cursor-config.ts`
 
@@ -182,7 +182,7 @@ export function createCursorConfigRoutes(dataDir: string): Router {
 
 ### Task 4.3: Register Routes in Setup Index
 
-**Status:** `pending`
+**Status:** `completed`
 
 **File:** `apps/server/src/routes/setup/index.ts`
 
@@ -210,7 +210,7 @@ export function createSetupRouter(dataDir: string): Router {
 
 ### Task 4.4: Update HttpApiClient
 
-**Status:** `pending`
+**Status:** `completed`
 
 **File:** `apps/ui/src/lib/http-api-client.ts`
 
@@ -320,24 +320,24 @@ curl -X POST http://localhost:3001/api/setup/cursor-config/default-model \
 
 Before marking this phase complete:
 
-- [ ] `/api/setup/cursor-status` returns installation status
-- [ ] `/api/setup/cursor-config` returns current config
-- [ ] `/api/setup/cursor-config/default-model` updates default
-- [ ] `/api/setup/cursor-config/models` updates enabled models
-- [ ] Error responses have correct status codes (400, 500)
-- [ ] Config persists to file after changes
-- [ ] SetupAPI type updated (if using Electron IPC)
+- [x] `/api/setup/cursor-status` returns installation status
+- [x] `/api/setup/cursor-config` returns current config
+- [x] `/api/setup/cursor-config/default-model` updates default
+- [x] `/api/setup/cursor-config/models` updates enabled models
+- [x] Error responses have correct status codes (400, 500)
+- [x] Config persists to file after changes
+- [x] HttpApiClient updated with Cursor methods (using web mode, not Electron IPC)
 
 ---
 
 ## Files Changed
 
-| File                                                   | Action | Description      |
-| ------------------------------------------------------ | ------ | ---------------- |
-| `apps/server/src/routes/setup/routes/cursor-status.ts` | Create | Status endpoint  |
-| `apps/server/src/routes/setup/routes/cursor-config.ts` | Create | Config endpoints |
-| `apps/server/src/routes/setup/index.ts`                | Modify | Register routes  |
-| `apps/ui/src/lib/electron.ts`                          | Modify | Add API types    |
+| File                                                   | Action | Description                   |
+| ------------------------------------------------------ | ------ | ----------------------------- |
+| `apps/server/src/routes/setup/routes/cursor-status.ts` | Create | Status endpoint               |
+| `apps/server/src/routes/setup/routes/cursor-config.ts` | Create | Config endpoints              |
+| `apps/server/src/routes/setup/index.ts`                | Modify | Register routes               |
+| `apps/ui/src/lib/http-api-client.ts`                   | Modify | Add Cursor API client methods |
 
 ---
 

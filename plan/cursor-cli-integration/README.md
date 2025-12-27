@@ -10,7 +10,7 @@
 | 1     | [Core Types & Configuration](phases/phase-1-types.md)        | `completed` | ✅          |
 | 2     | [Cursor Provider Implementation](phases/phase-2-provider.md) | `completed` | ✅          |
 | 3     | [Provider Factory Integration](phases/phase-3-factory.md)    | `completed` | ✅          |
-| 4     | [Setup Routes & Status Endpoints](phases/phase-4-routes.md)  | `pending`   | -           |
+| 4     | [Setup Routes & Status Endpoints](phases/phase-4-routes.md)  | `completed` | ✅          |
 | 5     | [Log Parser Integration](phases/phase-5-log-parser.md)       | `pending`   | -           |
 | 6     | [UI Setup Wizard](phases/phase-6-setup-wizard.md)            | `pending`   | -           |
 | 7     | [Settings View Provider Tabs](phases/phase-7-settings.md)    | `pending`   | -           |

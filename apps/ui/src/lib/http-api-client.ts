@@ -508,6 +508,59 @@ export class HttpApiClient implements ElectronAPI {
       error?: string;
     }> => this.get('/api/setup/gh-status'),
 
+    // Cursor CLI methods
+    getCursorStatus: (): Promise<{
+      success: boolean;
+      installed?: boolean;
+      version?: string | null;
+      path?: string | null;
+      auth?: {
+        authenticated: boolean;
+        method: string;
+      };
+      installCommand?: string;
+      loginCommand?: string;
+      error?: string;
+    }> => this.get('/api/setup/cursor-status'),
+
+    getCursorConfig: (
+      projectPath: string
+    ): Promise<{
+      success: boolean;
+      config?: {
+        defaultModel?: string;
+        models?: string[];
+        mcpServers?: string[];
+        rules?: string[];
+      };
+      availableModels?: Array<{
+        id: string;
+        label: string;
+        description: string;
+        hasThinking: boolean;
+        tier: 'free' | 'pro';
+      }>;
+      error?: string;
+    }> => this.get(`/api/setup/cursor-config?projectPath=${encodeURIComponent(projectPath)}`),
+
+    setCursorDefaultModel: (
+      projectPath: string,
+      model: string
+    ): Promise<{
+      success: boolean;
+      model?: string;
+      error?: string;
+    }> => this.post('/api/setup/cursor-config/default-model', { projectPath, model }),
+
+    setCursorModels: (
+      projectPath: string,
+      models: string[]
+    ): Promise<{
+      success: boolean;
+      models?: string[];
+      error?: string;
+    }> => this.post('/api/setup/cursor-config/models', { projectPath, models }),
+
     onInstallProgress: (callback: (progress: unknown) => void) => {
       return this.subscribeToEvent('agent:stream', callback);
     },
