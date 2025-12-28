@@ -94,23 +94,30 @@ async function getGhStatus(): Promise<GhStatus> {
     // Version command failed
   }
 
-  // Check authentication status
+  // Check authentication status by actually making an API call
+  // gh auth status can return non-zero even when GH_TOKEN is valid
   try {
-    const { stdout } = await execAsync('gh auth status', { env: execEnv });
-    // If this succeeds without error, we're authenticated
-    status.authenticated = true;
-
-    // Try to extract username from output
-    const userMatch =
-      stdout.match(/Logged in to [^\s]+ account ([^\s]+)/i) ||
-      stdout.match(/Logged in to [^\s]+ as ([^\s]+)/i);
-    if (userMatch) {
-      status.user = userMatch[1];
+    const { stdout } = await execAsync('gh api user --jq ".login"', { env: execEnv });
+    const user = stdout.trim();
+    if (user) {
+      status.authenticated = true;
+      status.user = user;
     }
-  } catch (error: unknown) {
-    // Auth status returns non-zero if not authenticated
-    const err = error as { stderr?: string };
-    if (err.stderr?.includes('not logged in')) {
+  } catch {
+    // API call failed - try gh auth status as fallback
+    try {
+      const { stdout } = await execAsync('gh auth status', { env: execEnv });
+      status.authenticated = true;
+
+      // Try to extract username from output
+      const userMatch =
+        stdout.match(/Logged in to [^\s]+ account ([^\s]+)/i) ||
+        stdout.match(/Logged in to [^\s]+ as ([^\s]+)/i);
+      if (userMatch) {
+        status.user = userMatch[1];
+      }
+    } catch {
+      // Auth status returns non-zero if not authenticated
       status.authenticated = false;
     }
   }
