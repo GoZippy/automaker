@@ -13,7 +13,7 @@
  */
 
 import { execSync } from 'child_process';
-import fsNative from 'fs';
+import fsNative, { statSync } from 'fs';
 import http from 'http';
 import path from 'path';
 import readline from 'readline';
@@ -661,4 +661,143 @@ export async function ensureDependencies(fs, baseDir) {
       });
     });
   }
+}
+
+// =============================================================================
+// Docker Utilities
+// =============================================================================
+
+/**
+ * Sanitize a project name to be safe for use in shell commands and Docker image names.
+ * Converts to lowercase and removes any characters that aren't alphanumeric.
+ * @param {string} name - Project name to sanitize
+ * @returns {string} - Sanitized project name
+ */
+export function sanitizeProjectName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Check if Docker images need to be rebuilt based on Dockerfile or package.json changes
+ * @param {string} baseDir - Base directory containing Dockerfile and package.json
+ * @returns {boolean} - Whether images need to be rebuilt
+ */
+export function shouldRebuildDockerImages(baseDir) {
+  try {
+    const dockerfilePath = path.join(baseDir, 'Dockerfile');
+    const packageJsonPath = path.join(baseDir, 'package.json');
+
+    // Get modification times of source files
+    const dockerfileMtime = statSync(dockerfilePath).mtimeMs;
+    const packageJsonMtime = statSync(packageJsonPath).mtimeMs;
+    const latestSourceMtime = Math.max(dockerfileMtime, packageJsonMtime);
+
+    // Get project name from docker-compose config, falling back to directory name
+    let projectName;
+    try {
+      const composeConfig = execSync('docker compose config --format json', {
+        encoding: 'utf-8',
+        cwd: baseDir,
+      });
+      const config = JSON.parse(composeConfig);
+      projectName = config.name;
+    } catch (error) {
+      // Fallback handled below
+    }
+
+    // Sanitize project name (whether from config or fallback)
+    // This prevents command injection and ensures valid Docker image names
+    const sanitizedProjectName = sanitizeProjectName(projectName || path.basename(baseDir));
+    const serverImageName = `${sanitizedProjectName}_server`;
+    const uiImageName = `${sanitizedProjectName}_ui`;
+
+    // Check if images exist and get their creation times
+    let needsRebuild = false;
+
+    try {
+      // Check server image
+      const serverImageInfo = execSync(
+        `docker image inspect ${serverImageName} --format "{{.Created}}" 2>/dev/null || echo ""`,
+        { encoding: 'utf-8', cwd: baseDir }
+      ).trim();
+
+      // Check UI image
+      const uiImageInfo = execSync(
+        `docker image inspect ${uiImageName} --format "{{.Created}}" 2>/dev/null || echo ""`,
+        { encoding: 'utf-8', cwd: baseDir }
+      ).trim();
+
+      // If either image doesn't exist, we need to rebuild
+      if (!serverImageInfo || !uiImageInfo) {
+        return true;
+      }
+
+      // Parse image creation times (ISO 8601 format)
+      const serverCreated = new Date(serverImageInfo).getTime();
+      const uiCreated = new Date(uiImageInfo).getTime();
+      const oldestImageTime = Math.min(serverCreated, uiCreated);
+
+      // If source files are newer than images, rebuild
+      needsRebuild = latestSourceMtime > oldestImageTime;
+    } catch (error) {
+      // If images don't exist or inspect fails, rebuild
+      needsRebuild = true;
+    }
+
+    return needsRebuild;
+  } catch (error) {
+    // If we can't check, err on the side of rebuilding
+    log('Could not check Docker image status, will rebuild to be safe', 'yellow');
+    return true;
+  }
+}
+
+/**
+ * Launch Docker containers with docker-compose
+ * @param {object} options - Configuration options
+ * @param {string} options.baseDir - Base directory containing docker-compose.yml
+ * @param {object} options.processes - Processes object to track docker process
+ * @returns {Promise<void>}
+ */
+export async function launchDockerContainers({ baseDir, processes }) {
+  log('Launching Docker Container (Isolated Mode)...', 'blue');
+
+  // Check if Dockerfile or package.json changed and rebuild if needed
+  const needsRebuild = shouldRebuildDockerImages(baseDir);
+  const buildFlag = needsRebuild ? ['--build'] : [];
+
+  if (needsRebuild) {
+    log('Dockerfile or package.json changed - rebuilding images...', 'yellow');
+  } else {
+    log('Starting Docker containers...', 'yellow');
+  }
+  console.log('');
+
+  // Check if ANTHROPIC_API_KEY is set
+  if (!process.env.ANTHROPIC_API_KEY) {
+    log('Warning: ANTHROPIC_API_KEY environment variable is not set.', 'yellow');
+    log('The server will require an API key to function.', 'yellow');
+    log('Set it with: export ANTHROPIC_API_KEY=your-key', 'yellow');
+    console.log('');
+  }
+
+  // Start containers with docker-compose
+  // Will rebuild if Dockerfile or package.json changed
+  processes.docker = crossSpawn('docker', ['compose', 'up', ...buildFlag], {
+    stdio: 'inherit',
+    cwd: baseDir,
+    env: {
+      ...process.env,
+    },
+  });
+
+  log('Docker containers starting...', 'blue');
+  log('UI will be available at: http://localhost:3007', 'green');
+  log('API will be available at: http://localhost:3008', 'green');
+  console.log('');
+  log('Press Ctrl+C to stop the containers.', 'yellow');
+
+  await new Promise((resolve) => {
+    processes.docker.on('close', resolve);
+  });
 }
