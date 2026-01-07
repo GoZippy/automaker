@@ -36,7 +36,7 @@ import type {
   ConvertToFeatureOptions,
 } from './electron';
 import type { Message, SessionListItem } from '@/types/electron';
-import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
+import type { Feature, ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
@@ -1900,6 +1900,11 @@ export class HttpApiClient implements ElectronAPI {
   // Claude API
   claude = {
     getUsage: (): Promise<ClaudeUsageResponse> => this.get('/api/claude/usage'),
+  };
+
+  // Codex API
+  codex = {
+    getUsage: (): Promise<CodexUsageResponse> => this.get('/api/codex/usage'),
   };
 
   // Context API

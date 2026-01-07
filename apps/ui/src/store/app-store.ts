@@ -681,19 +681,23 @@ export interface CodexRateLimitWindow {
   limit: number;
   used: number;
   remaining: number;
-  window: number; // Duration in minutes
+  usedPercent: number; // Percentage used (0-100)
+  windowDurationMins: number; // Duration in minutes
   resetsAt: number; // Unix timestamp in seconds
 }
 
 export interface CodexUsage {
-  planType: CodexPlanType | null;
-  credits: CodexCreditsSnapshot | null;
   rateLimits: {
-    session?: CodexRateLimitWindow;
-    weekly?: CodexRateLimitWindow;
+    primary?: CodexRateLimitWindow;
+    secondary?: CodexRateLimitWindow;
+    credits?: CodexCreditsSnapshot;
+    planType?: CodexPlanType;
   } | null;
   lastUpdated: string;
 }
+
+// Response type for Codex usage API (can be success or error)
+export type CodexUsageResponse = CodexUsage | { error: string; message?: string };
 
 /**
  * Check if Claude usage is at its limit (any of: session >= 100%, weekly >= 100%, OR cost >= limit)

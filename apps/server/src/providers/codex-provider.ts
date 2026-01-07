@@ -72,7 +72,7 @@ const CODEX_EVENT_TYPES = {
   itemCompleted: 'item.completed',
   itemStarted: 'item.started',
   itemUpdated: 'item.updated',
-  threadCompleted: 'thread.completed',
+  turnCompleted: 'turn.completed',
   error: 'error',
 } as const;
 
@@ -817,7 +817,7 @@ export class CodexProvider extends BaseProvider {
           continue;
         }
 
-        if (eventType === CODEX_EVENT_TYPES.threadCompleted) {
+        if (eventType === CODEX_EVENT_TYPES.turnCompleted) {
           const resultText = extractText(event.result) || undefined;
           yield { type: 'result', subtype: 'success', result: resultText };
           continue;
