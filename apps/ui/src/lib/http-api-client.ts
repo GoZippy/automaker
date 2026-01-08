@@ -374,7 +374,13 @@ export const verifySession = async (): Promise<boolean> => {
     'Content-Type': 'application/json',
   };
 
-  // Add session token header if available
+  // Electron mode: use API key header
+  const apiKey = getApiKey();
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+
+  // Add session token header if available (web mode)
   const sessionToken = getSessionToken();
   if (sessionToken) {
     headers['X-Session-Token'] = sessionToken;
