@@ -99,7 +99,7 @@ export function KanbanBoard({
   const { columnWidth, containerStyle } = useResponsiveKanban(columns.length);
 
   return (
-    <div className="flex-1 overflow-x-auto px-5 pb-4 relative" style={backgroundImageStyle}>
+    <div className="flex-1 overflow-x-auto px-5 pt-4 pb-4 relative" style={backgroundImageStyle}>
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetectionStrategy}

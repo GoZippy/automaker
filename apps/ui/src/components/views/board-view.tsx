@@ -40,8 +40,6 @@ import { useKeyboardShortcutsConfig } from '@/hooks/use-keyboard-shortcuts';
 import { useWindowState } from '@/hooks/use-window-state';
 // Board-view specific imports
 import { BoardHeader } from './board-view/board-header';
-import { BoardSearchBar } from './board-view/board-search-bar';
-import { BoardControls } from './board-view/board-controls';
 import { KanbanBoard } from './board-view/kanban-board';
 import { GraphView } from './graph-view';
 import {
@@ -1155,7 +1153,6 @@ export function BoardView() {
     >
       {/* Header */}
       <BoardHeader
-        projectName={currentProject.name}
         projectPath={currentProject.path}
         maxConcurrency={maxConcurrency}
         runningAgentsCount={runningAutoTasks.length}
@@ -1170,6 +1167,15 @@ export function BoardView() {
         }}
         onOpenPlanDialog={() => setShowPlanDialog(true)}
         isMounted={isMounted}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        isCreatingSpec={isCreatingSpec}
+        creatingSpecProjectPath={creatingSpecProjectPath}
+        onShowBoardBackground={() => setShowBoardBackgroundModal(true)}
+        onShowCompletedModal={() => setShowCompletedModal(true)}
+        completedCount={completedFeatures.length}
+        boardViewMode={boardViewMode}
+        onBoardViewModeChange={setBoardViewMode}
       />
 
       {/* Worktree Panel - conditionally rendered based on visibility setting */}
@@ -1208,26 +1214,6 @@ export function BoardView() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Search Bar Row */}
-        <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-          <BoardSearchBar
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            isCreatingSpec={isCreatingSpec}
-            creatingSpecProjectPath={creatingSpecProjectPath ?? undefined}
-            currentProjectPath={currentProject?.path}
-          />
-
-          {/* Board Background & Detail Level Controls */}
-          <BoardControls
-            isMounted={isMounted}
-            onShowBoardBackground={() => setShowBoardBackgroundModal(true)}
-            onShowCompletedModal={() => setShowCompletedModal(true)}
-            completedCount={completedFeatures.length}
-            boardViewMode={boardViewMode}
-            onBoardViewModeChange={setBoardViewMode}
-          />
-        </div>
         {/* View Content - Kanban or Graph */}
         {boardViewMode === 'kanban' ? (
           <KanbanBoard

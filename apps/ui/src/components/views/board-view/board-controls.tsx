@@ -25,7 +25,7 @@ export function BoardControls({
 
   return (
     <TooltipProvider>
-      <div className="flex items-center gap-2 ml-4">
+      <div className="flex items-center gap-2">
         {/* View Mode Toggle - Kanban / Graph */}
         <div
           className="flex items-center rounded-lg bg-secondary border border-border"

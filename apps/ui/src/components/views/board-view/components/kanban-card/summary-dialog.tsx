@@ -35,6 +35,7 @@ export function SummaryDialog({
         data-testid={`summary-dialog-${feature.id}`}
         onPointerDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
