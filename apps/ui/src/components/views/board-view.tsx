@@ -41,7 +41,6 @@ import { useWindowState } from '@/hooks/use-window-state';
 // Board-view specific imports
 import { BoardHeader } from './board-view/board-header';
 import { KanbanBoard } from './board-view/kanban-board';
-import { GraphView } from './graph-view';
 import {
   AddFeatureDialog,
   AgentOutputModal,
@@ -88,8 +87,6 @@ export function BoardView() {
     maxConcurrency,
     setMaxConcurrency,
     defaultSkipTests,
-    boardViewMode,
-    setBoardViewMode,
     specCreatingForProject,
     setSpecCreatingForProject,
     pendingPlanApproval,
@@ -507,6 +504,34 @@ export function BoardView() {
     },
     [currentProject, selectedFeatureIds, updateFeature, exitSelectionMode]
   );
+
+  // Handler for bulk deleting multiple features
+  const handleBulkDelete = useCallback(async () => {
+    if (!currentProject || selectedFeatureIds.size === 0) return;
+
+    try {
+      const api = getHttpApiClient();
+      const featureIds = Array.from(selectedFeatureIds);
+      const result = await api.features.bulkDelete(currentProject.path, featureIds);
+
+      if (result.success) {
+        // Delete from local state
+        featureIds.forEach((featureId) => {
+          persistFeatureDelete(featureId);
+        });
+        toast.success(`Deleted ${result.deletedCount} features`);
+        exitSelectionMode();
+        loadFeatures();
+      } else {
+        toast.error('Failed to delete some features', {
+          description: `${result.failedCount} features failed to delete`,
+        });
+      }
+    } catch (error) {
+      logger.error('Bulk delete failed:', error);
+      toast.error('Failed to delete features');
+    }
+  }, [currentProject, selectedFeatureIds, persistFeatureDelete, exitSelectionMode, loadFeatures]);
 
   // Get selected features for mass edit dialog
   const selectedFeatures = useMemo(() => {
@@ -1174,8 +1199,6 @@ export function BoardView() {
         onShowBoardBackground={() => setShowBoardBackgroundModal(true)}
         onShowCompletedModal={() => setShowCompletedModal(true)}
         completedCount={completedFeatures.length}
-        boardViewMode={boardViewMode}
-        onBoardViewModeChange={setBoardViewMode}
       />
 
       {/* Worktree Panel - conditionally rendered based on visibility setting */}
@@ -1214,69 +1237,46 @@ export function BoardView() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* View Content - Kanban or Graph */}
-        {boardViewMode === 'kanban' ? (
-          <KanbanBoard
-            sensors={sensors}
-            collisionDetectionStrategy={collisionDetectionStrategy}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            activeFeature={activeFeature}
-            getColumnFeatures={getColumnFeatures}
-            backgroundImageStyle={backgroundImageStyle}
-            backgroundSettings={backgroundSettings}
-            onEdit={(feature) => setEditingFeature(feature)}
-            onDelete={(featureId) => handleDeleteFeature(featureId)}
-            onViewOutput={handleViewOutput}
-            onVerify={handleVerifyFeature}
-            onResume={handleResumeFeature}
-            onForceStop={handleForceStopFeature}
-            onManualVerify={handleManualVerify}
-            onMoveBackToInProgress={handleMoveBackToInProgress}
-            onFollowUp={handleOpenFollowUp}
-            onComplete={handleCompleteFeature}
-            onImplement={handleStartImplementation}
-            onViewPlan={(feature) => setViewPlanFeature(feature)}
-            onApprovePlan={handleOpenApprovalDialog}
-            onSpawnTask={(feature) => {
-              setSpawnParentFeature(feature);
-              setShowAddDialog(true);
-            }}
-            featuresWithContext={featuresWithContext}
-            runningAutoTasks={runningAutoTasks}
-            onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}
-            onAddFeature={() => setShowAddDialog(true)}
-            pipelineConfig={
-              currentProject?.path ? pipelineConfigByProject[currentProject.path] || null : null
-            }
-            onOpenPipelineSettings={() => setShowPipelineSettings(true)}
-            isSelectionMode={isSelectionMode}
-            selectedFeatureIds={selectedFeatureIds}
-            onToggleFeatureSelection={toggleFeatureSelection}
-            onToggleSelectionMode={toggleSelectionMode}
-          />
-        ) : (
-          <GraphView
-            features={hookFeatures}
-            runningAutoTasks={runningAutoTasks}
-            currentWorktreePath={currentWorktreePath}
-            currentWorktreeBranch={currentWorktreeBranch}
-            projectPath={currentProject?.path || null}
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            onEditFeature={(feature) => setEditingFeature(feature)}
-            onViewOutput={handleViewOutput}
-            onStartTask={handleStartImplementation}
-            onStopTask={handleForceStopFeature}
-            onResumeTask={handleResumeFeature}
-            onUpdateFeature={updateFeature}
-            onSpawnTask={(feature) => {
-              setSpawnParentFeature(feature);
-              setShowAddDialog(true);
-            }}
-            onDeleteTask={(feature) => handleDeleteFeature(feature.id)}
-          />
-        )}
+        {/* View Content - Kanban Board */}
+        <KanbanBoard
+          sensors={sensors}
+          collisionDetectionStrategy={collisionDetectionStrategy}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          activeFeature={activeFeature}
+          getColumnFeatures={getColumnFeatures}
+          backgroundImageStyle={backgroundImageStyle}
+          backgroundSettings={backgroundSettings}
+          onEdit={(feature) => setEditingFeature(feature)}
+          onDelete={(featureId) => handleDeleteFeature(featureId)}
+          onViewOutput={handleViewOutput}
+          onVerify={handleVerifyFeature}
+          onResume={handleResumeFeature}
+          onForceStop={handleForceStopFeature}
+          onManualVerify={handleManualVerify}
+          onMoveBackToInProgress={handleMoveBackToInProgress}
+          onFollowUp={handleOpenFollowUp}
+          onComplete={handleCompleteFeature}
+          onImplement={handleStartImplementation}
+          onViewPlan={(feature) => setViewPlanFeature(feature)}
+          onApprovePlan={handleOpenApprovalDialog}
+          onSpawnTask={(feature) => {
+            setSpawnParentFeature(feature);
+            setShowAddDialog(true);
+          }}
+          featuresWithContext={featuresWithContext}
+          runningAutoTasks={runningAutoTasks}
+          onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}
+          onAddFeature={() => setShowAddDialog(true)}
+          pipelineConfig={
+            currentProject?.path ? pipelineConfigByProject[currentProject.path] || null : null
+          }
+          onOpenPipelineSettings={() => setShowPipelineSettings(true)}
+          isSelectionMode={isSelectionMode}
+          selectedFeatureIds={selectedFeatureIds}
+          onToggleFeatureSelection={toggleFeatureSelection}
+          onToggleSelectionMode={toggleSelectionMode}
+        />
       </div>
 
       {/* Selection Action Bar */}
@@ -1285,6 +1285,7 @@ export function BoardView() {
           selectedCount={selectedCount}
           totalCount={allSelectableFeatureIds.length}
           onEdit={() => setShowMassEditDialog(true)}
+          onDelete={handleBulkDelete}
           onClear={clearSelection}
           onSelectAll={() => selectAll(allSelectableFeatureIds)}
         />

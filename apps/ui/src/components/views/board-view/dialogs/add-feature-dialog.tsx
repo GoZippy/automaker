@@ -141,7 +141,7 @@ export function AddFeatureDialog({
   const [descriptionError, setDescriptionError] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancementMode, setEnhancementMode] = useState<
-    'improve' | 'technical' | 'simplify' | 'acceptance'
+    'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
   >('improve');
   const [enhanceOpen, setEnhanceOpen] = useState(false);
 
@@ -431,6 +431,7 @@ export function AddFeatureDialog({
                         {enhancementMode === 'technical' && 'Add Technical Details'}
                         {enhancementMode === 'simplify' && 'Simplify'}
                         {enhancementMode === 'acceptance' && 'Add Acceptance Criteria'}
+                        {enhancementMode === 'ux-reviewer' && 'User Experience'}
                         <ChevronDown className="w-3 h-3 ml-1" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -446,6 +447,9 @@ export function AddFeatureDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setEnhancementMode('acceptance')}>
                         Add Acceptance Criteria
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEnhancementMode('ux-reviewer')}>
+                        User Experience
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

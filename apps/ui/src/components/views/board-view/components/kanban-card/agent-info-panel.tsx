@@ -70,6 +70,7 @@ export function AgentInfoPanel({
 }: AgentInfoPanelProps) {
   const [agentInfo, setAgentInfo] = useState<AgentTaskInfo | null>(null);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
+  const [isTodosExpanded, setIsTodosExpanded] = useState(false);
 
   useEffect(() => {
     const loadContext = async () => {
@@ -197,32 +198,47 @@ export function AgentInfoPanel({
                   {agentInfo.todos.length} tasks
                 </span>
               </div>
-              <div className="space-y-0.5 max-h-16 overflow-y-auto">
-                {agentInfo.todos.slice(0, 3).map((todo, idx) => (
-                  <div key={idx} className="flex items-center gap-1.5 text-[10px]">
-                    {todo.status === 'completed' ? (
-                      <CheckCircle2 className="w-2.5 h-2.5 text-[var(--status-success)] shrink-0" />
-                    ) : todo.status === 'in_progress' ? (
-                      <Loader2 className="w-2.5 h-2.5 text-[var(--status-warning)] animate-spin shrink-0" />
-                    ) : (
-                      <Circle className="w-2.5 h-2.5 text-muted-foreground/50 shrink-0" />
-                    )}
-                    <span
-                      className={cn(
-                        'break-words hyphens-auto line-clamp-2 leading-relaxed',
-                        todo.status === 'completed' && 'text-muted-foreground/60 line-through',
-                        todo.status === 'in_progress' && 'text-[var(--status-warning)]',
-                        todo.status === 'pending' && 'text-muted-foreground/80'
+              <div
+                className={cn(
+                  'space-y-0.5 overflow-y-auto',
+                  isTodosExpanded ? 'max-h-40' : 'max-h-16'
+                )}
+              >
+                {(isTodosExpanded ? agentInfo.todos : agentInfo.todos.slice(0, 3)).map(
+                  (todo, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 text-[10px]">
+                      {todo.status === 'completed' ? (
+                        <CheckCircle2 className="w-2.5 h-2.5 text-[var(--status-success)] shrink-0" />
+                      ) : todo.status === 'in_progress' ? (
+                        <Loader2 className="w-2.5 h-2.5 text-[var(--status-warning)] animate-spin shrink-0" />
+                      ) : (
+                        <Circle className="w-2.5 h-2.5 text-muted-foreground/50 shrink-0" />
                       )}
-                    >
-                      {todo.content}
-                    </span>
-                  </div>
-                ))}
+                      <span
+                        className={cn(
+                          'break-words hyphens-auto line-clamp-2 leading-relaxed',
+                          todo.status === 'completed' && 'text-muted-foreground/60 line-through',
+                          todo.status === 'in_progress' && 'text-[var(--status-warning)]',
+                          todo.status === 'pending' && 'text-muted-foreground/80'
+                        )}
+                      >
+                        {todo.content}
+                      </span>
+                    </div>
+                  )
+                )}
                 {agentInfo.todos.length > 3 && (
-                  <p className="text-[10px] text-muted-foreground/60 pl-4">
-                    +{agentInfo.todos.length - 3} more
-                  </p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsTodosExpanded(!isTodosExpanded);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="text-[10px] text-muted-foreground/60 pl-4 hover:text-muted-foreground transition-colors cursor-pointer"
+                  >
+                    {isTodosExpanded ? 'Show less' : `+${agentInfo.todos.length - 3} more`}
+                  </button>
                 )}
               </div>
             </div>

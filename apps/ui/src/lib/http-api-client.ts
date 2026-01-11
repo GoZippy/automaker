@@ -1438,6 +1438,16 @@ export class HttpApiClient implements ElectronAPI {
       features?: Feature[];
       error?: string;
     }>;
+    bulkDelete: (
+      projectPath: string,
+      featureIds: string[]
+    ) => Promise<{
+      success: boolean;
+      deletedCount?: number;
+      failedCount?: number;
+      results?: Array<{ featureId: string; success: boolean; error?: string }>;
+      error?: string;
+    }>;
   } = {
     getAll: (projectPath: string) => this.post('/api/features/list', { projectPath }),
     get: (projectPath: string, featureId: string) =>
@@ -1449,7 +1459,7 @@ export class HttpApiClient implements ElectronAPI {
       featureId: string,
       updates: Partial<Feature>,
       descriptionHistorySource?: 'enhance' | 'edit',
-      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
     ) =>
       this.post('/api/features/update', {
         projectPath,
@@ -1466,6 +1476,8 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/generate-title', { description }),
     bulkUpdate: (projectPath: string, featureIds: string[], updates: Partial<Feature>) =>
       this.post('/api/features/bulk-update', { projectPath, featureIds, updates }),
+    bulkDelete: (projectPath: string, featureIds: string[]) =>
+      this.post('/api/features/bulk-delete', { projectPath, featureIds }),
   };
 
   // Auto Mode API
@@ -1533,6 +1545,8 @@ export class HttpApiClient implements ElectronAPI {
         editedPlan,
         feedback,
       }),
+    resumeInterrupted: (projectPath: string) =>
+      this.post('/api/auto-mode/resume-interrupted', { projectPath }),
     onEvent: (callback: (event: AutoModeEvent) => void) => {
       return this.subscribeToEvent('auto-mode:event', callback as EventCallback);
     },
@@ -1668,8 +1682,13 @@ export class HttpApiClient implements ElectronAPI {
         projectPath,
         maxFeatures,
       }),
-    stop: () => this.post('/api/spec-regeneration/stop'),
-    status: () => this.get('/api/spec-regeneration/status'),
+    stop: (projectPath?: string) => this.post('/api/spec-regeneration/stop', { projectPath }),
+    status: (projectPath?: string) =>
+      this.get(
+        projectPath
+          ? `/api/spec-regeneration/status?projectPath=${encodeURIComponent(projectPath)}`
+          : '/api/spec-regeneration/status'
+      ),
     onEvent: (callback: (event: SpecRegenerationEvent) => void) => {
       return this.subscribeToEvent('spec-regeneration:event', callback as EventCallback);
     },

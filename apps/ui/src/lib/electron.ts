@@ -433,11 +433,12 @@ export interface SpecRegenerationAPI {
     success: boolean;
     error?: string;
   }>;
-  stop: () => Promise<{ success: boolean; error?: string }>;
-  status: () => Promise<{
+  stop: (projectPath?: string) => Promise<{ success: boolean; error?: string }>;
+  status: (projectPath?: string) => Promise<{
     success: boolean;
     isRunning?: boolean;
     currentPhase?: string;
+    projectPath?: string;
     error?: string;
   }>;
   onEvent: (callback: (event: SpecRegenerationEvent) => void) => () => void;
@@ -461,7 +462,7 @@ export interface FeaturesAPI {
     featureId: string,
     updates: Partial<Feature>,
     descriptionHistorySource?: 'enhance' | 'edit',
-    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
   ) => Promise<{ success: boolean; feature?: Feature; error?: string }>;
   delete: (projectPath: string, featureId: string) => Promise<{ success: boolean; error?: string }>;
   getAgentOutput: (
@@ -532,6 +533,9 @@ export interface AutoModeAPI {
     editedPlan?: string,
     feedback?: string
   ) => Promise<{ success: boolean; error?: string }>;
+  resumeInterrupted: (
+    projectPath: string
+  ) => Promise<{ success: boolean; message?: string; error?: string }>;
   onEvent: (callback: (event: AutoModeEvent) => void) => () => void;
 }
 
@@ -2069,6 +2073,11 @@ function createMockAutoModeAPI(): AutoModeAPI {
       return { success: true };
     },
 
+    resumeInterrupted: async (projectPath: string) => {
+      console.log('[Mock] Resume interrupted features for:', projectPath);
+      return { success: true, message: 'Mock: no interrupted features' };
+    },
+
     onEvent: (callback: (event: AutoModeEvent) => void) => {
       mockAutoModeCallbacks.push(callback);
       return () => {
@@ -2498,7 +2507,7 @@ function createMockSpecRegenerationAPI(): SpecRegenerationAPI {
       return { success: true };
     },
 
-    stop: async () => {
+    stop: async (_projectPath?: string) => {
       mockSpecRegenerationRunning = false;
       mockSpecRegenerationPhase = '';
       if (mockSpecRegenerationTimeout) {
@@ -2508,7 +2517,7 @@ function createMockSpecRegenerationAPI(): SpecRegenerationAPI {
       return { success: true };
     },
 
-    status: async () => {
+    status: async (_projectPath?: string) => {
       return {
         success: true,
         isRunning: mockSpecRegenerationRunning,

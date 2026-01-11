@@ -210,9 +210,11 @@ export function formatShortcut(shortcut: string | undefined | null, forDisplay =
 export interface KeyboardShortcuts {
   // Navigation shortcuts
   board: string;
+  graph: string;
   agent: string;
   spec: string;
   context: string;
+  memory: string;
   settings: string;
   terminal: string;
   ideation: string;
@@ -243,9 +245,11 @@ export interface KeyboardShortcuts {
 export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   // Navigation
   board: 'K',
+  graph: 'H',
   agent: 'A',
   spec: 'D',
   context: 'C',
+  memory: 'Y',
   settings: 'S',
   terminal: 'T',
   ideation: 'I',

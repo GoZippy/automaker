@@ -314,7 +314,7 @@ export class FeatureLoader {
     featureId: string,
     updates: Partial<Feature>,
     descriptionHistorySource?: 'enhance' | 'edit',
-    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
   ): Promise<Feature> {
     const feature = await this.get(projectPath, featureId);
     if (!feature) {

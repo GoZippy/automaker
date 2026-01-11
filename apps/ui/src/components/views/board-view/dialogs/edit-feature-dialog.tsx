@@ -79,7 +79,7 @@ interface EditFeatureDialogProps {
       requirePlanApproval: boolean;
     },
     descriptionHistorySource?: 'enhance' | 'edit',
-    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+    enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
   ) => void;
   categorySuggestions: string[];
   branchSuggestions: string[];
@@ -112,7 +112,7 @@ export function EditFeatureDialog({
   );
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancementMode, setEnhancementMode] = useState<
-    'improve' | 'technical' | 'simplify' | 'acceptance'
+    'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
   >('improve');
   const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [showDependencyTree, setShowDependencyTree] = useState(false);
@@ -338,11 +338,21 @@ export function EditFeatureDialog({
                               hour: '2-digit',
                               minute: '2-digit',
                             });
+                            const getEnhancementModeLabel = (mode?: string) => {
+                              const labels: Record<string, string> = {
+                                improve: 'Improve Clarity',
+                                technical: 'Add Technical Details',
+                                simplify: 'Simplify',
+                                acceptance: 'Add Acceptance Criteria',
+                                'ux-reviewer': 'User Experience',
+                              };
+                              return labels[mode || 'improve'] || mode || 'improve';
+                            };
                             const sourceLabel =
                               entry.source === 'initial'
                                 ? 'Original'
                                 : entry.source === 'enhance'
-                                  ? `Enhanced (${entry.enhancementMode || 'improve'})`
+                                  ? `Enhanced (${getEnhancementModeLabel(entry.enhancementMode)})`
                                   : 'Edited';
 
                             return (
@@ -455,6 +465,7 @@ export function EditFeatureDialog({
                         {enhancementMode === 'technical' && 'Add Technical Details'}
                         {enhancementMode === 'simplify' && 'Simplify'}
                         {enhancementMode === 'acceptance' && 'Add Acceptance Criteria'}
+                        {enhancementMode === 'ux-reviewer' && 'User Experience'}
                         <ChevronDown className="w-3 h-3 ml-1" />
                       </Button>
                     </DropdownMenuTrigger>
@@ -470,6 +481,9 @@ export function EditFeatureDialog({
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setEnhancementMode('acceptance')}>
                         Add Acceptance Criteria
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEnhancementMode('ux-reviewer')}>
+                        User Experience
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

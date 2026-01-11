@@ -126,6 +126,9 @@ export function Sidebar() {
   // Derive isCreatingSpec from store state
   const isCreatingSpec = specCreatingForProject !== null;
   const creatingSpecProjectPath = specCreatingForProject;
+  // Check if the current project is specifically the one generating spec
+  const isCurrentProjectGeneratingSpec =
+    specCreatingForProject !== null && specCreatingForProject === currentProject?.path;
 
   // Auto-collapse sidebar on small screens and update Electron window minWidth
   useSidebarAutoCollapse({ sidebarOpen, toggleSidebar });
@@ -241,6 +244,7 @@ export function Sidebar() {
     cyclePrevProject,
     cycleNextProject,
     unviewedValidationsCount,
+    isSpecGenerating: isCurrentProjectGeneratingSpec,
   });
 
   // Register keyboard shortcuts

@@ -19,7 +19,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
       featureId: string,
       updates: Partial<Feature>,
       descriptionHistorySource?: 'enhance' | 'edit',
-      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance'
+      enhancementMode?: 'improve' | 'technical' | 'simplify' | 'acceptance' | 'ux-reviewer'
     ) => {
       if (!currentProject) return;
 

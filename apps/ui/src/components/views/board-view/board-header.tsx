@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Bot, Wand2, Settings2, GitBranch } from 'lucide-react';
 import { UsagePopover } from '@/components/usage-popover';
-import { useAppStore, BoardViewMode } from '@/store/app-store';
+import { useAppStore } from '@/store/app-store';
 import { useSetupStore } from '@/store/setup-store';
 import { AutoModeSettingsDialog } from './dialogs/auto-mode-settings-dialog';
 import { getHttpApiClient } from '@/lib/http-api-client';
@@ -31,8 +31,6 @@ interface BoardHeaderProps {
   onShowBoardBackground: () => void;
   onShowCompletedModal: () => void;
   completedCount: number;
-  boardViewMode: BoardViewMode;
-  onBoardViewModeChange: (mode: BoardViewMode) => void;
 }
 
 // Shared styles for header control containers
@@ -55,8 +53,6 @@ export function BoardHeader({
   onShowBoardBackground,
   onShowCompletedModal,
   completedCount,
-  boardViewMode,
-  onBoardViewModeChange,
 }: BoardHeaderProps) {
   const [showAutoModeSettings, setShowAutoModeSettings] = useState(false);
   const apiKeys = useAppStore((state) => state.apiKeys);
@@ -117,8 +113,6 @@ export function BoardHeader({
           onShowBoardBackground={onShowBoardBackground}
           onShowCompletedModal={onShowCompletedModal}
           completedCount={completedCount}
-          boardViewMode={boardViewMode}
-          onBoardViewModeChange={onBoardViewModeChange}
         />
       </div>
       <div className="flex gap-2 items-center">

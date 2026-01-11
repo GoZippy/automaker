@@ -18,6 +18,7 @@ export {
   getValidationPath,
   getAppSpecPath,
   getBranchTrackingPath,
+  getExecutionStatePath,
   ensureAutomakerDir,
   getGlobalSettingsPath,
   getCredentialsPath,
