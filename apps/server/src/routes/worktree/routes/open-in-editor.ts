@@ -4,25 +4,34 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { homedir } from 'os';
-import { isAbsolute } from 'path';
+import { isAbsolute, join } from 'path';
+import { access } from 'fs/promises';
 import type { EditorInfo } from '@automaker/types';
 import { getErrorMessage, logError } from '../common.js';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
+// Cache with TTL for editor detection
 let cachedEditor: EditorInfo | null = null;
 let cachedEditors: EditorInfo[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function isCacheValid(): boolean {
+  return Date.now() - cacheTimestamp < CACHE_TTL_MS;
+}
 
 /**
  * Check if a CLI command exists in PATH
+ * Uses execFile to avoid shell injection
  */
 async function commandExists(cmd: string): Promise<boolean> {
   try {
-    await execAsync(process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`);
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+    await execFileAsync(whichCmd, [cmd]);
     return true;
   } catch {
     return false;
@@ -31,24 +40,25 @@ async function commandExists(cmd: string): Promise<boolean> {
 
 /**
  * Check if a macOS app bundle exists and return the path if found
- * Checks both /Applications and ~/Applications
+ * Uses Node fs methods instead of shell commands for safety
  */
 async function findMacApp(appName: string): Promise<string | null> {
   if (process.platform !== 'darwin') return null;
 
   // Check /Applications first
+  const systemAppPath = join('/Applications', `${appName}.app`);
   try {
-    await execAsync(`test -d "/Applications/${appName}.app"`);
-    return `/Applications/${appName}.app`;
+    await access(systemAppPath);
+    return systemAppPath;
   } catch {
     // Not in /Applications
   }
 
   // Check ~/Applications (used by JetBrains Toolbox and others)
+  const userAppPath = join(homedir(), 'Applications', `${appName}.app`);
   try {
-    const homeDir = homedir();
-    await execAsync(`test -d "${homeDir}/Applications/${appName}.app"`);
-    return `${homeDir}/Applications/${appName}.app`;
+    await access(userAppPath);
+    return userAppPath;
   } catch {
     return null;
   }
@@ -81,8 +91,8 @@ async function findEditor(
 }
 
 async function detectAllEditors(): Promise<EditorInfo[]> {
-  // Return cached result if available
-  if (cachedEditors) {
+  // Return cached result if still valid
+  if (cachedEditors && isCacheValid()) {
     return cachedEditors;
   }
 
@@ -121,6 +131,7 @@ async function detectAllEditors(): Promise<EditorInfo[]> {
   }
 
   cachedEditors = editors;
+  cacheTimestamp = Date.now();
   return editors;
 }
 

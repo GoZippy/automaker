@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Copy,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus } from '../types';
 import { TooltipWrapper } from './tooltip-wrapper';
@@ -249,7 +250,14 @@ export function WorktreeActionsDropdown({
               })}
               {otherEditors.length > 0 && <DropdownMenuSeparator />}
               <DropdownMenuItem
-                onClick={() => navigator.clipboard.writeText(worktree.path)}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(worktree.path);
+                    toast.success('Path copied to clipboard');
+                  } catch {
+                    toast.error('Failed to copy path to clipboard');
+                  }
+                }}
                 className="text-xs"
               >
                 <Copy className="w-3.5 h-3.5 mr-2" />
