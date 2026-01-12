@@ -310,6 +310,7 @@ export function OpencodeSettingsTab() {
           isSaving={isSaving}
           onDefaultModelChange={handleDefaultModelChange}
           onModelToggle={handleModelToggle}
+          providers={cachedOpencodeProviders as OpenCodeProviderInfo[]}
           dynamicModels={dynamicOpencodeModels}
           enabledDynamicModelIds={enabledDynamicModelIds}
           onDynamicModelToggle={handleDynamicModelToggle}
