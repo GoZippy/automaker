@@ -24,6 +24,22 @@ export class ClaudeUsageService {
   private isLinux = os.platform() === 'linux';
 
   /**
+   * Kill a PTY process with platform-specific handling.
+   * Windows doesn't support Unix signals like SIGTERM, so we call kill() without arguments.
+   * On Unix-like systems (macOS, Linux), we can specify the signal.
+   *
+   * @param ptyProcess - The PTY process to kill
+   * @param signal - The signal to send on Unix-like systems (default: 'SIGTERM')
+   */
+  private killPtyProcess(ptyProcess: pty.IPty, signal: string = 'SIGTERM'): void {
+    if (this.isWindows) {
+      ptyProcess.kill();
+    } else {
+      ptyProcess.kill(signal);
+    }
+  }
+
+  /**
    * Check if Claude CLI is available on the system
    */
   async isAvailable(): Promise<boolean> {
@@ -211,7 +227,7 @@ export class ClaudeUsageService {
         if (!settled) {
           settled = true;
           if (ptyProcess && !ptyProcess.killed) {
-            ptyProcess.kill();
+            this.killPtyProcess(ptyProcess);
           }
           // Don't fail if we have data - return it instead
           if (output.includes('Current session')) {
@@ -253,7 +269,7 @@ export class ClaudeUsageService {
           if (!settled) {
             settled = true;
             if (ptyProcess && !ptyProcess.killed) {
-              ptyProcess.kill();
+              this.killPtyProcess(ptyProcess);
             }
             reject(
               new Error(
@@ -277,9 +293,10 @@ export class ClaudeUsageService {
               ptyProcess.write('\x1b'); // Send escape key
 
               // Fallback: if ESC doesn't exit (Linux), use SIGTERM after 2s
+              // Windows doesn't support signals, so killPtyProcess handles platform differences
               setTimeout(() => {
                 if (!settled && ptyProcess && !ptyProcess.killed) {
-                  ptyProcess.kill('SIGTERM');
+                  this.killPtyProcess(ptyProcess);
                 }
               }, 2000);
             }

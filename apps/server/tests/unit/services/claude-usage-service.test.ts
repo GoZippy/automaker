@@ -586,6 +586,8 @@ Resets in 2h
 
     it('should send SIGTERM after ESC if process does not exit', async () => {
       vi.useFakeTimers();
+      // Mock Unix platform to test SIGTERM behavior (Windows calls kill() without signal)
+      vi.mocked(os.platform).mockReturnValue('darwin');
       const ptyService = new ClaudeUsageService();
 
       let dataCallback: Function | undefined;

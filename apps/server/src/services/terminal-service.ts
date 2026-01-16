@@ -70,6 +70,23 @@ export class TerminalService extends EventEmitter {
   private sessions: Map<string, TerminalSession> = new Map();
   private dataCallbacks: Set<DataCallback> = new Set();
   private exitCallbacks: Set<ExitCallback> = new Set();
+  private isWindows = os.platform() === 'win32';
+
+  /**
+   * Kill a PTY process with platform-specific handling.
+   * Windows doesn't support Unix signals like SIGTERM/SIGKILL, so we call kill() without arguments.
+   * On Unix-like systems (macOS, Linux), we can specify the signal.
+   *
+   * @param ptyProcess - The PTY process to kill
+   * @param signal - The signal to send on Unix-like systems (default: 'SIGTERM')
+   */
+  private killPtyProcess(ptyProcess: pty.IPty, signal: string = 'SIGTERM'): void {
+    if (this.isWindows) {
+      ptyProcess.kill();
+    } else {
+      ptyProcess.kill(signal);
+    }
+  }
 
   /**
    * Detect the best shell for the current platform
@@ -477,8 +494,9 @@ export class TerminalService extends EventEmitter {
       }
 
       // First try graceful SIGTERM to allow process cleanup
+      // On Windows, killPtyProcess calls kill() without signal since Windows doesn't support Unix signals
       logger.info(`Session ${sessionId} sending SIGTERM`);
-      session.pty.kill('SIGTERM');
+      this.killPtyProcess(session.pty, 'SIGTERM');
 
       // Schedule SIGKILL fallback if process doesn't exit gracefully
       // The onExit handler will remove session from map when it actually exits
@@ -486,7 +504,7 @@ export class TerminalService extends EventEmitter {
         if (this.sessions.has(sessionId)) {
           logger.info(`Session ${sessionId} still alive after SIGTERM, sending SIGKILL`);
           try {
-            session.pty.kill('SIGKILL');
+            this.killPtyProcess(session.pty, 'SIGKILL');
           } catch {
             // Process may have already exited
           }
@@ -588,7 +606,8 @@ export class TerminalService extends EventEmitter {
         if (session.flushTimeout) {
           clearTimeout(session.flushTimeout);
         }
-        session.pty.kill();
+        // Use platform-specific kill to ensure proper termination on Windows
+        this.killPtyProcess(session.pty);
       } catch {
         // Ignore errors during cleanup
       }
