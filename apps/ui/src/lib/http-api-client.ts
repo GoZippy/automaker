@@ -156,6 +156,12 @@ const getServerUrl = (): string => {
   if (typeof window !== 'undefined') {
     const envUrl = import.meta.env.VITE_SERVER_URL;
     if (envUrl) return envUrl;
+
+    // In web mode (not Electron), use relative URL to leverage Vite proxy
+    // This avoids CORS issues since requests appear same-origin
+    if (!window.electron) {
+      return '';
+    }
   }
   // Use VITE_HOSTNAME if set, otherwise default to localhost
   const hostname = import.meta.env.VITE_HOSTNAME || 'localhost';
