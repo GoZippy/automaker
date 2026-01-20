@@ -1287,6 +1287,8 @@ export interface Credentials {
     google: string;
     /** OpenAI API key (for compatibility or alternative providers) */
     openai: string;
+    /** z.ai API key (for GLM models and usage tracking) */
+    zai: string;
   };
 }
 
@@ -1615,6 +1617,7 @@ export const DEFAULT_CREDENTIALS: Credentials = {
     anthropic: '',
     google: '',
     openai: '',
+    zai: '',
   },
 };
 
