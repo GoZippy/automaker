@@ -19,6 +19,8 @@ export type {
   McpHttpServerConfig,
   AgentDefinition,
   ReasoningEffort,
+  // System prompt configuration for CLAUDE.md auto-loading
+  SystemPromptPreset,
 } from './provider.js';
 
 // Provider constants and utilities
@@ -34,6 +36,10 @@ export type {
   CodexApprovalPolicy,
   CodexCliConfig,
   CodexAuthStatus,
+  // Event types for CLI event parsing
+  CodexEventType,
+  CodexItemType,
+  CodexEvent,
 } from './codex.js';
 export * from './codex-models.js';
 

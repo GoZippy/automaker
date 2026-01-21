@@ -636,10 +636,12 @@ export function BoardView() {
         const result = await api.features.bulkUpdate(currentProject.path, featureIds, finalUpdates);
 
         if (result.success) {
-          // Update local state
+          // Update local Zustand state
           featureIds.forEach((featureId) => {
             updateFeature(featureId, finalUpdates);
           });
+          // Invalidate React Query cache to ensure features are refetched with updated data
+          loadFeatures();
           toast.success(`Updated ${result.updatedCount} features`);
           exitSelectionMode();
         } else {
@@ -661,6 +663,7 @@ export function BoardView() {
       addAndSelectWorktree,
       currentWorktreeBranch,
       setWorktreeRefreshKey,
+      loadFeatures,
     ]
   );
 
@@ -1493,6 +1496,7 @@ export function BoardView() {
         branchSuggestions={branchSuggestions}
         branchCardCounts={branchCardCounts}
         currentBranch={currentWorktreeBranch || undefined}
+        projectPath={currentProject?.path}
       />
 
       {/* Board Background Modal */}
@@ -1542,6 +1546,7 @@ export function BoardView() {
         isMaximized={isMaximized}
         parentFeature={spawnParentFeature}
         allFeatures={hookFeatures}
+        projectPath={currentProject?.path}
         // When setting is enabled and a non-main worktree is selected, pass its branch to default to 'custom' work mode
         selectedNonMainWorktreeBranch={
           addFeatureUseSelectedWorktreeBranch && currentWorktreePath !== null
@@ -1572,6 +1577,7 @@ export function BoardView() {
         currentBranch={currentWorktreeBranch || undefined}
         isMaximized={isMaximized}
         allFeatures={hookFeatures}
+        projectPath={currentProject?.path}
       />
 
       {/* Agent Output Modal */}
