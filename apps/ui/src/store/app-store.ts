@@ -682,6 +682,9 @@ export interface AppState {
   serverLogLevel: ServerLogLevel; // Log level for the API server (error, warn, info, debug)
   enableRequestLogging: boolean; // Enable HTTP request logging (Morgan)
 
+  // Developer Tools Settings
+  showQueryDevtools: boolean; // Show React Query DevTools panel (only in development mode)
+
   // Enhancement Model Settings
   enhancementModel: ModelAlias; // Model used for feature enhancement (default: sonnet)
 
@@ -1168,6 +1171,9 @@ export interface AppActions {
   setServerLogLevel: (level: ServerLogLevel) => void;
   setEnableRequestLogging: (enabled: boolean) => void;
 
+  // Developer Tools actions
+  setShowQueryDevtools: (show: boolean) => void;
+
   // Enhancement Model actions
   setEnhancementModel: (model: ModelAlias) => void;
 
@@ -1472,6 +1478,7 @@ const initialState: AppState = {
   muteDoneSound: false, // Default to sound enabled (not muted)
   serverLogLevel: 'info', // Default to info level for server logs
   enableRequestLogging: true, // Default to enabled for HTTP request logging
+  showQueryDevtools: true, // Default to enabled (only shown in dev mode anyway)
   enhancementModel: 'claude-sonnet', // Default to sonnet for feature enhancement
   validationModel: 'claude-opus', // Default to opus for GitHub issue validation
   phaseModels: DEFAULT_PHASE_MODELS, // Phase-specific model configuration
@@ -2592,6 +2599,9 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
   // Server Log Level actions
   setServerLogLevel: (level) => set({ serverLogLevel: level }),
   setEnableRequestLogging: (enabled) => set({ enableRequestLogging: enabled }),
+
+  // Developer Tools actions
+  setShowQueryDevtools: (show) => set({ showQueryDevtools: show }),
 
   // Enhancement Model actions
   setEnhancementModel: (model) => set({ enhancementModel: model }),

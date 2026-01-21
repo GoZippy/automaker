@@ -863,6 +863,10 @@ export interface GlobalSettings {
   /** Enable HTTP request logging (Morgan). Default: true */
   enableRequestLogging?: boolean;
 
+  // Developer Tools
+  /** Show React Query DevTools panel (only in development mode). Default: true */
+  showQueryDevtools?: boolean;
+
   // AI Commit Message Generation
   /** Enable AI-generated commit messages when opening commit dialog (default: true) */
   enableAiCommitMessages: boolean;
@@ -1286,6 +1290,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   muteDoneSound: false,
   serverLogLevel: 'info',
   enableRequestLogging: true,
+  showQueryDevtools: true,
   enableAiCommitMessages: true,
   phaseModels: DEFAULT_PHASE_MODELS,
   enhancementModel: 'sonnet', // Legacy alias still supported
