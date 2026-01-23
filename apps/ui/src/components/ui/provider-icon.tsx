@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from 'react';
+import { useId, type ComponentType, type SVGProps } from 'react';
 import { cn } from '@/lib/utils';
 import type { AgentModel, ModelProvider } from '@automaker/types';
 import { getProviderFromModel } from '@/lib/utils';
@@ -166,8 +166,49 @@ export function CursorIcon(props: Omit<ProviderIconProps, 'provider'>) {
   return <ProviderIcon provider={PROVIDER_ICON_KEYS.cursor} {...props} />;
 }
 
-export function GeminiIcon(props: Omit<ProviderIconProps, 'provider'>) {
-  return <ProviderIcon provider={PROVIDER_ICON_KEYS.gemini} {...props} />;
+const GEMINI_GRADIENT_STOPS = [
+  { offset: '0%', color: '#4285F4' },
+  { offset: '33%', color: '#EA4335' },
+  { offset: '66%', color: '#FBBC04' },
+  { offset: '100%', color: '#34A853' },
+] as const;
+
+export function GeminiIcon({ title, className, ...props }: Omit<ProviderIconProps, 'provider'>) {
+  const definition = PROVIDER_ICON_DEFINITIONS[PROVIDER_ICON_KEYS.gemini];
+  const gradientId = useId();
+  const {
+    role,
+    'aria-label': ariaLabel,
+    'aria-labelledby': ariaLabelledby,
+    'aria-hidden': ariaHidden,
+    ...rest
+  } = props;
+  const hasAccessibleLabel = Boolean(title || ariaLabel || ariaLabelledby);
+
+  return (
+    <svg
+      viewBox={definition.viewBox}
+      className={cn('inline-block', className)}
+      role={role ?? (hasAccessibleLabel ? 'img' : 'presentation')}
+      aria-hidden={ariaHidden ?? !hasAccessibleLabel}
+      focusable="false"
+      {...rest}
+    >
+      {title && <title>{title}</title>}
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+          {GEMINI_GRADIENT_STOPS.map((stop) => (
+            <stop
+              key={stop.offset}
+              offset={stop.offset}
+              style={{ stopColor: stop.color, stopOpacity: 1 }}
+            />
+          ))}
+        </linearGradient>
+      </defs>
+      <path d={definition.path} fill={`url(#${gradientId})`} fillRule={definition.fillRule} />
+    </svg>
+  );
 }
 
 export function GrokIcon(props: Omit<ProviderIconProps, 'provider'>) {
