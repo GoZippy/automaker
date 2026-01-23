@@ -90,6 +90,11 @@ function computeHealthStatus(
     return 'active';
   }
 
+  // Pending work but no active execution
+  if (featureCounts.pending > 0) {
+    return 'waiting';
+  }
+
   // If all features are completed or verified
   if (totalFeatures > 0 && featureCounts.pending === 0 && featureCounts.running === 0) {
     return 'completed';

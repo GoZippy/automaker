@@ -66,7 +66,7 @@ export function RunningAgentsPanel({ projects }: RunningAgentsPanelProps) {
   );
 
   const handleAgentKeyDown = useCallback(
-    (e: React.KeyboardEvent, agent: RunningAgentInfo) => {
+    (e: React.KeyboardEvent, agent: RunningAgent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         handleAgentClick(agent);
