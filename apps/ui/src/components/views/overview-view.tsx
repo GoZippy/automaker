@@ -5,7 +5,6 @@
  * recent completions, and alerts. Quick navigation to any project or feature.
  */
 
-import { useNavigate } from '@tanstack/react-router';
 import { useMultiProjectStatus } from '@/hooks/use-multi-project-status';
 import { isElectron } from '@/lib/electron';
 import { isMac } from '@/lib/utils';
@@ -25,16 +24,10 @@ import {
   Clock,
   Bot,
   Bell,
-  ArrowLeft,
 } from 'lucide-react';
 
 export function OverviewView() {
-  const navigate = useNavigate();
   const { overview, isLoading, error, refresh } = useMultiProjectStatus(15000); // Refresh every 15s
-
-  const handleBackToDashboard = () => {
-    navigate({ to: '/dashboard' });
-  };
 
   return (
     <div className="flex-1 flex flex-col h-screen content-bg" data-testid="overview-view">
@@ -49,15 +42,12 @@ export function OverviewView() {
         )}
         <div className="px-4 sm:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3 titlebar-no-drag">
-            <Button variant="ghost" size="icon" onClick={handleBackToDashboard} className="h-8 w-8">
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-brand-500/10 flex items-center justify-center">
                 <LayoutDashboard className="w-4 h-4 text-brand-500" />
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-foreground">Projects Overview</h1>
+                <h1 className="text-lg font-semibold text-foreground">Dashboard</h1>
                 <p className="text-xs text-muted-foreground">
                   {overview ? `${overview.aggregate.projectCounts.total} projects` : 'Loading...'}
                 </p>
@@ -222,9 +212,9 @@ export function OverviewView() {
                       <p className="text-sm text-muted-foreground mb-4">
                         Create or open a project to get started
                       </p>
-                      <Button variant="outline" onClick={handleBackToDashboard}>
-                        Go to Dashboard
-                      </Button>
+                      <p className="text-sm text-muted-foreground">
+                        Use the sidebar to create or open a project
+                      </p>
                     </CardContent>
                   </Card>
                 ) : (
