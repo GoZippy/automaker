@@ -286,9 +286,20 @@ Your entire response should be valid JSON starting with { and ending with }. No 
       contentForParsing = JSON.stringify(extracted);
       logger.info('✅ Pre-extracted JSON from text response');
     } else {
-      // Fall back to raw text (let parseAndCreateFeatures try its extraction)
-      contentForParsing = rawText;
-      logger.warn('⚠️ Could not pre-extract JSON, passing raw text to parser');
+      // If pre-extraction fails, we know the next step will also fail.
+      // Throw an error here to avoid redundant parsing and make the failure point clearer.
+      logger.error(
+        '❌ Could not extract features JSON from model response. Full response text was:\n' +
+          rawText
+      );
+      const errorMessage =
+        'Failed to parse features from model response: No valid JSON with a "features" array found.';
+      events.emit('spec-regeneration:event', {
+        type: 'spec_regeneration_error',
+        error: errorMessage,
+        projectPath: projectPath,
+      });
+      throw new Error(errorMessage);
     }
   }
 

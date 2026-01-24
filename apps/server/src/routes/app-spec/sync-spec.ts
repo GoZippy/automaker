@@ -261,7 +261,7 @@ CRITICAL INSTRUCTIONS:
 
     if (techResult.structured_output) {
       // Use structured output from Claude/Codex models
-      const structured = techResult.structured_output as TechStackExtractionResult;
+      const structured = techResult.structured_output as unknown as TechStackExtractionResult;
       if (Array.isArray(structured.technologies)) {
         parsedTechnologies = structured.technologies;
         logger.info('✅ Received structured output for tech analysis');
