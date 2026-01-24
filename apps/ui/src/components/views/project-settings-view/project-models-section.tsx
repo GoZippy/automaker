@@ -349,7 +349,9 @@ function PhaseGroup({
     </div>
   );
 }
-
+/**
+ * Renders the per-project model overrides UI for all phase models.
+ */
 export function ProjectModelsSection({ project }: ProjectModelsSectionProps) {
   const { clearAllProjectPhaseModelOverrides, disabledProviders, claudeCompatibleProviders } =
     useAppStore();
@@ -360,24 +362,9 @@ export function ProjectModelsSection({ project }: ProjectModelsSectionProps) {
   const hasDefaultFeatureModelOverride = !!project.defaultFeatureModel;
   const overrideCount = phaseOverrideCount + (hasDefaultFeatureModelOverride ? 1 : 0);
 
-  // Check if Claude is available
-  const isClaudeDisabled = disabledProviders.includes('claude');
-
   // Check if there are any enabled ClaudeCompatibleProviders
   const hasEnabledProviders =
     claudeCompatibleProviders && claudeCompatibleProviders.some((p) => p.enabled !== false);
-
-  if (isClaudeDisabled) {
-    return (
-      <div className="text-center py-12 text-muted-foreground">
-        <Workflow className="w-12 h-12 mx-auto mb-3 opacity-50" />
-        <p className="text-sm">Claude not configured</p>
-        <p className="text-xs mt-1">
-          Enable Claude in global settings to configure per-project model overrides.
-        </p>
-      </div>
-    );
-  }
 
   const handleClearAll = () => {
     clearAllProjectPhaseModelOverrides(project.id);
