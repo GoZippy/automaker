@@ -10,6 +10,11 @@ import { getErrorMessage, logError } from '../common.js';
 
 const logger = createLogger('ideation:suggestions-generate');
 
+/**
+ * Creates an Express route handler for generating AI-powered ideation suggestions.
+ * Accepts a prompt, category, and optional context sources configuration,
+ * then returns structured suggestions that can be added to the board.
+ */
 export function createSuggestionsGenerateHandler(ideationService: IdeationService) {
   return async (req: Request, res: Response): Promise<void> => {
     try {

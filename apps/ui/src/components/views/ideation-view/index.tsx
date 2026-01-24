@@ -62,7 +62,10 @@ function IdeationBreadcrumbs({
   );
 }
 
-// Header shown on all pages - matches other view headers
+/**
+ * Header component for the ideation view with navigation, bulk actions, and settings.
+ * Displays breadcrumbs, accept/discard all buttons, and the generate ideas button with settings popover.
+ */
 function IdeationHeader({
   currentMode,
   selectedCategory,
@@ -172,6 +175,11 @@ function IdeationHeader({
   );
 }
 
+/**
+ * Main view for brainstorming and idea management.
+ * Provides a dashboard for reviewing generated ideas and a prompt selection flow
+ * for generating new ideas using AI-powered suggestions.
+ */
 export function IdeationView() {
   const currentProject = useAppStore((s) => s.currentProject);
   const { currentMode, selectedCategory, setMode, setCategory } = useIdeationStore();
