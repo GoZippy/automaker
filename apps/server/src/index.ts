@@ -139,8 +139,9 @@ const BOX_CONTENT_WIDTH = 67;
       logger.info('✓ Claude Code CLI authentication detected');
       return;
     }
-  } catch {
+  } catch (error) {
     // Ignore errors checking CLI auth - will fall through to warning
+    logger.warn('Error checking for Claude Code CLI authentication:', error);
   }
 
   // No authentication found - show warning
