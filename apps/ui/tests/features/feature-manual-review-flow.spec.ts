@@ -90,7 +90,9 @@ test.describe('Feature Manual Review Flow', () => {
 
         // Add to projects if not already there
         const existingProjects = json.settings.projects || [];
-        const hasProject = existingProjects.some((p: any) => p.path === projectPath);
+        const hasProject = existingProjects.some(
+          (p: { id: string; path: string }) => p.path === projectPath
+        );
         if (!hasProject) {
           json.settings.projects = [testProject, ...existingProjects];
         }

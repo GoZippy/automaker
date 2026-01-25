@@ -1,6 +1,5 @@
-// @ts-nocheck - graph view page with feature filtering and visualization state
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { useAppStore, Feature } from '@/store/app-store';
+import { useAppStore, Feature, FeatureImagePath } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
 import { GraphView } from './graph-view';
 import {
@@ -236,7 +235,7 @@ export function GraphViewPage() {
   // Follow-up state (simplified for graph view)
   const [followUpFeature, setFollowUpFeature] = useState<Feature | null>(null);
   const [followUpPrompt, setFollowUpPrompt] = useState('');
-  const [followUpImagePaths, setFollowUpImagePaths] = useState<any[]>([]);
+  const [followUpImagePaths, setFollowUpImagePaths] = useState<FeatureImagePath[]>([]);
   const [, setFollowUpPreviewMap] = useState<Map<string, string>>(new Map());
 
   // In-progress features for shortcuts

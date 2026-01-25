@@ -31,9 +31,15 @@ import type {
   ConvertToFeatureOptions,
   NotificationsAPI,
   EventHistoryAPI,
+  CreatePROptions,
 } from './electron';
-import type { IdeationContextSources } from '@automaker/types';
-import type { EventHistoryFilter } from '@automaker/types';
+import type {
+  IdeationContextSources,
+  EventHistoryFilter,
+  IdeationStreamEvent,
+  IdeationAnalysisEvent,
+  Notification,
+} from '@automaker/types';
 import type { Message, SessionListItem } from '@/types/electron';
 import type { Feature, ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
@@ -131,9 +137,7 @@ export const handleServerOffline = (): void => {
  * Must be called early in Electron mode before making API requests.
  */
 export const initServerUrl = async (): Promise<void> => {
-  // window.electronAPI is typed as ElectronAPI, but some Electron-only helpers
-  // (like getServerUrl) are not part of the shared interface. Narrow via `any`.
-  const electron = typeof window !== 'undefined' ? (window.electronAPI as any) : null;
+  const electron = typeof window !== 'undefined' ? window.electronAPI : null;
   if (electron?.getServerUrl) {
     try {
       cachedServerUrl = await electron.getServerUrl();
@@ -249,7 +253,7 @@ export const isElectronMode = (): boolean => {
   // Prefer a stable runtime marker from preload.
   // In some dev/electron setups, method availability can be temporarily undefined
   // during early startup, but `isElectron` remains reliable.
-  const api = window.electronAPI as any;
+  const api = window.electronAPI;
   return api?.isElectron === true || !!api?.getApiKey;
 };
 
@@ -266,7 +270,7 @@ export const checkExternalServerMode = async (): Promise<boolean> => {
   }
 
   if (typeof window !== 'undefined') {
-    const api = window.electronAPI as any;
+    const api = window.electronAPI;
     if (api?.isExternalServerMode) {
       try {
         cachedExternalServerMode = Boolean(await api.isExternalServerMode());
@@ -2035,7 +2039,7 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/generate-commit-message', { worktreePath }),
     push: (worktreePath: string, force?: boolean, remote?: string) =>
       this.post('/api/worktree/push', { worktreePath, force, remote }),
-    createPR: (worktreePath: string, options?: any) =>
+    createPR: (worktreePath: string, options?: CreatePROptions) =>
       this.post('/api/worktree/create-pr', { worktreePath, ...options }),
     getDiffs: (projectPath: string, featureId: string) =>
       this.post('/api/worktree/diffs', { projectPath, featureId }),
@@ -2762,18 +2766,18 @@ export class HttpApiClient implements ElectronAPI {
 
     getPrompts: () => this.get('/api/ideation/prompts'),
 
-    onStream: (callback: (event: any) => void): (() => void) => {
+    onStream: (callback: (event: IdeationStreamEvent) => void): (() => void) => {
       return this.subscribeToEvent('ideation:stream', callback as EventCallback);
     },
 
-    onAnalysisEvent: (callback: (event: any) => void): (() => void) => {
+    onAnalysisEvent: (callback: (event: IdeationAnalysisEvent) => void): (() => void) => {
       return this.subscribeToEvent('ideation:analysis', callback as EventCallback);
     },
   };
 
   // Notifications API - project-level notifications
   notifications: NotificationsAPI & {
-    onNotificationCreated: (callback: (notification: any) => void) => () => void;
+    onNotificationCreated: (callback: (notification: Notification) => void) => () => void;
   } = {
     list: (projectPath: string) => this.post('/api/notifications/list', { projectPath }),
 
@@ -2786,7 +2790,7 @@ export class HttpApiClient implements ElectronAPI {
     dismiss: (projectPath: string, notificationId?: string) =>
       this.post('/api/notifications/dismiss', { projectPath, notificationId }),
 
-    onNotificationCreated: (callback: (notification: any) => void): (() => void) => {
+    onNotificationCreated: (callback: (notification: Notification) => void): (() => void) => {
       return this.subscribeToEvent('notification:created', callback as EventCallback);
     },
   };

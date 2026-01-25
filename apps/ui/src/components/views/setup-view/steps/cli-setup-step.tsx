@@ -1,4 +1,3 @@
-// @ts-nocheck - CLI setup wizard with step validation and setup store state
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +44,33 @@ type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'error';
 
 type CliSetupAuthStatus = ClaudeAuthStatus | CodexAuthStatus;
 
+interface CliStatusApiResponse {
+  success: boolean;
+  status?: 'installed' | 'not_installed';
+  installed?: boolean;
+  method?: string;
+  version?: string;
+  path?: string;
+  auth?: {
+    authenticated: boolean;
+    method: string;
+    hasCredentialsFile?: boolean;
+    hasStoredOAuthToken?: boolean;
+    hasStoredApiKey?: boolean;
+    hasEnvApiKey?: boolean;
+    hasEnvOAuthToken?: boolean;
+    hasAuthFile?: boolean;
+    hasApiKey?: boolean;
+  };
+  error?: string;
+}
+
+interface InstallApiResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
 interface CliSetupConfig {
   cliType: ModelProvider;
   displayName: string;
@@ -73,8 +99,8 @@ interface CliSetupConfig {
   buildCliAuthStatus: (previous: CliSetupAuthStatus | null) => CliSetupAuthStatus;
   buildApiKeyAuthStatus: (previous: CliSetupAuthStatus | null) => CliSetupAuthStatus;
   buildClearedAuthStatus: (previous: CliSetupAuthStatus | null) => CliSetupAuthStatus;
-  statusApi: () => Promise<any>;
-  installApi: () => Promise<any>;
+  statusApi: () => Promise<CliStatusApiResponse>;
+  installApi: () => Promise<InstallApiResponse>;
   verifyAuthApi: (
     method: 'cli' | 'api_key',
     apiKey?: string

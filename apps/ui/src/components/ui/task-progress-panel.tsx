@@ -9,6 +9,7 @@ import { Check, Circle, ChevronDown, ChevronRight, FileCode } from 'lucide-react
 import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
 import type { AutoModeEvent } from '@/types/electron';
+import type { Feature, ParsedTask } from '@automaker/types';
 import { Badge } from '@/components/ui/badge';
 
 interface TaskInfo {
@@ -53,26 +54,29 @@ export function TaskProgressPanel({
       }
 
       const result = await api.features.get(projectPath, featureId);
-      const feature: any = (result as any).feature;
+      const feature = (result as { success: boolean; feature?: Feature }).feature;
       if (result.success && feature?.planSpec?.tasks) {
-        const planSpec = feature.planSpec as any;
-        const planTasks = planSpec.tasks;
+        const planSpec = feature.planSpec;
+        const planTasks = planSpec.tasks; // Already guarded by the if condition above
         const currentId = planSpec.currentTaskId;
         const completedCount = planSpec.tasksCompleted || 0;
 
         // Convert planSpec tasks to TaskInfo with proper status
-        const initialTasks: TaskInfo[] = planTasks.map((t: any, index: number) => ({
-          id: t.id,
-          description: t.description,
-          filePath: t.filePath,
-          phase: t.phase,
-          status:
-            index < completedCount
-              ? ('completed' as const)
-              : t.id === currentId
-                ? ('in_progress' as const)
-                : ('pending' as const),
-        }));
+        // planTasks is guaranteed to be defined due to the if condition check
+        const initialTasks: TaskInfo[] = (planTasks as ParsedTask[]).map(
+          (t: ParsedTask, index: number) => ({
+            id: t.id,
+            description: t.description,
+            filePath: t.filePath,
+            phase: t.phase,
+            status:
+              index < completedCount
+                ? ('completed' as const)
+                : t.id === currentId
+                  ? ('in_progress' as const)
+                  : ('pending' as const),
+          })
+        );
 
         setTasks(initialTasks);
         setCurrentTaskId(currentId || null);

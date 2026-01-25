@@ -1,15 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { getElectronAPI } from '@/lib/electron';
 import { createLogger } from '@automaker/utils/logger';
+import type { Feature } from '@/store/app-store';
 
 const logger = createLogger('BoardEffects');
 
 interface UseBoardEffectsProps {
-  currentProject: { path: string; id: string } | null;
+  currentProject: { path: string; id: string; name?: string } | null;
   specCreatingForProject: string | null;
   setSpecCreatingForProject: (path: string | null) => void;
   checkContextExists: (featureId: string) => Promise<boolean>;
-  features: any[];
+  features: Feature[];
   isLoading: boolean;
   featuresWithContext: Set<string>;
   setFeaturesWithContext: (set: Set<string>) => void;
@@ -33,10 +34,10 @@ export function useBoardEffects({
   // Make current project available globally for modal
   useEffect(() => {
     if (currentProject) {
-      (window as any).__currentProject = currentProject;
+      window.__currentProject = currentProject;
     }
     return () => {
-      (window as any).__currentProject = null;
+      window.__currentProject = null;
     };
   }, [currentProject]);
 

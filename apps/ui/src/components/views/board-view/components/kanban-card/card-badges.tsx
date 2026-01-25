@@ -98,13 +98,11 @@ export const PriorityBadges = memo(function PriorityBadges({
       return;
     }
 
-    // eslint-disable-next-line no-undef
     const interval = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
 
     return () => {
-      // eslint-disable-next-line no-undef
       clearInterval(interval);
     };
   }, [feature.justFinishedAt, feature.status, currentTime]);

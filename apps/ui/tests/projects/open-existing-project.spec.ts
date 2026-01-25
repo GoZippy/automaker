@@ -114,7 +114,9 @@ test.describe('Open Project', () => {
 
         // Add to existing projects (or create array)
         const existingProjects = json.settings.projects || [];
-        const hasProject = existingProjects.some((p: any) => p.id === projectId);
+        const hasProject = existingProjects.some(
+          (p: { id: string; path: string }) => p.id === projectId
+        );
         if (!hasProject) {
           json.settings.projects = [testProject, ...existingProjects];
         }

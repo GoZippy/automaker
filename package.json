@@ -43,6 +43,7 @@
     "lint": "npm run lint --workspace=apps/ui",
     "lint:errors": "npm run lint --workspace=apps/ui -- --quiet",
     "lint:server:errors": "npm run lint --workspace=apps/server -- --quiet",
+    "typecheck": "npm run typecheck --workspace=apps/ui",
     "test": "npm run test --workspace=apps/ui",
     "test:headed": "npm run test:headed --workspace=apps/ui",
     "test:ui": "npm run test --workspace=apps/ui -- --ui",

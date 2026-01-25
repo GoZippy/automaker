@@ -1437,10 +1437,27 @@ export interface ProviderStatus {
   };
 }
 
+/**
+ * Extended Electron API with additional Electron-specific methods
+ * that are exposed via the preload script but not part of the shared interface.
+ */
+export interface ExtendedElectronAPI extends ElectronAPI {
+  /** Runtime marker indicating Electron environment */
+  isElectron?: boolean;
+  /** Get the server URL (Electron-only) */
+  getServerUrl?: () => Promise<string>;
+  /** Get the API key (Electron-only) */
+  getApiKey?: () => Promise<string | null>;
+  /** Check if running in external server mode (Electron-only) */
+  isExternalServerMode?: () => Promise<boolean>;
+  /** Get system paths (Electron-only) */
+  getPath?: (name: 'documents' | 'home' | 'appData' | 'userData') => Promise<string>;
+}
+
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
-    isElectron: boolean;
+    electronAPI?: ExtendedElectronAPI;
+    isElectron?: boolean;
   }
 }
 

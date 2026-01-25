@@ -17,6 +17,7 @@ import { useAppStore } from '@/store/app-store';
 import { extractSummary } from '@/lib/log-parser';
 import { useAgentOutput } from '@/hooks/queries';
 import type { AutoModeEvent } from '@/types/electron';
+import type { BacklogPlanEvent } from '@automaker/types';
 
 interface AgentOutputModalProps {
   open: boolean;
@@ -48,18 +49,16 @@ export function AgentOutputModal({
   const isBacklogPlan = featureId.startsWith('backlog-plan:');
 
   // Resolve project path - prefer prop, fallback to window.__currentProject
-  const resolvedProjectPath = projectPathProp || (window as any).__currentProject?.path || '';
+  const resolvedProjectPath = projectPathProp || window.__currentProject?.path || '';
 
   // Track additional content from WebSocket events (appended to query data)
   const [streamedContent, setStreamedContent] = useState<string>('');
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
 
   // Use React Query for initial output loading
-  const { data: initialOutput = '', isLoading } = useAgentOutput(
-    resolvedProjectPath,
-    featureId,
-    open && !!resolvedProjectPath
-  );
+  const { data: initialOutput = '', isLoading } = useAgentOutput(resolvedProjectPath, featureId, {
+    enabled: open && !!resolvedProjectPath,
+  });
 
   // Reset streamed content when modal opens or featureId changes
   useEffect(() => {
@@ -262,7 +261,8 @@ export function AgentOutputModal({
     const api = getElectronAPI();
     if (!api?.backlogPlan) return;
 
-    const unsubscribe = api.backlogPlan.onEvent((event: any) => {
+    const unsubscribe = api.backlogPlan.onEvent((data: unknown) => {
+      const event = data as BacklogPlanEvent;
       if (!event?.type) return;
 
       let newContent = '';

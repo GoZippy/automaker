@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { UIEvent } from 'react';
-import { useAppStore } from '@/store/app-store';
+import { useAppStore, ChatSession } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -156,7 +156,7 @@ export function ChatHistory() {
     createChatSession();
   };
 
-  const handleSelectSession = (session: any) => {
+  const handleSelectSession = (session: ChatSession) => {
     setCurrentChatSession(session);
   };
 

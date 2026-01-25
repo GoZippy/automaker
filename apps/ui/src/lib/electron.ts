@@ -28,7 +28,11 @@ import type {
   UpdateIdeaInput,
   ConvertToFeatureOptions,
   IdeationContextSources,
+  Feature,
+  IdeationStreamEvent,
+  IdeationAnalysisEvent,
 } from '@automaker/types';
+import type { InstallProgress } from '@/store/setup-store';
 import { DEFAULT_MAX_CONCURRENCY } from '@automaker/types';
 import { getJSON, setJSON, removeItem } from './storage';
 
@@ -124,7 +128,7 @@ export interface IdeationAPI {
     projectPath: string,
     ideaId: string,
     options?: ConvertToFeatureOptions
-  ) => Promise<{ success: boolean; feature?: any; featureId?: string; error?: string }>;
+  ) => Promise<{ success: boolean; feature?: Feature; featureId?: string; error?: string }>;
 
   // Add suggestion directly to board as feature
   addSuggestionToBoard: (
@@ -141,8 +145,8 @@ export interface IdeationAPI {
   }>;
 
   // Event subscriptions
-  onStream: (callback: (event: any) => void) => () => void;
-  onAnalysisEvent: (callback: (event: any) => void) => () => void;
+  onStream: (callback: (event: IdeationStreamEvent) => void) => () => void;
+  onAnalysisEvent: (callback: (event: IdeationAnalysisEvent) => void) => () => void;
 }
 
 export interface FileEntry {
@@ -186,6 +190,16 @@ export interface StatResult {
   error?: string;
 }
 
+// Options for creating a pull request
+export interface CreatePROptions {
+  projectPath?: string;
+  commitMessage?: string;
+  prTitle?: string;
+  prBody?: string;
+  baseBranch?: string;
+  draft?: boolean;
+}
+
 // Re-export types from electron.d.ts for external use
 export type {
   AutoModeEvent,
@@ -211,9 +225,6 @@ import type {
 
 // Import HTTP API client (ES module)
 import { getHttpApiClient, getServerUrlSync } from './http-api-client';
-
-// Feature type - Import from app-store
-import type { Feature } from '@/store/app-store';
 
 // Running Agent type
 export interface RunningAgent {
@@ -749,7 +760,7 @@ export interface ElectronAPI {
   };
   // Setup API surface is implemented by the main process and mirrored by HttpApiClient.
   // Keep this intentionally loose to avoid tight coupling between front-end and server types.
-  setup?: any;
+  setup?: SetupAPI;
   agent?: {
     start: (
       sessionId: string,
@@ -950,13 +961,11 @@ export const isElectron = (): boolean => {
     return false;
   }
 
-  const w = window as any;
-
-  if (w.isElectron === true) {
+  if (window.isElectron === true) {
     return true;
   }
 
-  return !!w.electronAPI?.isElectron;
+  return !!window.electronAPI?.isElectron;
 };
 
 // Check if backend server is available
@@ -1030,7 +1039,7 @@ export const getCurrentApiMode = (): 'http' => {
 
 // Debug helpers
 if (typeof window !== 'undefined') {
-  (window as any).__checkApiMode = () => {
+  window.__checkApiMode = () => {
     console.log('Current API mode:', getCurrentApiMode());
     console.log('isElectron():', isElectron());
   };
@@ -1413,8 +1422,8 @@ interface SetupAPI {
     user: string | null;
     error?: string;
   }>;
-  onInstallProgress?: (callback: (progress: any) => void) => () => void;
-  onAuthProgress?: (callback: (progress: any) => void) => () => void;
+  onInstallProgress?: (callback: (progress: InstallProgress) => void) => () => void;
+  onAuthProgress?: (callback: (progress: InstallProgress) => void) => () => void;
 }
 
 // Mock Setup API implementation
@@ -1665,7 +1674,7 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    createPR: async (worktreePath: string, options?: any) => {
+    createPR: async (worktreePath: string, options?: CreatePROptions) => {
       console.log('[Mock] Creating PR:', { worktreePath, options });
       return {
         success: true,
@@ -2927,7 +2936,7 @@ function createMockFeaturesAPI(): FeaturesAPI {
       console.log('[Mock] Getting all features for:', projectPath);
 
       // Check if test has set mock features via global variable
-      const testFeatures = (window as any).__mockFeatures;
+      const testFeatures = window.__mockFeatures;
       if (testFeatures !== undefined) {
         return { success: true, features: testFeatures };
       }

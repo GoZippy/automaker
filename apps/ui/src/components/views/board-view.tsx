@@ -1,4 +1,3 @@
-// @ts-nocheck - dnd-kit type incompatibilities with collision detection and complex state management
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import {
@@ -9,6 +8,8 @@ import {
   rectIntersection,
   pointerWithin,
   type PointerEvent as DndPointerEvent,
+  type CollisionDetection,
+  type Collision,
 } from '@dnd-kit/core';
 
 // Custom pointer sensor that ignores drag events from within dialogs
@@ -29,7 +30,7 @@ class DialogAwarePointerSensor extends PointerSensor {
 import { useAppStore, Feature } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
 import { getHttpApiClient } from '@/lib/http-api-client';
-import type { BacklogPlanResult } from '@automaker/types';
+import type { BacklogPlanResult, FeatureStatusWithPipeline } from '@automaker/types';
 import { pathsEqual } from '@/lib/utils';
 import { toast } from 'sonner';
 import { BoardBackgroundModal } from '@/components/dialogs/board-background-modal';
@@ -348,12 +349,12 @@ export function BoardView() {
   }, [currentProject, worktreeRefreshKey]);
 
   // Custom collision detection that prioritizes specific drop targets (cards, worktrees) over columns
-  const collisionDetectionStrategy = useCallback((args: any) => {
+  const collisionDetectionStrategy = useCallback((args: Parameters<CollisionDetection>[0]) => {
     const pointerCollisions = pointerWithin(args);
 
     // Priority 1: Specific drop targets (cards for dependency links, worktrees)
     // These need to be detected even if they are inside a column
-    const specificTargetCollisions = pointerCollisions.filter((collision: any) => {
+    const specificTargetCollisions = pointerCollisions.filter((collision: Collision) => {
       const id = String(collision.id);
       return id.startsWith('card-drop-') || id.startsWith('worktree-drop-');
     });
@@ -363,7 +364,7 @@ export function BoardView() {
     }
 
     // Priority 2: Columns
-    const columnCollisions = pointerCollisions.filter((collision: any) =>
+    const columnCollisions = pointerCollisions.filter((collision: Collision) =>
       COLUMNS.some((col) => col.id === collision.id)
     );
 
@@ -1094,7 +1095,7 @@ export function BoardView() {
     const columns = getColumnsWithPipeline(pipelineConfig);
     const map: Record<string, typeof hookFeatures> = {};
     for (const column of columns) {
-      map[column.id] = getColumnFeatures(column.id as any);
+      map[column.id] = getColumnFeatures(column.id as FeatureStatusWithPipeline);
     }
     return map;
   }, [pipelineConfig, getColumnFeatures]);
