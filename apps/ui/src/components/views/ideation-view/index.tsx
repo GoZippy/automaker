@@ -163,7 +163,7 @@ function IdeationHeader({
             Accept All ({acceptAllCount})
           </Button>
         )}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
           <Button onClick={onGenerateIdeas} className="gap-2">
             <Lightbulb className="w-4 h-4" />
             Generate Ideas

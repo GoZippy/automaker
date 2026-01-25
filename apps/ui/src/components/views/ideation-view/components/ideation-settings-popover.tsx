@@ -74,7 +74,7 @@ export function IdeationSettingsPopover({ projectPath }: IdeationSettingsPopover
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="p-1 rounded hover:bg-accent/50 transition-colors"
+          className="p-1 border rounded hover:bg-accent/50 transition-colors"
           title="Generation Settings"
           aria-label="Generation settings"
           data-testid="ideation-context-settings-button"
