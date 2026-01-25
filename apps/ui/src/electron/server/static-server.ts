@@ -37,7 +37,8 @@ const CONTENT_TYPES: Record<string, string> = {
  * Uses centralized electronApp methods for serving static files from app bundle.
  */
 export async function startStaticServer(): Promise<void> {
-  const staticPath = path.join(__dirname, '../../dist');
+  // __dirname is apps/ui/dist-electron (Vite bundles all into single file)
+  const staticPath = path.join(__dirname, '../dist');
 
   state.staticServer = http.createServer((request, response) => {
     let filePath = path.join(staticPath, request.url?.split('?')[0] || '/');

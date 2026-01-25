@@ -41,7 +41,8 @@ export function createWindow(): void {
     minWidth: MIN_WIDTH_COLLAPSED, // Small minimum - horizontal scrolling handles overflow
     minHeight: MIN_HEIGHT,
     webPreferences: {
-      preload: path.join(__dirname, '../preload.js'),
+      // __dirname is apps/ui/dist-electron (Vite bundles all into single file)
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },

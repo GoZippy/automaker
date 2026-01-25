@@ -55,11 +55,12 @@ export async function startServer(): Promise<void> {
   let args: string[];
   let serverPath: string;
 
+  // __dirname is apps/ui/dist-electron (Vite bundles all into single file)
   if (isDev) {
-    serverPath = path.join(__dirname, '../../../server/src/index.ts');
+    serverPath = path.join(__dirname, '../../server/src/index.ts');
 
-    const serverNodeModules = path.join(__dirname, '../../../server/node_modules/tsx');
-    const rootNodeModules = path.join(__dirname, '../../../../node_modules/tsx');
+    const serverNodeModules = path.join(__dirname, '../../server/node_modules/tsx');
+    const rootNodeModules = path.join(__dirname, '../../../node_modules/tsx');
 
     let tsxCliPath: string;
     // Check for tsx in app bundle paths
@@ -71,7 +72,7 @@ export async function startServer(): Promise<void> {
       } else {
         try {
           tsxCliPath = require.resolve('tsx/cli.mjs', {
-            paths: [path.join(__dirname, '../../../server')],
+            paths: [path.join(__dirname, '../../server')],
           });
         } catch {
           throw new Error("Could not find tsx. Please run 'npm install' in the server directory.");
@@ -80,7 +81,7 @@ export async function startServer(): Promise<void> {
     } catch {
       try {
         tsxCliPath = require.resolve('tsx/cli.mjs', {
-          paths: [path.join(__dirname, '../../../server')],
+          paths: [path.join(__dirname, '../../server')],
         });
       } catch {
         throw new Error("Could not find tsx. Please run 'npm install' in the server directory.");
@@ -103,22 +104,22 @@ export async function startServer(): Promise<void> {
 
   const serverNodeModules = app.isPackaged
     ? path.join(process.resourcesPath, 'server', 'node_modules')
-    : path.join(__dirname, '../../../server/node_modules');
+    : path.join(__dirname, '../../server/node_modules');
 
   // Server root directory - where .env file is located
   // In dev: apps/server (not apps/server/src)
   // In production: resources/server
   const serverRoot = app.isPackaged
     ? path.join(process.resourcesPath, 'server')
-    : path.join(__dirname, '../../../server');
+    : path.join(__dirname, '../../server');
 
   // IMPORTANT: Use shared data directory (not Electron's user data directory)
   // This ensures Electron and web mode share the same settings/projects
-  // In dev: project root/data (navigate from __dirname which is apps/server/dist or apps/ui/dist-electron)
+  // In dev: project root/data (navigate from __dirname which is apps/ui/dist-electron)
   // In production: same as Electron user data (for app isolation)
   const dataDir = app.isPackaged
     ? app.getPath('userData')
-    : path.join(__dirname, '../../../..', 'data');
+    : path.join(__dirname, '../../..', 'data');
   logger.info(
     `[DATA_DIR] app.isPackaged=${app.isPackaged}, __dirname=${__dirname}, dataDir=${dataDir}`
   );

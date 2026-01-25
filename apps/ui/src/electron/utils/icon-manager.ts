@@ -27,9 +27,10 @@ export function getIconPath(): string | null {
     iconFile = 'logo_larger.png';
   }
 
+  // __dirname is apps/ui/dist-electron (Vite bundles all into single file)
   const iconPath = isDev
-    ? path.join(__dirname, '../../public', iconFile)
-    : path.join(__dirname, '../../dist/public', iconFile);
+    ? path.join(__dirname, '../public', iconFile)
+    : path.join(__dirname, '../dist/public', iconFile);
 
   try {
     if (!electronAppExists(iconPath)) {
