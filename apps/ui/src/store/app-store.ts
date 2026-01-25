@@ -4,7 +4,7 @@ import type { Project, TrashedProject } from '@/lib/electron';
 import { getElectronAPI } from '@/lib/electron';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { createLogger } from '@automaker/utils/logger';
-import { setItem, getItem } from '@/lib/storage';
+// Note: setItem/getItem moved to ./utils/theme-utils.ts
 import {
   UI_SANS_FONT_OPTIONS,
   UI_MONO_FONT_OPTIONS,
@@ -63,9 +63,6 @@ import {
   type BoardViewMode,
   type ShortcutKey,
   type KeyboardShortcuts,
-  DEFAULT_KEYBOARD_SHORTCUTS,
-  parseShortcut,
-  formatShortcut,
   // Settings types
   type ApiKeys,
   // Chat types
@@ -100,8 +97,28 @@ import {
   type CodexRateLimitWindow,
   type CodexUsage,
   type CodexUsageResponse,
-  isClaudeUsageAtLimit,
 } from './types';
+
+// Import utility functions from modular utils files
+import {
+  THEME_STORAGE_KEY,
+  getStoredTheme,
+  getStoredFontSans,
+  getStoredFontMono,
+  parseShortcut,
+  formatShortcut,
+  DEFAULT_KEYBOARD_SHORTCUTS,
+  isClaudeUsageAtLimit,
+} from './utils';
+
+// Import internal theme utils (not re-exported publicly)
+import {
+  getEffectiveFont,
+  saveThemeToStorage,
+  saveFontSansToStorage,
+  saveFontMonoToStorage,
+  persistEffectiveThemeForProject,
+} from './utils/theme-utils';
 
 const logger = createLogger('AppStore');
 const OPENCODE_BEDROCK_PROVIDER_ID = 'amazon-bedrock';
@@ -158,138 +175,37 @@ export type {
 };
 
 // Re-export values from ./types for backward compatibility
+export { generateSplitId };
+
+// Re-export utilities from ./utils for backward compatibility
 export {
-  DEFAULT_KEYBOARD_SHORTCUTS,
+  THEME_STORAGE_KEY,
+  getStoredTheme,
+  getStoredFontSans,
+  getStoredFontMono,
   parseShortcut,
   formatShortcut,
+  DEFAULT_KEYBOARD_SHORTCUTS,
   isClaudeUsageAtLimit,
-  generateSplitId,
 };
 
-// NOTE: Type definitions moved to ./types/ directory
+// NOTE: Type definitions moved to ./types/ directory, utilities moved to ./utils/ directory
 // The following inline types have been replaced with imports above:
 // - ViewMode, ThemeMode, BoardViewMode (./types/ui-types.ts)
-// - ShortcutKey, KeyboardShortcuts, DEFAULT_KEYBOARD_SHORTCUTS, parseShortcut, formatShortcut (./types/ui-types.ts)
+// - ShortcutKey, KeyboardShortcuts (./types/ui-types.ts)
 // - ApiKeys (./types/settings-types.ts)
 // - ImageAttachment, TextFileAttachment, ChatMessage, ChatSession, FeatureImage (./types/chat-types.ts)
 // - Terminal types (./types/terminal-types.ts)
 // - ClaudeModel, Feature, FileTreeNode, ProjectAnalysis (./types/project-types.ts)
 // - InitScriptState, AutoModeActivity, AppState, AppActions (./types/state-types.ts)
 // - Claude/Codex usage types (./types/usage-types.ts)
-
-// LocalStorage keys for persistence (fallback when server settings aren't available)
-export const THEME_STORAGE_KEY = 'automaker:theme';
-export const FONT_SANS_STORAGE_KEY = 'automaker:font-sans';
-export const FONT_MONO_STORAGE_KEY = 'automaker:font-mono';
+// The following utility functions have been moved to ./utils/:
+// - Theme utilities: THEME_STORAGE_KEY, getStoredTheme, getStoredFontSans, getStoredFontMono, etc. (./utils/theme-utils.ts)
+// - Shortcut utilities: parseShortcut, formatShortcut, DEFAULT_KEYBOARD_SHORTCUTS (./utils/shortcut-utils.ts)
+// - Usage utilities: isClaudeUsageAtLimit (./utils/usage-utils.ts)
 
 // Maximum number of output lines to keep in init script state (prevents unbounded memory growth)
 export const MAX_INIT_OUTPUT_LINES = 500;
-
-/**
- * Get the theme from localStorage as a fallback
- * Used before server settings are loaded (e.g., on login/setup pages)
- */
-export function getStoredTheme(): ThemeMode | null {
-  const stored = getItem(THEME_STORAGE_KEY);
-  if (stored) return stored as ThemeMode;
-
-  // Backwards compatibility: older versions stored theme inside the Zustand persist blob.
-  // We intentionally keep reading it as a fallback so users don't get a "default theme flash"
-  // on login/logged-out pages if THEME_STORAGE_KEY hasn't been written yet.
-  try {
-    const legacy = getItem('automaker-storage');
-    if (!legacy) return null;
-    interface LegacyStorageFormat {
-      state?: { theme?: string };
-      theme?: string;
-    }
-    const parsed = JSON.parse(legacy) as LegacyStorageFormat;
-    const theme = parsed.state?.theme ?? parsed.theme;
-    if (typeof theme === 'string' && theme.length > 0) {
-      return theme as ThemeMode;
-    }
-  } catch {
-    // Ignore legacy parse errors
-  }
-
-  return null;
-}
-
-/**
- * Helper to get effective font value with validation
- * Returns the font to use (project override -> global -> null for default)
- * @param projectFont - The project-specific font override
- * @param globalFont - The global font setting
- * @param fontOptions - The list of valid font options for validation
- */
-function getEffectiveFont(
-  projectFont: string | undefined,
-  globalFont: string | null,
-  fontOptions: readonly { value: string; label: string }[]
-): string | null {
-  const isValidFont = (font: string | null | undefined): boolean => {
-    if (!font || font === DEFAULT_FONT_VALUE) return true;
-    return fontOptions.some((opt) => opt.value === font);
-  };
-
-  if (projectFont) {
-    if (!isValidFont(projectFont)) return null; // Fallback to default if font not in list
-    return projectFont === DEFAULT_FONT_VALUE ? null : projectFont;
-  }
-  if (!isValidFont(globalFont)) return null; // Fallback to default if font not in list
-  return globalFont === DEFAULT_FONT_VALUE ? null : globalFont;
-}
-
-/**
- * Save theme to localStorage for immediate persistence
- * This is used as a fallback when server settings can't be loaded
- */
-function saveThemeToStorage(theme: ThemeMode): void {
-  setItem(THEME_STORAGE_KEY, theme);
-}
-
-/**
- * Get fonts from localStorage as a fallback
- * Used before server settings are loaded (e.g., on login/setup pages)
- */
-export function getStoredFontSans(): string | null {
-  return getItem(FONT_SANS_STORAGE_KEY);
-}
-
-export function getStoredFontMono(): string | null {
-  return getItem(FONT_MONO_STORAGE_KEY);
-}
-
-/**
- * Save fonts to localStorage for immediate persistence
- * This is used as a fallback when server settings can't be loaded
- */
-function saveFontSansToStorage(fontFamily: string | null): void {
-  if (fontFamily) {
-    setItem(FONT_SANS_STORAGE_KEY, fontFamily);
-  } else {
-    // Remove from storage if null (using default)
-    localStorage.removeItem(FONT_SANS_STORAGE_KEY);
-  }
-}
-
-function saveFontMonoToStorage(fontFamily: string | null): void {
-  if (fontFamily) {
-    setItem(FONT_MONO_STORAGE_KEY, fontFamily);
-  } else {
-    // Remove from storage if null (using default)
-    localStorage.removeItem(FONT_MONO_STORAGE_KEY);
-  }
-}
-
-function persistEffectiveThemeForProject(project: Project | null, fallbackTheme: ThemeMode): void {
-  const projectTheme = project?.theme as ThemeMode | undefined;
-  const themeToStore = projectTheme ?? fallbackTheme;
-  saveThemeToStorage(themeToStore);
-}
-
-// NOTE: Type definitions have been moved to ./types/ directory
-// Types are imported at the top of this file and re-exported for backward compatibility
 
 // Default background settings for board backgrounds
 export const defaultBackgroundSettings: {

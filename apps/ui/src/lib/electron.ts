@@ -1,6 +1,6 @@
 // Type definitions for Electron IPC API
 import type { SessionListItem, Message } from '@/types/electron';
-import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/types/usage-types';
+import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
 import type {
   IssueValidationVerdict,
   IssueValidationConfidence,
