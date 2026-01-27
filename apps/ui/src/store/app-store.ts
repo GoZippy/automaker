@@ -2512,7 +2512,7 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
           authMethod?: string;
         }>;
         error?: string;
-      }>('/api/opencode/models');
+      }>('/api/setup/opencode/models');
 
       if (data.success && data.models) {
         // Filter out Bedrock models
