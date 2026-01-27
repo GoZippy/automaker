@@ -68,6 +68,7 @@ import {
   type RunningFeature,
   type GetCurrentBranchFn,
 } from './concurrency-manager.js';
+import { TypedEventBus } from './typed-event-bus.js';
 import type { SettingsService } from './settings-service.js';
 import { pipelineService, PipelineService } from './pipeline-service.js';
 import {
@@ -421,6 +422,7 @@ const FAILURE_WINDOW_MS = 60000; // Failures within 1 minute count as consecutiv
 
 export class AutoModeService {
   private events: EventEmitter;
+  private eventBus: TypedEventBus;
   private concurrencyManager: ConcurrencyManager;
   private autoLoop: AutoLoopState | null = null;
   private featureLoader = new FeatureLoader();
@@ -441,9 +443,11 @@ export class AutoModeService {
   constructor(
     events: EventEmitter,
     settingsService?: SettingsService,
-    concurrencyManager?: ConcurrencyManager
+    concurrencyManager?: ConcurrencyManager,
+    eventBus?: TypedEventBus
   ) {
     this.events = events;
+    this.eventBus = eventBus ?? new TypedEventBus(events);
     this.settingsService = settingsService ?? null;
     // Pass the getCurrentBranch function to ConcurrencyManager for worktree counting
     this.concurrencyManager = concurrencyManager ?? new ConcurrencyManager(getCurrentBranch);
@@ -653,7 +657,7 @@ export class AutoModeService {
     );
 
     // Emit event to notify UI
-    this.emitAutoModeEvent('auto_mode_paused_failures', {
+    this.eventBus.emitAutoModeEvent('auto_mode_paused_failures', {
       message:
         failureCount >= CONSECUTIVE_FAILURE_THRESHOLD
           ? `Auto Mode paused: ${failureCount} consecutive failures detected. This may indicate a quota limit or API issue. Please check your usage and try again.`
@@ -683,7 +687,7 @@ export class AutoModeService {
     );
 
     // Emit event to notify UI
-    this.emitAutoModeEvent('auto_mode_paused_failures', {
+    this.eventBus.emitAutoModeEvent('auto_mode_paused_failures', {
       message:
         failureCount >= CONSECUTIVE_FAILURE_THRESHOLD
           ? `Auto Mode paused: ${failureCount} consecutive failures detected. This may indicate a quota limit or API issue. Please check your usage and try again.`
@@ -839,7 +843,7 @@ export class AutoModeService {
       // Don't fail startup due to reset errors
     }
 
-    this.emitAutoModeEvent('auto_mode_started', {
+    this.eventBus.emitAutoModeEvent('auto_mode_started', {
       message: `Auto mode started with max ${resolvedMaxConcurrency} concurrent features`,
       projectPath,
       branchName,
@@ -854,7 +858,7 @@ export class AutoModeService {
       const worktreeDescErr = branchName ? `worktree ${branchName}` : 'main worktree';
       logger.error(`Loop error for ${worktreeDescErr} in ${projectPath}:`, error);
       const errorInfo = classifyError(error);
-      this.emitAutoModeEvent('auto_mode_error', {
+      this.eventBus.emitAutoModeEvent('auto_mode_error', {
         error: errorInfo.message,
         errorType: errorInfo.type,
         projectPath,
@@ -909,7 +913,7 @@ export class AutoModeService {
         if (pendingFeatures.length === 0) {
           // Emit idle event only once when backlog is empty AND no features are running
           if (projectRunningCount === 0 && !projectState.hasEmittedIdleEvent) {
-            this.emitAutoModeEvent('auto_mode_idle', {
+            this.eventBus.emitAutoModeEvent('auto_mode_idle', {
               message: 'No pending features - auto mode idle',
               projectPath,
               branchName,
@@ -1012,7 +1016,7 @@ export class AutoModeService {
 
     // Emit stop event
     if (wasRunning) {
-      this.emitAutoModeEvent('auto_mode_stopped', {
+      this.eventBus.emitAutoModeEvent('auto_mode_stopped', {
         message: 'Auto mode stopped',
         projectPath,
         branchName,
@@ -1115,7 +1119,7 @@ export class AutoModeService {
       branchName: null,
     };
 
-    this.emitAutoModeEvent('auto_mode_started', {
+    this.eventBus.emitAutoModeEvent('auto_mode_started', {
       message: `Auto mode started with max ${maxConcurrency} concurrent features`,
       projectPath,
     });
@@ -1129,7 +1133,7 @@ export class AutoModeService {
     this.runAutoLoop().catch((error) => {
       logger.error('Loop error:', error);
       const errorInfo = classifyError(error);
-      this.emitAutoModeEvent('auto_mode_error', {
+      this.eventBus.emitAutoModeEvent('auto_mode_error', {
         error: errorInfo.message,
         errorType: errorInfo.type,
         projectPath,
@@ -1161,7 +1165,7 @@ export class AutoModeService {
           // Emit idle event only once when backlog is empty AND no features are running
           const runningCount = this.concurrencyManager.getAllRunning().length;
           if (runningCount === 0 && !this.hasEmittedIdleEvent) {
-            this.emitAutoModeEvent('auto_mode_idle', {
+            this.eventBus.emitAutoModeEvent('auto_mode_idle', {
               message: 'No pending features - auto mode idle',
               projectPath: this.config!.projectPath,
             });
@@ -1225,7 +1229,7 @@ export class AutoModeService {
 
     // Emit stop event immediately when user explicitly stops
     if (wasRunning) {
-      this.emitAutoModeEvent('auto_mode_stopped', {
+      this.eventBus.emitAutoModeEvent('auto_mode_stopped', {
         message: 'Auto mode stopped',
         projectPath,
       });
@@ -1390,7 +1394,7 @@ export class AutoModeService {
       await this.updateFeatureStatus(projectPath, featureId, 'in_progress');
 
       // Emit feature start event AFTER status update so frontend sees correct status
-      this.emitAutoModeEvent('auto_mode_feature_start', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_start', {
         featureId,
         projectPath,
         branchName: feature.branchName ?? null,
@@ -1442,7 +1446,7 @@ export class AutoModeService {
 
         // Emit planning mode info
         if (feature.planningMode && feature.planningMode !== 'skip') {
-          this.emitAutoModeEvent('planning_started', {
+          this.eventBus.emitAutoModeEvent('planning_started', {
             featureId: feature.id,
             mode: feature.planningMode,
             message: `Starting ${feature.planningMode} planning phase`,
@@ -1556,7 +1560,7 @@ export class AutoModeService {
         console.warn('[AutoMode] Failed to record learnings:', learningError);
       }
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature.title,
         branchName: feature.branchName ?? null,
@@ -1572,7 +1576,7 @@ export class AutoModeService {
       const errorInfo = classifyError(error);
 
       if (errorInfo.isAbort) {
-        this.emitAutoModeEvent('auto_mode_feature_complete', {
+        this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
           featureId,
           featureName: feature?.title,
           branchName: feature?.branchName ?? null,
@@ -1583,7 +1587,7 @@ export class AutoModeService {
       } else {
         logger.error(`Feature ${featureId} failed:`, error);
         await this.updateFeatureStatus(projectPath, featureId, 'backlog');
-        this.emitAutoModeEvent('auto_mode_error', {
+        this.eventBus.emitAutoModeEvent('auto_mode_error', {
           featureId,
           featureName: feature?.title,
           branchName: feature?.branchName ?? null,
@@ -1666,14 +1670,14 @@ export class AutoModeService {
       // Update feature status to current pipeline step
       await this.updateFeatureStatus(projectPath, featureId, pipelineStatus);
 
-      this.emitAutoModeEvent('auto_mode_progress', {
+      this.eventBus.emitAutoModeEvent('auto_mode_progress', {
         featureId,
         branchName: feature.branchName ?? null,
         content: `Starting pipeline step ${i + 1}/${steps.length}: ${step.name}`,
         projectPath,
       });
 
-      this.emitAutoModeEvent('pipeline_step_started', {
+      this.eventBus.emitAutoModeEvent('pipeline_step_started', {
         featureId,
         stepId: step.id,
         stepName: step.name,
@@ -1720,7 +1724,7 @@ export class AutoModeService {
         // No context update
       }
 
-      this.emitAutoModeEvent('pipeline_step_complete', {
+      this.eventBus.emitAutoModeEvent('pipeline_step_complete', {
         featureId,
         stepId: step.id,
         stepName: step.name,
@@ -1882,7 +1886,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
         );
 
         // Emit event for UI notification
-        this.emitAutoModeEvent('auto_mode_feature_resuming', {
+        this.eventBus.emitAutoModeEvent('auto_mode_feature_resuming', {
           featureId,
           featureName: feature.title,
           projectPath,
@@ -1900,7 +1904,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
       );
 
       // Emit event for UI notification
-      this.emitAutoModeEvent('auto_mode_feature_resuming', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_resuming', {
         featureId,
         featureName: feature.title,
         projectPath,
@@ -1978,7 +1982,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
 
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature.title,
         branchName: feature.branchName ?? null,
@@ -2064,7 +2068,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
       // If next status is not a pipeline step, feature is done
       if (!pipelineService.isPipelineStatus(nextStatus)) {
         await this.updateFeatureStatus(projectPath, featureId, nextStatus);
-        this.emitAutoModeEvent('auto_mode_feature_complete', {
+        this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
           featureId,
           featureName: feature.title,
           branchName: feature.branchName ?? null,
@@ -2093,7 +2097,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
     if (stepsToExecute.length === 0) {
       const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature.title,
         branchName: feature.branchName ?? null,
@@ -2145,7 +2149,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
       runningEntry.branchName = branchName ?? null;
 
       // Emit resume event
-      this.emitAutoModeEvent('auto_mode_feature_start', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_start', {
         featureId,
         projectPath,
         branchName: branchName ?? null,
@@ -2156,7 +2160,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
         },
       });
 
-      this.emitAutoModeEvent('auto_mode_progress', {
+      this.eventBus.emitAutoModeEvent('auto_mode_progress', {
         featureId,
         projectPath,
         branchName: branchName ?? null,
@@ -2187,7 +2191,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
 
       logger.info(`Pipeline resume completed successfully for feature ${featureId}`);
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature.title,
         branchName: feature.branchName ?? null,
@@ -2199,7 +2203,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
       const errorInfo = classifyError(error);
 
       if (errorInfo.isAbort) {
-        this.emitAutoModeEvent('auto_mode_feature_complete', {
+        this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
           featureId,
           featureName: feature.title,
           branchName: feature.branchName ?? null,
@@ -2210,7 +2214,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
       } else {
         logger.error(`Pipeline resume failed for feature ${featureId}:`, error);
         await this.updateFeatureStatus(projectPath, featureId, 'backlog');
-        this.emitAutoModeEvent('auto_mode_error', {
+        this.eventBus.emitAutoModeEvent('auto_mode_error', {
           featureId,
           featureName: feature.title,
           branchName: feature.branchName ?? null,
@@ -2335,7 +2339,7 @@ Address the follow-up instructions above. Review the previous work and make the 
       await this.updateFeatureStatus(projectPath, featureId, 'in_progress');
 
       // Emit feature start event AFTER status update so frontend sees correct status
-      this.emitAutoModeEvent('auto_mode_feature_start', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_start', {
         featureId,
         projectPath,
         branchName,
@@ -2439,7 +2443,7 @@ Address the follow-up instructions above. Review the previous work and make the 
       // Record success to reset consecutive failure tracking
       this.recordSuccess();
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature?.title,
         branchName: branchName ?? null,
@@ -2452,7 +2456,7 @@ Address the follow-up instructions above. Review the previous work and make the 
     } catch (error) {
       const errorInfo = classifyError(error);
       if (!errorInfo.isCancellation) {
-        this.emitAutoModeEvent('auto_mode_error', {
+        this.eventBus.emitAutoModeEvent('auto_mode_error', {
           featureId,
           featureName: feature?.title,
           branchName: branchName ?? null,
@@ -2532,7 +2536,7 @@ Address the follow-up instructions above. Review the previous work and make the 
       }
     }
 
-    this.emitAutoModeEvent('auto_mode_feature_complete', {
+    this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
       featureId,
       featureName: feature?.title,
       branchName: feature?.branchName ?? null,
@@ -2666,7 +2670,7 @@ Address the follow-up instructions above. Review the previous work and make the 
         cwd: workDir,
       });
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         featureName: feature?.title,
         branchName: feature?.branchName ?? null,
@@ -2705,7 +2709,7 @@ Address the follow-up instructions above. Review the previous work and make the 
     const abortController = new AbortController();
 
     const analysisFeatureId = `analysis-${Date.now()}`;
-    this.emitAutoModeEvent('auto_mode_feature_start', {
+    this.eventBus.emitAutoModeEvent('auto_mode_feature_start', {
       featureId: analysisFeatureId,
       projectPath,
       branchName: null, // Project analysis is not worktree-specific
@@ -2786,7 +2790,7 @@ Format your response as a structured markdown document.`;
           for (const block of msg.message.content) {
             if (block.type === 'text') {
               analysisResult = block.text || '';
-              this.emitAutoModeEvent('auto_mode_progress', {
+              this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                 featureId: analysisFeatureId,
                 content: block.text,
                 projectPath,
@@ -2804,7 +2808,7 @@ Format your response as a structured markdown document.`;
       await secureFs.mkdir(automakerDir, { recursive: true });
       await secureFs.writeFile(analysisPath, analysisResult);
 
-      this.emitAutoModeEvent('auto_mode_feature_complete', {
+      this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId: analysisFeatureId,
         featureName: 'Project Analysis',
         branchName: null, // Project analysis is not worktree-specific
@@ -2814,7 +2818,7 @@ Format your response as a structured markdown document.`;
       });
     } catch (error) {
       const errorInfo = classifyError(error);
-      this.emitAutoModeEvent('auto_mode_error', {
+      this.eventBus.emitAutoModeEvent('auto_mode_error', {
         featureId: analysisFeatureId,
         featureName: 'Project Analysis',
         branchName: null, // Project analysis is not worktree-specific
@@ -3075,7 +3079,7 @@ Format your response as a structured markdown document.`;
 
             await this.updateFeatureStatus(projectPathFromClient, featureId, 'backlog');
 
-            this.emitAutoModeEvent('plan_rejected', {
+            this.eventBus.emitAutoModeEvent('plan_rejected', {
               featureId,
               projectPath: projectPathFromClient,
               feedback,
@@ -3109,7 +3113,7 @@ Format your response as a structured markdown document.`;
     // If rejected with feedback, we can store it for the user to see
     if (!approved && feedback) {
       // Emit event so client knows the rejection reason
-      this.emitAutoModeEvent('plan_rejected', {
+      this.eventBus.emitAutoModeEvent('plan_rejected', {
         featureId,
         projectPath,
         feedback,
@@ -3489,7 +3493,7 @@ Format your response as a structured markdown document.`;
 
       await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
 
-      this.emitAutoModeEvent('auto_mode_summary', {
+      this.eventBus.emitAutoModeEvent('auto_mode_summary', {
         featureId,
         projectPath,
         summary,
@@ -3537,7 +3541,7 @@ Format your response as a structured markdown document.`;
         await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
 
         // Emit event for UI update
-        this.emitAutoModeEvent('auto_mode_task_status', {
+        this.eventBus.emitAutoModeEvent('auto_mode_task_status', {
           featureId,
           projectPath,
           taskId,
@@ -4045,14 +4049,14 @@ You can use the Read tool to view these images at any time during implementation
       await this.sleep(500);
 
       // Emit mock progress events to simulate agent activity
-      this.emitAutoModeEvent('auto_mode_progress', {
+      this.eventBus.emitAutoModeEvent('auto_mode_progress', {
         featureId,
         content: 'Mock agent: Analyzing the codebase...',
       });
 
       await this.sleep(300);
 
-      this.emitAutoModeEvent('auto_mode_progress', {
+      this.eventBus.emitAutoModeEvent('auto_mode_progress', {
         featureId,
         content: 'Mock agent: Implementing the feature...',
       });
@@ -4063,7 +4067,7 @@ You can use the Read tool to view these images at any time during implementation
       const mockFilePath = path.join(workDir, 'yellow.txt');
       await secureFs.writeFile(mockFilePath, 'yellow');
 
-      this.emitAutoModeEvent('auto_mode_progress', {
+      this.eventBus.emitAutoModeEvent('auto_mode_progress', {
         featureId,
         content: "Mock agent: Created yellow.txt file with content 'yellow'",
       });
@@ -4315,7 +4319,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
 
         // Emit task started
         logger.info(`Starting task ${task.id}: ${task.description}`);
-        this.emitAutoModeEvent('auto_mode_task_started', {
+        this.eventBus.emitAutoModeEvent('auto_mode_task_started', {
           featureId,
           projectPath,
           branchName,
@@ -4364,7 +4368,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 const text = block.text || '';
                 taskOutput += text;
                 responseText += text;
-                this.emitAutoModeEvent('auto_mode_progress', {
+                this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                   featureId,
                   branchName,
                   content: text,
@@ -4386,7 +4390,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                   }
                 }
               } else if (block.type === 'tool_use') {
-                this.emitAutoModeEvent('auto_mode_tool', {
+                this.eventBus.emitAutoModeEvent('auto_mode_tool', {
                   featureId,
                   branchName,
                   tool: block.name,
@@ -4409,7 +4413,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
 
         // Emit task completed
         logger.info(`Task ${task.id} completed for feature ${featureId}`);
-        this.emitAutoModeEvent('auto_mode_task_complete', {
+        this.eventBus.emitAutoModeEvent('auto_mode_task_complete', {
           featureId,
           projectPath,
           branchName,
@@ -4573,7 +4577,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                     const approvalPromise = this.waitForPlanApproval(featureId, projectPath);
 
                     // Emit plan_approval_required event
-                    this.emitAutoModeEvent('plan_approval_required', {
+                    this.eventBus.emitAutoModeEvent('plan_approval_required', {
                       featureId,
                       projectPath,
                       branchName,
@@ -4605,7 +4609,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                         userFeedback = approvalResult.feedback;
 
                         // Emit approval event
-                        this.emitAutoModeEvent('plan_approved', {
+                        this.eventBus.emitAutoModeEvent('plan_approved', {
                           featureId,
                           projectPath,
                           branchName,
@@ -4634,7 +4638,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                         planVersion++;
 
                         // Emit revision event
-                        this.emitAutoModeEvent('plan_revision_requested', {
+                        this.eventBus.emitAutoModeEvent('plan_revision_requested', {
                           featureId,
                           projectPath,
                           branchName,
@@ -4717,7 +4721,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                             for (const block of msg.message.content) {
                               if (block.type === 'text') {
                                 revisionText += block.text || '';
-                                this.emitAutoModeEvent('auto_mode_progress', {
+                                this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                                   featureId,
                                   content: block.text,
                                 });
@@ -4752,7 +4756,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                               `This will cause fallback to single-agent execution. ` +
                               `The AI may have omitted the required \`\`\`tasks block.`
                           );
-                          this.emitAutoModeEvent('plan_revision_warning', {
+                          this.eventBus.emitAutoModeEvent('plan_revision_warning', {
                             featureId,
                             projectPath,
                             branchName,
@@ -4791,7 +4795,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                   );
 
                   // Emit info event for frontend
-                  this.emitAutoModeEvent('plan_auto_approved', {
+                  this.eventBus.emitAutoModeEvent('plan_auto_approved', {
                     featureId,
                     projectPath,
                     branchName,
@@ -4851,7 +4855,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
 
                     // Emit task started
                     logger.info(`Starting task ${task.id}: ${task.description}`);
-                    this.emitAutoModeEvent('auto_mode_task_started', {
+                    this.eventBus.emitAutoModeEvent('auto_mode_task_started', {
                       featureId,
                       projectPath,
                       branchName,
@@ -4901,7 +4905,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                             const text = block.text || '';
                             taskOutput += text;
                             responseText += text;
-                            this.emitAutoModeEvent('auto_mode_progress', {
+                            this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                               featureId,
                               branchName,
                               content: text,
@@ -4920,7 +4924,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                                   startTaskId,
                                   'in_progress'
                                 );
-                                this.emitAutoModeEvent('auto_mode_task_started', {
+                                this.eventBus.emitAutoModeEvent('auto_mode_task_started', {
                                   featureId,
                                   projectPath,
                                   branchName,
@@ -4952,7 +4956,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                             const phaseNumber = detectPhaseCompleteMarker(text);
                             if (phaseNumber !== null) {
                               logger.info(`[PHASE_COMPLETE] detected for Phase ${phaseNumber}`);
-                              this.emitAutoModeEvent('auto_mode_phase_complete', {
+                              this.eventBus.emitAutoModeEvent('auto_mode_phase_complete', {
                                 featureId,
                                 projectPath,
                                 branchName,
@@ -4960,7 +4964,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                               });
                             }
                           } else if (block.type === 'tool_use') {
-                            this.emitAutoModeEvent('auto_mode_tool', {
+                            this.eventBus.emitAutoModeEvent('auto_mode_tool', {
                               featureId,
                               branchName,
                               tool: block.name,
@@ -4984,7 +4988,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
 
                     // Emit task completed
                     logger.info(`Task ${task.id} completed for feature ${featureId}`);
-                    this.emitAutoModeEvent('auto_mode_task_complete', {
+                    this.eventBus.emitAutoModeEvent('auto_mode_task_complete', {
                       featureId,
                       projectPath,
                       branchName,
@@ -5005,7 +5009,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                         // Phase changed, emit phase complete
                         const phaseMatch = task.phase.match(/Phase\s*(\d+)/i);
                         if (phaseMatch) {
-                          this.emitAutoModeEvent('auto_mode_phase_complete', {
+                          this.eventBus.emitAutoModeEvent('auto_mode_phase_complete', {
                             featureId,
                             projectPath,
                             branchName,
@@ -5056,13 +5060,13 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                       for (const block of msg.message.content) {
                         if (block.type === 'text') {
                           responseText += block.text || '';
-                          this.emitAutoModeEvent('auto_mode_progress', {
+                          this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                             featureId,
                             branchName,
                             content: block.text,
                           });
                         } else if (block.type === 'tool_use') {
-                          this.emitAutoModeEvent('auto_mode_tool', {
+                          this.eventBus.emitAutoModeEvent('auto_mode_tool', {
                             featureId,
                             branchName,
                             tool: block.name,
@@ -5095,7 +5099,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 logger.info(
                   `Emitting progress event for ${featureId}, content length: ${block.text?.length || 0}`
                 );
-                this.emitAutoModeEvent('auto_mode_progress', {
+                this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                   featureId,
                   branchName,
                   content: block.text,
@@ -5103,7 +5107,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
               }
             } else if (block.type === 'tool_use') {
               // Emit event for real-time UI
-              this.emitAutoModeEvent('auto_mode_tool', {
+              this.eventBus.emitAutoModeEvent('auto_mode_tool', {
                 featureId,
                 branchName,
                 tool: block.name,
@@ -5341,19 +5345,6 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     return prompt;
   }
 
-  /**
-   * Emit an auto-mode event wrapped in the correct format for the client.
-   * All auto-mode events are sent as type "auto-mode:event" with the actual
-   * event type and data in the payload.
-   */
-  private emitAutoModeEvent(eventType: string, data: Record<string, unknown>): void {
-    // Wrap the event in auto-mode:event format expected by the client
-    this.events.emit('auto-mode:event', {
-      type: eventType,
-      ...data,
-    });
-  }
-
   private sleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(resolve, ms);
@@ -5518,7 +5509,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       );
 
       // Emit event to notify UI with context information
-      this.emitAutoModeEvent('auto_mode_resuming_features', {
+      this.eventBus.emitAutoModeEvent('auto_mode_resuming_features', {
         message: `Resuming ${allInterruptedFeatures.length} interrupted feature(s) after server restart`,
         projectPath,
         featureIds: allInterruptedFeatures.map((f) => f.id),
