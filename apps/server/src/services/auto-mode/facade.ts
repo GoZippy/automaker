@@ -180,6 +180,7 @@ export class AutoModeServiceFacade {
             model: resolvedModel,
             planningMode: opts?.planningMode as PlanningMode | undefined,
             requirePlanApproval: opts?.requirePlanApproval as boolean | undefined,
+            previousContent: opts?.previousContent as string | undefined,
             systemPrompt: opts?.systemPrompt as string | undefined,
             autoLoadClaudeMd: opts?.autoLoadClaudeMd as boolean | undefined,
             thinkingLevel: opts?.thinkingLevel as ThinkingLevel | undefined,
