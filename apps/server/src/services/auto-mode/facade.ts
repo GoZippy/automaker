@@ -14,8 +14,8 @@
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { Feature } from '@automaker/types';
-import { DEFAULT_MAX_CONCURRENCY } from '@automaker/types';
+import type { Feature, PlanningMode, ThinkingLevel } from '@automaker/types';
+import { DEFAULT_MAX_CONCURRENCY, stripProviderPrefix } from '@automaker/types';
 import { createLogger, loadContextFiles, classifyError } from '@automaker/utils';
 import { getFeatureDir } from '@automaker/platform';
 import * as secureFs from '../../lib/secure-fs.js';
@@ -32,6 +32,7 @@ import { RecoveryService } from '../recovery-service.js';
 import { PipelineOrchestrator } from '../pipeline-orchestrator.js';
 import { AgentExecutor } from '../agent-executor.js';
 import { TestRunnerService } from '../test-runner-service.js';
+import { ProviderFactory } from '../../providers/provider-factory.js';
 import { FeatureLoader } from '../feature-loader.js';
 import type { SettingsService } from '../settings-service.js';
 import type { EventEmitter } from '../../lib/events.js';
@@ -153,9 +154,58 @@ export class AutoModeServiceFacade {
       buildFeaturePrompt,
       (pPath, featureId, useWorktrees, _isAutoMode, _model, opts) =>
         facadeInstance!.executeFeature(featureId, useWorktrees, false, undefined, opts),
-      // runAgentFn stub - facade does not implement runAgent directly
-      async () => {
-        throw new Error('runAgentFn not implemented in facade');
+      // runAgentFn - delegates to AgentExecutor
+      async (
+        workDir: string,
+        featureId: string,
+        prompt: string,
+        abortController: AbortController,
+        pPath: string,
+        imagePaths?: string[],
+        model?: string,
+        opts?: Record<string, unknown>
+      ) => {
+        const resolvedModel = model || 'claude-sonnet-4-20250514';
+        const provider = ProviderFactory.getProviderForModel(resolvedModel);
+        const effectiveBareModel = stripProviderPrefix(resolvedModel);
+
+        await agentExecutor.execute(
+          {
+            workDir,
+            featureId,
+            prompt,
+            projectPath: pPath,
+            abortController,
+            imagePaths,
+            model: resolvedModel,
+            planningMode: opts?.planningMode as PlanningMode | undefined,
+            requirePlanApproval: opts?.requirePlanApproval as boolean | undefined,
+            systemPrompt: opts?.systemPrompt as string | undefined,
+            autoLoadClaudeMd: opts?.autoLoadClaudeMd as boolean | undefined,
+            thinkingLevel: opts?.thinkingLevel as ThinkingLevel | undefined,
+            branchName: opts?.branchName as string | null | undefined,
+            provider,
+            effectiveBareModel,
+          },
+          {
+            waitForApproval: (fId, projPath) => planApprovalService.waitForApproval(fId, projPath),
+            saveFeatureSummary: (projPath, fId, summary) =>
+              featureStateManager.saveFeatureSummary(projPath, fId, summary),
+            updateFeatureSummary: (projPath, fId, summary) =>
+              featureStateManager.saveFeatureSummary(projPath, fId, summary),
+            buildTaskPrompt: (task, allTasks, taskIndex, _planContent, template, feedback) => {
+              let taskPrompt = template
+                .replace(/\{\{taskName\}\}/g, task.description)
+                .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
+                .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
+                .replace(/\{\{taskDescription\}\}/g, task.description || task.description);
+              if (feedback) {
+                taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
+              }
+              return taskPrompt;
+            },
+          }
+        );
       }
     );
 
@@ -193,15 +243,72 @@ export class AutoModeServiceFacade {
         (featureId) => concurrencyManager.isRunning(featureId)
       );
 
-    // ExecutionService - runAgentFn is a stub
+    // ExecutionService - runAgentFn calls AgentExecutor.execute
     const executionService = new ExecutionService(
       eventBus,
       concurrencyManager,
       worktreeResolver,
       settingsService,
-      // Callbacks - runAgentFn stub
-      async () => {
-        throw new Error('runAgentFn not implemented in facade');
+      // runAgentFn - delegates to AgentExecutor
+      async (
+        workDir: string,
+        featureId: string,
+        prompt: string,
+        abortController: AbortController,
+        pPath: string,
+        imagePaths?: string[],
+        model?: string,
+        opts?: {
+          projectPath?: string;
+          planningMode?: PlanningMode;
+          requirePlanApproval?: boolean;
+          systemPrompt?: string;
+          autoLoadClaudeMd?: boolean;
+          thinkingLevel?: ThinkingLevel;
+          branchName?: string | null;
+        }
+      ) => {
+        const resolvedModel = model || 'claude-sonnet-4-20250514';
+        const provider = ProviderFactory.getProviderForModel(resolvedModel);
+        const effectiveBareModel = stripProviderPrefix(resolvedModel);
+
+        await agentExecutor.execute(
+          {
+            workDir,
+            featureId,
+            prompt,
+            projectPath: pPath,
+            abortController,
+            imagePaths,
+            model: resolvedModel,
+            planningMode: opts?.planningMode,
+            requirePlanApproval: opts?.requirePlanApproval,
+            systemPrompt: opts?.systemPrompt,
+            autoLoadClaudeMd: opts?.autoLoadClaudeMd,
+            thinkingLevel: opts?.thinkingLevel,
+            branchName: opts?.branchName,
+            provider,
+            effectiveBareModel,
+          },
+          {
+            waitForApproval: (fId, projPath) => planApprovalService.waitForApproval(fId, projPath),
+            saveFeatureSummary: (projPath, fId, summary) =>
+              featureStateManager.saveFeatureSummary(projPath, fId, summary),
+            updateFeatureSummary: (projPath, fId, summary) =>
+              featureStateManager.saveFeatureSummary(projPath, fId, summary),
+            buildTaskPrompt: (task, allTasks, taskIndex, planContent, template, feedback) => {
+              let taskPrompt = template
+                .replace(/\{\{taskName\}\}/g, task.description)
+                .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
+                .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
+                .replace(/\{\{taskDescription\}\}/g, task.description || task.description);
+              if (feedback) {
+                taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
+              }
+              return taskPrompt;
+            },
+          }
+        );
       },
       (context) => pipelineOrchestrator.executePipeline(context),
       (pPath, featureId, status) =>
