@@ -1065,11 +1065,20 @@ export async function getClaudeAuthIndicators(): Promise<ClaudeAuthIndicators> {
   };
 
   // Check settings file
+  // First check existence, then try to read to confirm it's actually readable
   try {
     if (await systemPathAccess(settingsPath)) {
       settingsFileCheck.exists = true;
-      settingsFileCheck.readable = true;
-      result.hasSettingsFile = true;
+      // Try to actually read the file to confirm read permissions
+      try {
+        await systemPathReadFile(settingsPath);
+        settingsFileCheck.readable = true;
+        result.hasSettingsFile = true;
+      } catch (readErr) {
+        // File exists but cannot be read (permission denied, etc.)
+        settingsFileCheck.readable = false;
+        settingsFileCheck.error = `Cannot read: ${readErr instanceof Error ? readErr.message : String(readErr)}`;
+      }
     }
   } catch (err) {
     settingsFileCheck.error = err instanceof Error ? err.message : String(err);
@@ -1117,6 +1126,9 @@ export async function getClaudeAuthIndicators(): Promise<ClaudeAuthIndicators> {
   }
 
   // Check credentials files
+  // We iterate through all credential paths and only stop when we find a file
+  // that contains actual credentials (OAuth tokens or API keys). An empty or
+  // token-less file should not prevent checking subsequent credential paths.
   for (let i = 0; i < credentialPaths.length; i++) {
     const credPath = credentialPaths[i];
     const credCheck = credentialFileChecks[i];
@@ -1126,18 +1138,27 @@ export async function getClaudeAuthIndicators(): Promise<ClaudeAuthIndicators> {
       credCheck.readable = true;
       try {
         const credentials = JSON.parse(content);
-        result.hasCredentialsFile = true;
         // Support multiple credential formats:
         // 1. Claude Code CLI format: { claudeAiOauth: { accessToken, refreshToken } }
         // 2. Legacy format: { oauth_token } or { access_token }
         // 3. API key format: { api_key }
         const hasClaudeOauth = !!credentials.claudeAiOauth?.accessToken;
         const hasLegacyOauth = !!(credentials.oauth_token || credentials.access_token);
-        result.credentials = {
-          hasOAuthToken: hasClaudeOauth || hasLegacyOauth,
-          hasApiKey: !!credentials.api_key,
-        };
-        break;
+        const hasOAuthToken = hasClaudeOauth || hasLegacyOauth;
+        const hasApiKey = !!credentials.api_key;
+
+        // Only consider this a valid credentials file if it actually contains tokens
+        // An empty JSON file ({}) or file without tokens should not stop us from
+        // checking subsequent credential paths
+        if (hasOAuthToken || hasApiKey) {
+          result.hasCredentialsFile = true;
+          result.credentials = {
+            hasOAuthToken,
+            hasApiKey,
+          };
+          break; // Found valid credentials, stop searching
+        }
+        // File exists and is valid JSON but contains no tokens - continue checking other paths
       } catch (parseErr) {
         credCheck.error = `JSON parse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`;
       }

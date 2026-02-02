@@ -173,10 +173,14 @@ describe('OAuth Credential Detection', () => {
       const { getClaudeAuthIndicators } = await import('../src/system-paths');
       const indicators = await getClaudeAuthIndicators();
 
-      expect(indicators.hasCredentialsFile).toBe(true);
-      expect(indicators.credentials).not.toBeNull();
-      expect(indicators.credentials?.hasOAuthToken).toBe(false);
-      expect(indicators.credentials?.hasApiKey).toBe(false);
+      // Empty credentials file ({}) should NOT be treated as having credentials
+      // because it contains no actual tokens. This allows the system to continue
+      // checking subsequent credential paths that might have valid tokens.
+      expect(indicators.hasCredentialsFile).toBe(false);
+      expect(indicators.credentials).toBeNull();
+      // But the file should still show as existing and readable in the checks
+      expect(indicators.checks.credentialFiles[0].exists).toBe(true);
+      expect(indicators.checks.credentialFiles[0].readable).toBe(true);
     });
 
     it('should handle credentials file with null values', async () => {
@@ -191,9 +195,10 @@ describe('OAuth Credential Detection', () => {
       const { getClaudeAuthIndicators } = await import('../src/system-paths');
       const indicators = await getClaudeAuthIndicators();
 
-      expect(indicators.hasCredentialsFile).toBe(true);
-      expect(indicators.credentials?.hasOAuthToken).toBe(false);
-      expect(indicators.credentials?.hasApiKey).toBe(false);
+      // File with all null values should NOT be treated as having credentials
+      // because null values are not valid tokens
+      expect(indicators.hasCredentialsFile).toBe(false);
+      expect(indicators.credentials).toBeNull();
     });
 
     it('should handle credentials with empty string values', async () => {
@@ -210,10 +215,10 @@ describe('OAuth Credential Detection', () => {
       const { getClaudeAuthIndicators } = await import('../src/system-paths');
       const indicators = await getClaudeAuthIndicators();
 
-      expect(indicators.hasCredentialsFile).toBe(true);
-      // Empty strings should not be treated as valid credentials
-      expect(indicators.credentials?.hasOAuthToken).toBe(false);
-      expect(indicators.credentials?.hasApiKey).toBe(false);
+      // Empty strings should NOT be treated as having credentials
+      // This allows checking subsequent credential paths for valid tokens
+      expect(indicators.hasCredentialsFile).toBe(false);
+      expect(indicators.credentials).toBeNull();
     });
 
     it('should detect settings file presence', async () => {
@@ -336,6 +341,27 @@ describe('OAuth Credential Detection', () => {
       expect(indicators.hasCredentialsFile).toBe(true);
       expect(indicators.credentials?.hasOAuthToken).toBe(true);
       expect(indicators.credentials?.hasApiKey).toBe(false);
+    });
+
+    it('should check second credentials file if first file has no tokens', async () => {
+      // Write empty/token-less content to .credentials.json (first path checked)
+      // This tests the bug fix: previously, an empty JSON file would stop the search
+      await fs.writeFile(path.join(mockClaudeDir, '.credentials.json'), JSON.stringify({}));
+
+      // Write actual credentials to credentials.json (second path)
+      await fs.writeFile(
+        path.join(mockClaudeDir, 'credentials.json'),
+        JSON.stringify({
+          api_key: 'sk-test-key-from-second-file',
+        })
+      );
+
+      const { getClaudeAuthIndicators } = await import('../src/system-paths');
+      const indicators = await getClaudeAuthIndicators();
+
+      // Should find credentials in second file since first file has no tokens
+      expect(indicators.hasCredentialsFile).toBe(true);
+      expect(indicators.credentials?.hasApiKey).toBe(true);
     });
   });
 
@@ -585,9 +611,9 @@ describe('OAuth Credential Detection', () => {
       const { getClaudeAuthIndicators } = await import('../src/system-paths');
       const indicators = await getClaudeAuthIndicators();
 
-      expect(indicators.hasCredentialsFile).toBe(true);
-      expect(indicators.credentials?.hasOAuthToken).toBe(false);
-      expect(indicators.credentials?.hasApiKey).toBe(false);
+      // File with unexpected structure but no valid tokens should NOT be treated as having credentials
+      expect(indicators.hasCredentialsFile).toBe(false);
+      expect(indicators.credentials).toBeNull();
     });
 
     it('should handle array instead of object in credentials', async () => {
@@ -598,10 +624,9 @@ describe('OAuth Credential Detection', () => {
       const { getClaudeAuthIndicators } = await import('../src/system-paths');
       const indicators = await getClaudeAuthIndicators();
 
-      // Array is valid JSON but wrong structure - should handle gracefully
-      expect(indicators.hasCredentialsFile).toBe(true);
-      expect(indicators.credentials?.hasOAuthToken).toBe(false);
-      expect(indicators.credentials?.hasApiKey).toBe(false);
+      // Array is valid JSON but wrong structure - no valid tokens, so not treated as credentials file
+      expect(indicators.hasCredentialsFile).toBe(false);
+      expect(indicators.credentials).toBeNull();
     });
 
     it('should handle numeric values in credential fields', async () => {
