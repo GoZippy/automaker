@@ -209,7 +209,17 @@ export function CursorCliStatus({ status, isChecking, onRefresh }: CursorCliStat
     setIsAuthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.authCursor();
+      // Check if authCursor method exists on the API
+      const authCursor = (api?.setup as Record<string, unknown> | undefined)?.authCursor as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!authCursor) {
+        toast.error('Authentication Failed', {
+          description: 'Cursor authentication is not available',
+        });
+        return;
+      }
+      const result = await authCursor();
 
       if (result.success) {
         toast.success('Signed In', {
@@ -234,7 +244,17 @@ export function CursorCliStatus({ status, isChecking, onRefresh }: CursorCliStat
     setIsDeauthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.deauthCursor();
+      // Check if deauthCursor method exists on the API
+      const deauthCursor = (api?.setup as Record<string, unknown> | undefined)?.deauthCursor as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!deauthCursor) {
+        toast.error('Sign Out Failed', {
+          description: 'Cursor sign out is not available',
+        });
+        return;
+      }
+      const result = await deauthCursor();
 
       if (result.success) {
         toast.success('Signed Out', {

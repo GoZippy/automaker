@@ -68,7 +68,6 @@ export function CodexUsagePopover() {
   // Use React Query for data fetching with automatic polling
   const {
     data: codexUsage,
-    isLoading,
     isFetching,
     error: queryError,
     dataUpdatedAt,

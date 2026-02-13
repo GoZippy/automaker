@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ListChecks } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { SpecOutput } from '@automaker/spec-parser';
+import { generateUUID } from '@/lib/utils';
 
 type Feature = SpecOutput['implemented_features'][number];
 
@@ -22,19 +23,16 @@ interface FeatureWithId extends Feature {
   _locationIds?: string[];
 }
 
-function generateId(): string {
-  return crypto.randomUUID();
-}
-
 function featureToInternal(feature: Feature): FeatureWithId {
   return {
     ...feature,
-    _id: generateId(),
-    _locationIds: feature.file_locations?.map(() => generateId()),
+    _id: generateUUID(),
+    _locationIds: feature.file_locations?.map(() => generateUUID()),
   };
 }
 
 function internalToFeature(internal: FeatureWithId): Feature {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, _locationIds, ...feature } = internal;
   return feature;
 }
@@ -63,7 +61,7 @@ function FeatureCard({ feature, index, onChange, onRemove }: FeatureCardProps) {
     onChange({
       ...feature,
       file_locations: [...locations, ''],
-      _locationIds: [...locationIds, generateId()],
+      _locationIds: [...locationIds, generateUUID()],
     });
   };
 

@@ -26,6 +26,9 @@ export function useSessions(includeArchived = false) {
     queryKey: queryKeys.sessions.all(includeArchived),
     queryFn: async (): Promise<SessionListItem[]> => {
       const api = getElectronAPI();
+      if (!api.sessions) {
+        throw new Error('Sessions API not available');
+      }
       const result = await api.sessions.list(includeArchived);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch sessions');
@@ -48,6 +51,9 @@ export function useSessionHistory(sessionId: string | undefined) {
     queryFn: async () => {
       if (!sessionId) throw new Error('No session ID');
       const api = getElectronAPI();
+      if (!api.agent) {
+        throw new Error('Agent API not available');
+      }
       const result = await api.agent.getHistory(sessionId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch session history');
@@ -74,6 +80,9 @@ export function useSessionQueue(sessionId: string | undefined) {
     queryFn: async () => {
       if (!sessionId) throw new Error('No session ID');
       const api = getElectronAPI();
+      if (!api.agent) {
+        throw new Error('Agent API not available');
+      }
       const result = await api.agent.queueList(sessionId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch queue');

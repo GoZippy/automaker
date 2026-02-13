@@ -55,13 +55,18 @@ export function OpencodeSetupStep({ onNext, onBack, onSkip }: OpencodeSetupStepP
       }
       const result = await api.setup.getOpencodeStatus();
       if (result.success) {
+        // Derive install command from platform-specific options or use npm fallback
+        const installCommand =
+          result.installCommands?.npm ||
+          result.installCommands?.macos ||
+          result.installCommands?.linux;
         const status: OpencodeCliStatus = {
           installed: result.installed ?? false,
-          version: result.version,
-          path: result.path,
+          version: result.version ?? null,
+          path: result.path ?? null,
           auth: result.auth,
-          installCommand: result.installCommand,
-          loginCommand: result.loginCommand,
+          installCommand,
+          loginCommand: 'opencode auth login',
         };
         setOpencodeCliStatus(status);
 
@@ -316,7 +321,7 @@ export function OpencodeSetupStep({ onNext, onBack, onSkip }: OpencodeSetupStepP
                   >
                     {isLoggingIn ? (
                       <>
-                        <Spinner size="sm" className="mr-2" />
+                        <Spinner size="sm" variant="foreground" className="mr-2" />
                         Waiting for login...
                       </>
                     ) : (

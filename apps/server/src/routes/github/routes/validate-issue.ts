@@ -23,6 +23,7 @@ import {
   isCodexModel,
   isCursorModel,
   isOpencodeModel,
+  supportsStructuredOutput,
 } from '@automaker/types';
 import { resolvePhaseModel } from '@automaker/model-resolver';
 import { extractJson } from '../../../lib/json-extractor.js';
@@ -124,8 +125,9 @@ async function runValidation(
     const prompts = await getPromptCustomization(settingsService, '[ValidateIssue]');
     const issueValidationSystemPrompt = prompts.issueValidation.systemPrompt;
 
-    // Determine if we should use structured output (Claude/Codex support it, Cursor/OpenCode don't)
-    const useStructuredOutput = isClaudeModel(model) || isCodexModel(model);
+    // Determine if we should use structured output based on model type
+    // Claude and Codex support it; Cursor, Gemini, OpenCode, Copilot don't
+    const useStructuredOutput = supportsStructuredOutput(model);
 
     // Build the final prompt - for Cursor, include system prompt and JSON schema instructions
     let finalPrompt = basePrompt;

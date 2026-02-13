@@ -26,6 +26,9 @@ export function useAvailableEditors() {
   const { mutate: refreshMutate, isPending: isRefreshing } = useMutation({
     mutationFn: async () => {
       const api = getElectronAPI();
+      if (!api.worktree) {
+        throw new Error('Worktree API not available');
+      }
       const result = await api.worktree.refreshEditors();
       if (!result.success) {
         throw new Error(result.error || 'Failed to refresh editors');

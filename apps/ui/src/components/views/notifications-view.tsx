@@ -2,13 +2,13 @@
  * Notifications View - Full page view for all notifications
  */
 
-import { useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { useNotificationsStore } from '@/store/notifications-store';
 import { useLoadNotifications, useNotificationEvents } from '@/hooks/use-notification-events';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { Bell, Check, CheckCheck, Trash2, ExternalLink } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { useNavigate } from '@tanstack/react-router';
@@ -42,8 +42,6 @@ export function NotificationsView() {
     unreadCount,
     isLoading,
     error,
-    setNotifications,
-    setUnreadCount,
     markAsRead,
     dismissNotification,
     markAllAsRead,

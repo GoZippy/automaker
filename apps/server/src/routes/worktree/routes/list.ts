@@ -39,8 +39,15 @@ interface GitHubRemoteCacheEntry {
   checkedAt: number;
 }
 
+interface GitHubPRCacheEntry {
+  prs: Map<string, WorktreePRInfo>;
+  fetchedAt: number;
+}
+
 const githubRemoteCache = new Map<string, GitHubRemoteCacheEntry>();
+const githubPRCache = new Map<string, GitHubPRCacheEntry>();
 const GITHUB_REMOTE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const GITHUB_PR_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes - avoid hitting GitHub on every poll
 
 interface WorktreeInfo {
   path: string;
@@ -180,9 +187,21 @@ async function getGitHubRemoteStatus(projectPath: string): Promise<GitHubRemoteS
  * This also allows detecting PRs that were created outside the app.
  *
  * Uses cached GitHub remote status to avoid repeated warnings when the
- * project doesn't have a GitHub remote configured.
+ * project doesn't have a GitHub remote configured. Results are cached
+ * briefly to avoid hammering GitHub on frequent worktree polls.
  */
-async function fetchGitHubPRs(projectPath: string): Promise<Map<string, WorktreePRInfo>> {
+async function fetchGitHubPRs(
+  projectPath: string,
+  forceRefresh = false
+): Promise<Map<string, WorktreePRInfo>> {
+  const now = Date.now();
+  const cached = githubPRCache.get(projectPath);
+
+  // Return cached result if valid and not forcing refresh
+  if (!forceRefresh && cached && now - cached.fetchedAt < GITHUB_PR_CACHE_TTL_MS) {
+    return cached.prs;
+  }
+
   const prMap = new Map<string, WorktreePRInfo>();
 
   try {
@@ -225,8 +244,22 @@ async function fetchGitHubPRs(projectPath: string): Promise<Map<string, Worktree
         createdAt: pr.createdAt,
       });
     }
+
+    // Only update cache on successful fetch
+    githubPRCache.set(projectPath, {
+      prs: prMap,
+      fetchedAt: Date.now(),
+    });
   } catch (error) {
-    // Silently fail - PR detection is optional
+    // On fetch failure, return stale cached data if available to avoid
+    // repeated API calls during GitHub API flakiness or temporary outages
+    if (cached) {
+      logger.warn(`Failed to fetch GitHub PRs, returning stale cache: ${getErrorMessage(error)}`);
+      // Extend cache TTL to avoid repeated retries during outages
+      githubPRCache.set(projectPath, { prs: cached.prs, fetchedAt: Date.now() });
+      return cached.prs;
+    }
+    // No cache available, log warning and return empty map
     logger.warn(`Failed to fetch GitHub PRs: ${getErrorMessage(error)}`);
   }
 
@@ -364,7 +397,7 @@ export function createListHandler() {
       // Only fetch GitHub PRs if includeDetails is requested (performance optimization).
       // Uses --state all to detect merged/closed PRs, limited to 1000 recent PRs.
       const githubPRs = includeDetails
-        ? await fetchGitHubPRs(projectPath)
+        ? await fetchGitHubPRs(projectPath, forceRefreshGitHub)
         : new Map<string, WorktreePRInfo>();
 
       for (const worktree of worktrees) {

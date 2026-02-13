@@ -1,14 +1,12 @@
-// @ts-nocheck
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Brain, AlertTriangle } from 'lucide-react';
 import { AnthropicIcon, CursorIcon, OpenAIIcon } from '@/components/ui/provider-icon';
 import { cn } from '@/lib/utils';
-import type { ModelAlias } from '@/store/app-store';
 import { useAppStore } from '@/store/app-store';
 import { useSetupStore } from '@/store/setup-store';
-import { getModelProvider, PROVIDER_PREFIXES, stripProviderPrefix } from '@automaker/types';
-import type { ModelProvider } from '@automaker/types';
+import { getModelProvider } from '@automaker/types';
+import type { ModelProvider, CursorModelId } from '@automaker/types';
 import { CLAUDE_MODELS, CURSOR_MODELS, ModelOption } from './model-constants';
 import { useEffect } from 'react';
 import { Spinner } from '@/components/ui/spinner';
@@ -41,6 +39,7 @@ export function ModelSelector({
   const isCursorAvailable = cursorCliStatus?.installed && cursorCliStatus?.auth?.authenticated;
 
   // Check if Codex CLI is available
+  // @ts-expect-error - codexCliStatus uses CliStatus type but should use CodexCliStatus which has auth
   const isCodexAvailable = codexCliStatus?.installed && codexCliStatus?.auth?.authenticated;
 
   // Fetch Codex models on mount
@@ -76,8 +75,8 @@ export function ModelSelector({
     // Check both the full ID (for GPT models) and the unprefixed version (for non-GPT models)
     const unprefixedId = model.id.startsWith('cursor-') ? model.id.slice(7) : model.id;
     return (
-      enabledCursorModels.includes(model.id as any) ||
-      enabledCursorModels.includes(unprefixedId as any)
+      enabledCursorModels.includes(model.id as CursorModelId) ||
+      enabledCursorModels.includes(unprefixedId as CursorModelId)
     );
   });
 

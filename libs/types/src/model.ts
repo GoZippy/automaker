@@ -3,6 +3,7 @@
  */
 import type { CursorModelId } from './cursor-models.js';
 import type { OpencodeModelId } from './opencode-models.js';
+import type { GeminiModelId } from './gemini-models.js';
 
 /**
  * Canonical Claude model IDs with provider prefix
@@ -119,6 +120,7 @@ export type DynamicModelId = `${string}/${string}`;
  */
 export type PrefixedCursorModelId = `cursor-${string}`;
 export type PrefixedOpencodeModelId = `opencode-${string}`;
+export type PrefixedGeminiModelId = `gemini-${string}`;
 
 /**
  * ModelId - Unified model identifier across providers
@@ -127,7 +129,9 @@ export type ModelId =
   | ModelAlias
   | CodexModelId
   | CursorModelId
+  | GeminiModelId
   | OpencodeModelId
   | DynamicModelId
   | PrefixedCursorModelId
-  | PrefixedOpencodeModelId;
+  | PrefixedOpencodeModelId
+  | PrefixedGeminiModelId;

@@ -27,16 +27,17 @@ import {
   Copy,
   Eye,
   ScrollText,
-  Sparkles,
+  CloudOff,
   Terminal,
   SquarePlus,
   SplitSquareHorizontal,
   Undo2,
   Zap,
+  FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus } from '../types';
+import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus, TestSessionInfo } from '../types';
 import { TooltipWrapper } from './tooltip-wrapper';
 import { useAvailableEditors, useEffectiveDefaultEditor } from '../hooks/use-available-editors';
 import {
@@ -63,6 +64,14 @@ interface WorktreeActionsDropdownProps {
   standalone?: boolean;
   /** Whether auto mode is running for this worktree */
   isAutoModeRunning?: boolean;
+  /** Whether a test command is configured in project settings */
+  hasTestCommand?: boolean;
+  /** Whether tests are being started for this worktree */
+  isStartingTests?: boolean;
+  /** Whether tests are currently running for this worktree */
+  isTestRunning?: boolean;
+  /** Active test session info for this worktree */
+  testSessionInfo?: TestSessionInfo;
   onOpenChange: (open: boolean) => void;
   onPull: (worktree: WorktreeInfo) => void;
   onPush: (worktree: WorktreeInfo) => void;
@@ -84,6 +93,12 @@ interface WorktreeActionsDropdownProps {
   onRunInitScript: (worktree: WorktreeInfo) => void;
   onToggleAutoMode?: (worktree: WorktreeInfo) => void;
   onMerge: (worktree: WorktreeInfo) => void;
+  /** Start running tests for this worktree */
+  onStartTests?: (worktree: WorktreeInfo) => void;
+  /** Stop running tests for this worktree */
+  onStopTests?: (worktree: WorktreeInfo) => void;
+  /** View test logs for this worktree */
+  onViewTestLogs?: (worktree: WorktreeInfo) => void;
   hasInitScript: boolean;
 }
 
@@ -101,6 +116,10 @@ export function WorktreeActionsDropdown({
   gitRepoStatus,
   standalone = false,
   isAutoModeRunning = false,
+  hasTestCommand = false,
+  isStartingTests = false,
+  isTestRunning = false,
+  testSessionInfo,
   onOpenChange,
   onPull,
   onPush,
@@ -122,6 +141,9 @@ export function WorktreeActionsDropdown({
   onRunInitScript,
   onToggleAutoMode,
   onMerge,
+  onStartTests,
+  onStopTests,
+  onViewTestLogs,
   hasInitScript,
 }: WorktreeActionsDropdownProps) {
   // Get available editors for the "Open In" submenu
@@ -139,7 +161,7 @@ export function WorktreeActionsDropdown({
     : null;
 
   // Get available terminals for the "Open In Terminal" submenu
-  const { terminals, hasExternalTerminals } = useAvailableTerminals();
+  const { terminals } = useAvailableTerminals();
 
   // Use shared hook for effective default terminal (null = integrated terminal)
   const effectiveDefaultTerminal = useEffectiveDefaultTerminal(terminals);
@@ -231,6 +253,65 @@ export function WorktreeActionsDropdown({
             <DropdownMenuSeparator />
           </>
         )}
+        {/* Test Runner section - only show when test command is configured */}
+        {hasTestCommand && onStartTests && (
+          <>
+            {isTestRunning ? (
+              <>
+                <DropdownMenuLabel className="text-xs flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  Tests Running
+                </DropdownMenuLabel>
+                {onViewTestLogs && (
+                  <DropdownMenuItem onClick={() => onViewTestLogs(worktree)} className="text-xs">
+                    <ScrollText className="w-3.5 h-3.5 mr-2" />
+                    View Test Logs
+                  </DropdownMenuItem>
+                )}
+                {onStopTests && (
+                  <DropdownMenuItem
+                    onClick={() => onStopTests(worktree)}
+                    className="text-xs text-destructive focus:text-destructive"
+                  >
+                    <Square className="w-3.5 h-3.5 mr-2" />
+                    Stop Tests
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  onClick={() => onStartTests(worktree)}
+                  disabled={isStartingTests}
+                  className="text-xs"
+                >
+                  <FlaskConical
+                    className={cn('w-3.5 h-3.5 mr-2', isStartingTests && 'animate-pulse')}
+                  />
+                  {isStartingTests ? 'Starting Tests...' : 'Run Tests'}
+                </DropdownMenuItem>
+                {onViewTestLogs && testSessionInfo && (
+                  <DropdownMenuItem onClick={() => onViewTestLogs(worktree)} className="text-xs">
+                    <ScrollText className="w-3.5 h-3.5 mr-2" />
+                    View Last Test Results
+                    {testSessionInfo.status === 'passed' && (
+                      <span className="ml-auto text-[10px] bg-green-500/20 text-green-600 px-1.5 py-0.5 rounded">
+                        passed
+                      </span>
+                    )}
+                    {testSessionInfo.status === 'failed' && (
+                      <span className="ml-auto text-[10px] bg-red-500/20 text-red-600 px-1.5 py-0.5 rounded">
+                        failed
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+              </>
+            )}
+          </>
+        )}
         {/* Auto Mode toggle */}
         {onToggleAutoMode && (
           <>
@@ -238,7 +319,7 @@ export function WorktreeActionsDropdown({
               <DropdownMenuItem onClick={() => onToggleAutoMode(worktree)} className="text-xs">
                 <span className="flex items-center mr-2">
                   <Zap className="w-3.5 h-3.5 text-yellow-500" />
-                  <span className="ml-0.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="ml-1.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                 </span>
                 Stop Auto Mode
               </DropdownMenuItem>
@@ -284,9 +365,9 @@ export function WorktreeActionsDropdown({
             {isPushing ? 'Pushing...' : 'Push'}
             {!canPerformGitOps && <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />}
             {canPerformGitOps && !hasRemoteBranch && (
-              <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">
-                <Sparkles className="w-2.5 h-2.5" />
-                new
+              <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] bg-amber-500/20 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                <CloudOff className="w-2.5 h-2.5" />
+                local only
               </span>
             )}
             {canPerformGitOps && hasRemoteBranch && aheadCount > 0 && (

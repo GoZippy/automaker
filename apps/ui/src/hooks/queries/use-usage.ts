@@ -32,6 +32,9 @@ export function useClaudeUsage(enabled = true) {
     queryKey: queryKeys.usage.claude(),
     queryFn: async (): Promise<ClaudeUsage> => {
       const api = getElectronAPI();
+      if (!api.claude) {
+        throw new Error('Claude API not available');
+      }
       const result = await api.claude.getUsage();
       // Check if result is an error response
       if ('error' in result) {
@@ -65,6 +68,9 @@ export function useCodexUsage(enabled = true) {
     queryKey: queryKeys.usage.codex(),
     queryFn: async (): Promise<CodexUsage> => {
       const api = getElectronAPI();
+      if (!api.codex) {
+        throw new Error('Codex API not available');
+      }
       const result = await api.codex.getUsage();
       // Check if result is an error response
       if ('error' in result) {

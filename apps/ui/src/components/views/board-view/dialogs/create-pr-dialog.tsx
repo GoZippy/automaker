@@ -241,9 +241,9 @@ export function CreatePRDialog({
             <GitPullRequest className="w-5 h-5" />
             Create Pull Request
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="break-words">
             Push changes and create a pull request from{' '}
-            <code className="font-mono bg-muted px-1 rounded">{worktree.branch}</code>
+            <code className="font-mono bg-muted px-1 rounded break-all">{worktree.branch}</code>
           </DialogDescription>
         </DialogHeader>
 

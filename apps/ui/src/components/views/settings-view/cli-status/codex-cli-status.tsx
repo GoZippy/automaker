@@ -84,7 +84,17 @@ export function CodexCliStatus({ status, authStatus, isChecking, onRefresh }: Cl
     setIsAuthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.authCodex();
+      // Check if authCodex method exists on the API
+      const authCodex = (api.setup as Record<string, unknown> | undefined)?.authCodex as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!authCodex) {
+        toast.error('Authentication Failed', {
+          description: 'Codex authentication is not available',
+        });
+        return;
+      }
+      const result = await authCodex();
 
       if (result.success) {
         toast.success('Signed In', {
@@ -109,7 +119,17 @@ export function CodexCliStatus({ status, authStatus, isChecking, onRefresh }: Cl
     setIsDeauthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.deauthCodex();
+      // Check if deauthCodex method exists on the API
+      const deauthCodex = (api.setup as Record<string, unknown> | undefined)?.deauthCodex as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!deauthCodex) {
+        toast.error('Sign Out Failed', {
+          description: 'Codex sign out is not available',
+        });
+        return;
+      }
+      const result = await deauthCodex();
 
       if (result.success) {
         toast.success('Signed Out', {

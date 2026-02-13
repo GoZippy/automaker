@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - GitHub issues view with issue selection and feature creation flow
 import { useState, useCallback, useMemo } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import { CircleDot, RefreshCw, SearchX } from 'lucide-react';
@@ -42,9 +42,6 @@ export function GitHubIssuesView() {
 
   // Model override for validation
   const validationModelOverride = useModelOverride({ phase: 'validationModel' });
-
-  // Extract model string for API calls (backward compatibility)
-  const validationModelString = validationModelOverride.effectiveModel;
 
   const { openIssues, closedIssues, loading, refreshing, error, refresh } = useGithubIssues();
 

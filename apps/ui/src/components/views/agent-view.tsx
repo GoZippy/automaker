@@ -63,7 +63,6 @@ export function AgentView() {
     sendMessage,
     clearHistory,
     stopExecution,
-    error: agentError,
     serverQueue,
     addToServerQueue,
     removeFromServerQueue,

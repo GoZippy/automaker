@@ -40,7 +40,7 @@ import { useIsCompact } from '@/hooks/use-media-query';
 import type { Project } from '@/lib/electron';
 
 const logger = createLogger('RootLayout');
-const SHOW_QUERY_DEVTOOLS = import.meta.env.DEV;
+const IS_DEV = import.meta.env.DEV;
 const SERVER_READY_MAX_ATTEMPTS = 8;
 const SERVER_READY_BACKOFF_BASE_MS = 250;
 const SERVER_READY_MAX_DELAY_MS = 1500;
@@ -168,11 +168,10 @@ function RootLayoutContent() {
     theme,
     fontFamilySans,
     fontFamilyMono,
+    sidebarStyle,
     skipSandboxWarning,
     setSkipSandboxWarning,
     fetchCodexModels,
-    sidebarOpen,
-    toggleSidebar,
   } = useAppStore();
   const { setupComplete, codexCliStatus } = useSetupStore();
   const navigate = useNavigate();
@@ -186,14 +185,10 @@ function RootLayoutContent() {
   // Load project settings when switching projects
   useProjectSettingsLoader();
 
-  // Check if we're in compact mode (< 1240px) to hide project switcher
-  const isCompact = useIsCompact();
-
   const isSetupRoute = location.pathname === '/setup';
   const isLoginRoute = location.pathname === '/login';
   const isLoggedOutRoute = location.pathname === '/logged-out';
   const isDashboardRoute = location.pathname === '/dashboard';
-  const isBoardRoute = location.pathname === '/board';
   const isRootRoute = location.pathname === '/';
   const [autoOpenStatus, setAutoOpenStatus] = useState<AutoOpenStatus>(AUTO_OPEN_STATUS.idle);
   const autoOpenCandidate = selectAutoOpenProject(currentProject, projects, projectHistory);
@@ -260,11 +255,8 @@ function RootLayoutContent() {
 
   // Get effective theme and fonts for the current project
   // Note: theme/fontFamilySans/fontFamilyMono are destructured above to ensure re-renders when they change
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void theme; // Used for subscription
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void fontFamilySans; // Used for subscription
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void fontFamilyMono; // Used for subscription
   const effectiveFontSans = getEffectiveFontSans();
   const effectiveFontMono = getEffectiveFontMono();
@@ -853,11 +845,6 @@ function RootLayoutContent() {
     );
   }
 
-  // Show project switcher on all app pages (not on dashboard, setup, or login)
-  // Also hide on compact screens (< 1240px) - the sidebar will show a logo instead
-  const showProjectSwitcher =
-    !isDashboardRoute && !isSetupRoute && !isLoginRoute && !isLoggedOutRoute && !isCompact;
-
   return (
     <>
       <main className="flex h-screen overflow-hidden" data-testid="app-container">
@@ -868,7 +855,8 @@ function RootLayoutContent() {
             aria-hidden="true"
           />
         )}
-        {showProjectSwitcher && <ProjectSwitcher />}
+        {/* Discord-style layout: narrow project switcher + expandable sidebar */}
+        {sidebarStyle === 'discord' && <ProjectSwitcher />}
         <Sidebar />
         <div
           className="flex-1 flex flex-col overflow-hidden transition-all duration-300"
@@ -895,17 +883,22 @@ function RootLayoutContent() {
 }
 
 function RootLayout() {
-  // Hide devtools on compact screens (mobile/tablet) to avoid overlap with sidebar settings
+  // Hide devtools on compact screens (mobile/tablet) to avoid overlap with UI controls
   const isCompact = useIsCompact();
+  // Get the user's preference for showing devtools from the app store
+  const showQueryDevtools = useAppStore((state) => state.showQueryDevtools);
+
+  // Show devtools only if: in dev mode, user setting enabled, and not compact screen
+  const shouldShowDevtools = IS_DEV && showQueryDevtools && !isCompact;
 
   return (
     <QueryClientProvider client={queryClient}>
       <FileBrowserProvider>
         <RootLayoutContent />
       </FileBrowserProvider>
-      {SHOW_QUERY_DEVTOOLS && !isCompact ? (
-        <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-left" />
-      ) : null}
+      {shouldShowDevtools && (
+        <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
+      )}
     </QueryClientProvider>
   );
 }

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Markdown } from '@/components/ui/markdown';
+import { PlanContentViewer } from './plan-content-viewer';
 import { Label } from '@/components/ui/label';
 import { Feature } from '@/store/app-store';
 import { Check, RefreshCw, Edit2, Eye } from 'lucide-react';
@@ -42,6 +42,10 @@ export function PlanApprovalDialog({
   const [editedPlan, setEditedPlan] = useState(planContent);
   const [showRejectFeedback, setShowRejectFeedback] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState('');
+  const [showFullDescription, setShowFullDescription] = useState(false);
+
+  const DESCRIPTION_LIMIT = 250;
+  const TITLE_LIMIT = 50;
 
   // Reset state when dialog opens or plan content changes
   useEffect(() => {
@@ -50,6 +54,7 @@ export function PlanApprovalDialog({
       setIsEditMode(false);
       setShowRejectFeedback(false);
       setRejectFeedback('');
+      setShowFullDescription(false);
     }
   }, [open, planContent]);
 
@@ -82,15 +87,31 @@ export function PlanApprovalDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl" data-testid="plan-approval-dialog">
         <DialogHeader>
-          <DialogTitle>{viewOnly ? 'View Plan' : 'Review Plan'}</DialogTitle>
+          <DialogTitle>
+            {viewOnly ? 'View Plan' : 'Review Plan'}
+            {feature?.title && feature.title.length <= TITLE_LIMIT && (
+              <span className="font-normal text-muted-foreground"> - {feature.title}</span>
+            )}
+          </DialogTitle>
           <DialogDescription>
             {viewOnly
               ? 'View the generated plan for this feature.'
               : 'Review the generated plan before implementation begins.'}
             {feature && (
               <span className="block mt-2 text-primary">
-                Feature: {feature.description.slice(0, 150)}
-                {feature.description.length > 150 ? '...' : ''}
+                Feature:{' '}
+                {showFullDescription || feature.description.length <= DESCRIPTION_LIMIT
+                  ? feature.description
+                  : `${feature.description.slice(0, DESCRIPTION_LIMIT)}...`}
+                {feature.description.length > DESCRIPTION_LIMIT && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullDescription(!showFullDescription)}
+                    className="ml-1 text-muted-foreground hover:text-foreground underline text-sm"
+                  >
+                    {showFullDescription ? 'show less' : 'show more'}
+                  </button>
+                )}
               </span>
             )}
           </DialogDescription>
@@ -135,9 +156,7 @@ export function PlanApprovalDialog({
                 disabled={isLoading}
               />
             ) : (
-              <div className="p-4 overflow-auto">
-                <Markdown>{editedPlan || 'No plan content available.'}</Markdown>
-              </div>
+              <PlanContentViewer content={editedPlan || ''} className="p-4" />
             )}
           </div>
 
@@ -191,7 +210,7 @@ export function PlanApprovalDialog({
                 className="bg-green-600 hover:bg-green-700 text-white"
               >
                 {isLoading ? (
-                  <Spinner size="sm" className="mr-2" />
+                  <Spinner size="sm" variant="foreground" className="mr-2" />
                 ) : (
                   <Check className="w-4 h-4 mr-2" />
                 )}

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAppStore, FileTreeNode, ProjectAnalysis } from '@/store/app-store';
+import { useAppStore, FileTreeNode, ProjectAnalysis, Feature } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -640,14 +640,14 @@ ${Object.entries(projectAnalysis.filesByExtension)
       }
 
       for (const detectedFeature of detectedFeatures) {
-        await api.features.create(currentProject.path, {
+        const newFeature: Feature = {
           id: generateUUID(),
           category: detectedFeature.category,
           description: detectedFeature.description,
           status: 'backlog',
-          // Initialize with empty steps so the object satisfies the Feature type
           steps: [],
-        } as any);
+        };
+        await api.features.create(currentProject.path, newFeature);
       }
 
       // Invalidate React Query cache to sync UI

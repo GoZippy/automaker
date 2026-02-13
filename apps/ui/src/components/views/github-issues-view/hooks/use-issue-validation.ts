@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - GitHub issue validation with Electron API integration and async state
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import {
@@ -16,17 +16,6 @@ import { isValidationStale } from '../utils';
 import { useValidateIssue, useMarkValidationViewed } from '@/hooks/mutations';
 
 const logger = createLogger('IssueValidation');
-
-/**
- * Extract model string from PhaseModelEntry or string (handles both formats)
- */
-function extractModel(entry: PhaseModelEntry | string | undefined): ModelId | undefined {
-  if (!entry) return undefined;
-  if (typeof entry === 'string') {
-    return entry as ModelId;
-  }
-  return entry.model;
-}
 
 interface UseIssueValidationOptions {
   selectedIssue: GitHubIssue | null;

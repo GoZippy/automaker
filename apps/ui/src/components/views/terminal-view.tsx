@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { createLogger } from '@automaker/utils/logger';
 import {
@@ -58,7 +58,7 @@ import {
   defaultDropAnimationSideEffects,
 } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
-import { apiFetch, apiGet, apiPost, apiDeleteRaw, getAuthHeaders } from '@/lib/api-fetch';
+import { apiFetch, apiGet, apiPost, apiDeleteRaw } from '@/lib/api-fetch';
 import { getApiKey } from '@/lib/http-api-client';
 
 const logger = createLogger('Terminal');
@@ -244,7 +244,6 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     reorderTerminalTabs,
     moveTerminalToTab,
     setTerminalPanelFontSize,
-    setTerminalTabLayout,
     toggleTerminalMaximized,
     saveTerminalLayout,
     getPersistedTerminalLayout,
@@ -311,9 +310,10 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       if (!node) return;
       if (node.type === 'terminal') {
         sessionIds.push(node.sessionId);
-      } else {
+      } else if (node.type === 'split') {
         node.panels.forEach(collectFromLayout);
       }
+      // testRunner type has sessionId but we only collect terminal sessions
     };
     terminalState.tabs.forEach((tab) => collectFromLayout(tab.layout));
     return sessionIds;
@@ -621,7 +621,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
             description: data.error || 'Unknown error',
           });
           // Reset the handled ref so the same cwd can be retried
-          initialCwdHandledRef.current = undefined;
+          initialCwdHandledRef.current = null;
         }
       } catch (err) {
         logger.error('Create terminal with cwd error:', err);
@@ -629,7 +629,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
           description: 'Could not connect to server',
         });
         // Reset the handled ref so the same cwd can be retried
-        initialCwdHandledRef.current = undefined;
+        initialCwdHandledRef.current = null;
       }
     };
 
@@ -790,6 +790,11 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
               size: persisted.size,
               fontSize: persisted.fontSize,
             };
+          }
+
+          // Handle testRunner type - skip for now as we don't persist test runner sessions
+          if (persisted.type === 'testRunner') {
+            return null;
           }
 
           // It's a split - rebuild all child panels
@@ -1095,7 +1100,8 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     const collectSessionIds = (node: TerminalPanelContent | null): string[] => {
       if (!node) return [];
       if (node.type === 'terminal') return [node.sessionId];
-      return node.panels.flatMap(collectSessionIds);
+      if (node.type === 'split') return node.panels.flatMap(collectSessionIds);
+      return []; // testRunner type
     };
 
     const sessionIds = collectSessionIds(tab.layout);
@@ -1133,7 +1139,10 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     if (panel.type === 'terminal') {
       return [panel.sessionId];
     }
-    return panel.panels.flatMap(getTerminalIds);
+    if (panel.type === 'split') {
+      return panel.panels.flatMap(getTerminalIds);
+    }
+    return []; // testRunner type
   };
 
   // Get a STABLE key for a panel - uses the stable id for splits
@@ -1142,8 +1151,12 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     if (panel.type === 'terminal') {
       return panel.sessionId;
     }
-    // Use the stable id for split nodes
-    return panel.id;
+    if (panel.type === 'split') {
+      // Use the stable id for split nodes
+      return panel.id;
+    }
+    // testRunner - use sessionId
+    return panel.sessionId;
   };
 
   const findTerminalFontSize = useCallback(
@@ -1155,6 +1168,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
           }
           return null;
         }
+        if (panel.type !== 'split') return null; // testRunner type
         for (const child of panel.panels) {
           const found = findInPanel(child);
           if (found !== null) return found;
@@ -1209,7 +1223,8 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
         // Helper to get all terminal IDs from a layout subtree
         const getAllTerminals = (node: TerminalPanelContent): string[] => {
           if (node.type === 'terminal') return [node.sessionId];
-          return node.panels.flatMap(getAllTerminals);
+          if (node.type === 'split') return node.panels.flatMap(getAllTerminals);
+          return []; // testRunner type
         };
 
         // Helper to find terminal and its path in the tree
@@ -1226,6 +1241,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
           if (node.type === 'terminal') {
             return node.sessionId === target ? path : null;
           }
+          if (node.type !== 'split') return null; // testRunner type
           for (let i = 0; i < node.panels.length; i++) {
             const result = findPath(node.panels[i], target, [
               ...path,
@@ -1355,6 +1371,11 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       );
     }
 
+    // Handle testRunner type - return null for now
+    if (content.type === 'testRunner') {
+      return null;
+    }
+
     const isHorizontal = content.direction === 'horizontal';
     const defaultSizePerPanel = 100 / content.panels.length;
 
@@ -1366,7 +1387,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
 
     return (
       <PanelGroup direction={content.direction} onLayout={handleLayoutChange}>
-        {content.panels.map((panel, index) => {
+        {content.panels.map((panel: TerminalPanelContent, index: number) => {
           const panelSize =
             panel.type === 'terminal' && panel.size ? panel.size : defaultSizePerPanel;
 

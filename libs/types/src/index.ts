@@ -19,6 +19,8 @@ export type {
   McpHttpServerConfig,
   AgentDefinition,
   ReasoningEffort,
+  // System prompt configuration for CLAUDE.md auto-loading
+  SystemPromptPreset,
 } from './provider.js';
 
 // Provider constants and utilities
@@ -34,6 +36,10 @@ export type {
   CodexApprovalPolicy,
   CodexCliConfig,
   CodexAuthStatus,
+  // Event types for CLI event parsing
+  CodexEventType,
+  CodexItemType,
+  CodexEvent,
 } from './codex.js';
 export * from './codex-models.js';
 
@@ -58,6 +64,11 @@ export type {
   FeatureTextFilePath,
   FeatureStatus,
   DescriptionHistoryEntry,
+  FeatureExport,
+  FeatureImport,
+  FeatureImportResult,
+  ParsedTask,
+  PlanSpec,
 } from './feature.js';
 
 // Session types
@@ -136,6 +147,7 @@ export { DEFAULT_PROMPT_CUSTOMIZATION } from './prompts.js';
 // Settings types and constants
 export type {
   ThemeMode,
+  SidebarStyle,
   PlanningMode,
   ThinkingLevel,
   ServerLogLevel,
@@ -196,6 +208,7 @@ export {
 export type { ModelOption, ThinkingLevelOption, ReasoningEffortOption } from './model-display.js';
 export {
   CLAUDE_MODELS,
+  GEMINI_MODELS,
   THINKING_LEVELS,
   THINKING_LEVEL_LABELS,
   REASONING_EFFORT_LEVELS,
@@ -240,6 +253,12 @@ export * from './cursor-cli.js';
 // OpenCode types
 export * from './opencode-models.js';
 
+// Gemini types
+export * from './gemini-models.js';
+
+// Copilot types
+export * from './copilot-models.js';
+
 // Provider utilities
 export {
   PROVIDER_PREFIXES,
@@ -247,12 +266,15 @@ export {
   isClaudeModel,
   isCodexModel,
   isOpencodeModel,
+  isGeminiModel,
+  isCopilotModel,
   getModelProvider,
   stripProviderPrefix,
   addProviderPrefix,
   getBareModelId,
   normalizeModelString,
   validateBareModelId,
+  supportsStructuredOutput,
 } from './provider-utils.js';
 
 // Model migration utilities
@@ -306,7 +328,9 @@ export type {
   IdeationEventType,
   IdeationStreamEvent,
   IdeationAnalysisEvent,
+  IdeationContextSources,
 } from './ideation.js';
+export { DEFAULT_IDEATION_CONTEXT_SOURCES } from './ideation.js';
 
 // Notification types
 export type { NotificationType, Notification, NotificationsFile } from './notification.js';
@@ -324,8 +348,34 @@ export type {
 export { EVENT_HISTORY_VERSION, DEFAULT_EVENT_HISTORY_INDEX } from './event-history.js';
 
 // Worktree and PR types
-export type { PRState, WorktreePRInfo } from './worktree.js';
+export type {
+  PRState,
+  WorktreePRInfo,
+  AddRemoteRequest,
+  AddRemoteResult,
+  AddRemoteResponse,
+  AddRemoteErrorResponse,
+} from './worktree.js';
 export { PR_STATES, validatePRState } from './worktree.js';
 
 // Terminal types
 export type { TerminalInfo } from './terminal.js';
+
+// Test runner types
+export type { TestRunnerInfo } from './test-runner.js';
+
+// Project overview types (multi-project dashboard)
+export type {
+  ProjectHealthStatus,
+  FeatureStatusCounts,
+  ProjectStatus,
+  AggregateFeatureCounts,
+  AggregateProjectCounts,
+  AggregateStatus,
+  ActivityType,
+  ActivitySeverity,
+  RecentActivity,
+  ActivityFeedOptions,
+  MultiProjectOverview,
+  ProjectOverviewError,
+} from './project-overview.js';

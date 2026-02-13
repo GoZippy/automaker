@@ -14,8 +14,7 @@ import { toast } from 'sonner';
 
 export function ApiKeysSection() {
   const { apiKeys, setApiKeys } = useAppStore();
-  const { claudeAuthStatus, setClaudeAuthStatus, codexAuthStatus, setCodexAuthStatus } =
-    useSetupStore();
+  const { claudeAuthStatus, setClaudeAuthStatus, setCodexAuthStatus } = useSetupStore();
   const [isDeletingAnthropicKey, setIsDeletingAnthropicKey] = useState(false);
   const [isDeletingOpenaiKey, setIsDeletingOpenaiKey] = useState(false);
 
@@ -45,7 +44,7 @@ export function ApiKeysSection() {
       } else {
         toast.error(result.error || 'Failed to delete API key');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete API key');
     } finally {
       setIsDeletingAnthropicKey(false);
@@ -73,7 +72,7 @@ export function ApiKeysSection() {
       } else {
         toast.error(result.error || 'Failed to delete API key');
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete API key');
     } finally {
       setIsDeletingOpenaiKey(false);

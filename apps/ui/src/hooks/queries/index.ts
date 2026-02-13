@@ -60,12 +60,13 @@ export {
 // CLI Status
 export {
   useClaudeCliStatus,
-  useCursorCliStatus,
-  useCodexCliStatus,
-  useOpencodeCliStatus,
   useGitHubCliStatus,
   useApiKeysStatus,
   usePlatformInfo,
+  useCursorCliStatus,
+  useCopilotCliStatus,
+  useGeminiCliStatus,
+  useOpencodeCliStatus,
 } from './use-cli-status';
 
 // Ideation

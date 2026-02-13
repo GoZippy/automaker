@@ -16,7 +16,7 @@ import { createServer } from 'http';
 import dotenv from 'dotenv';
 
 import { createEventEmitter, type EventEmitter } from './lib/events.js';
-import { initAllowedPaths } from '@automaker/platform';
+import { initAllowedPaths, getClaudeAuthIndicators } from '@automaker/platform';
 import { createLogger, setLogLevel, LogLevel } from '@automaker/utils';
 
 const logger = createLogger('Server');
@@ -43,7 +43,6 @@ import { createEnhancePromptRoutes } from './routes/enhance-prompt/index.js';
 import { createWorktreeRoutes } from './routes/worktree/index.js';
 import { createGitRoutes } from './routes/git/index.js';
 import { createSetupRoutes } from './routes/setup/index.js';
-import { createSuggestionsRoutes } from './routes/suggestions/index.js';
 import { createModelsRoutes } from './routes/models/index.js';
 import { createRunningAgentsRoutes } from './routes/running-agents/index.js';
 import { createWorkspaceRoutes } from './routes/workspace/index.js';
@@ -83,6 +82,8 @@ import { createNotificationsRoutes } from './routes/notifications/index.js';
 import { getNotificationService } from './services/notification-service.js';
 import { createEventHistoryRoutes } from './routes/event-history/index.js';
 import { getEventHistoryService } from './services/event-history-service.js';
+import { getTestRunnerService } from './services/test-runner-service.js';
+import { createProjectsRoutes } from './routes/projects/index.js';
 
 // Load environment variables
 dotenv.config();
@@ -116,15 +117,44 @@ export function isRequestLoggingEnabled(): boolean {
 // Width for log box content (excluding borders)
 const BOX_CONTENT_WIDTH = 67;
 
-// Check for required environment variables
-const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+// Check for Claude authentication (async - runs in background)
+// The Claude Agent SDK can use either ANTHROPIC_API_KEY or Claude Code CLI authentication
+(async () => {
+  const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
 
-if (!hasAnthropicKey) {
+  if (hasAnthropicKey) {
+    logger.info('✓ ANTHROPIC_API_KEY detected');
+    return;
+  }
+
+  // Check for Claude Code CLI authentication
+  try {
+    const indicators = await getClaudeAuthIndicators();
+    const hasCliAuth =
+      indicators.hasStatsCacheWithActivity ||
+      (indicators.hasSettingsFile && indicators.hasProjectsSessions) ||
+      (indicators.hasCredentialsFile &&
+        (indicators.credentials?.hasOAuthToken || indicators.credentials?.hasApiKey));
+
+    if (hasCliAuth) {
+      logger.info('✓ Claude Code CLI authentication detected');
+      return;
+    }
+  } catch (error) {
+    // Ignore errors checking CLI auth - will fall through to warning
+    logger.warn('Error checking for Claude Code CLI authentication:', error);
+  }
+
+  // No authentication found - show warning
   const wHeader = '⚠️  WARNING: No Claude authentication configured'.padEnd(BOX_CONTENT_WIDTH);
   const w1 = 'The Claude Agent SDK requires authentication to function.'.padEnd(BOX_CONTENT_WIDTH);
-  const w2 = 'Set your Anthropic API key:'.padEnd(BOX_CONTENT_WIDTH);
-  const w3 = '  export ANTHROPIC_API_KEY="sk-ant-..."'.padEnd(BOX_CONTENT_WIDTH);
-  const w4 = 'Or use the setup wizard in Settings to configure authentication.'.padEnd(
+  const w2 = 'Options:'.padEnd(BOX_CONTENT_WIDTH);
+  const w3 = '1. Install Claude Code CLI and authenticate with subscription'.padEnd(
+    BOX_CONTENT_WIDTH
+  );
+  const w4 = '2. Set your Anthropic API key:'.padEnd(BOX_CONTENT_WIDTH);
+  const w5 = '   export ANTHROPIC_API_KEY="sk-ant-..."'.padEnd(BOX_CONTENT_WIDTH);
+  const w6 = '3. Use the setup wizard in Settings to configure authentication.'.padEnd(
     BOX_CONTENT_WIDTH
   );
 
@@ -137,14 +167,13 @@ if (!hasAnthropicKey) {
 ║                                                                     ║
 ║  ${w2}║
 ║  ${w3}║
-║                                                                     ║
 ║  ${w4}║
+║  ${w5}║
+║  ${w6}║
 ║                                                                     ║
 ╚═════════════════════════════════════════════════════════════════════╝
 `);
-} else {
-  logger.info('✓ ANTHROPIC_API_KEY detected');
-}
+})();
 
 // Initialize security
 initAllowedPaths();
@@ -248,6 +277,10 @@ notificationService.setEventEmitter(events);
 // Initialize Event History Service
 const eventHistoryService = getEventHistoryService();
 
+// Initialize Test Runner Service with event emitter for real-time test output streaming
+const testRunnerService = getTestRunnerService();
+testRunnerService.setEventEmitter(events);
+
 // Initialize Event Hook Service for custom event triggers (with history storage)
 eventHookService.initialize(events, settingsService, eventHistoryService, featureLoader);
 
@@ -321,12 +354,14 @@ app.get('/api/health/detailed', createDetailedHandler());
 app.use('/api/fs', createFsRoutes(events));
 app.use('/api/agent', createAgentRoutes(agentService, events));
 app.use('/api/sessions', createSessionsRoutes(agentService));
-app.use('/api/features', createFeaturesRoutes(featureLoader, settingsService, events));
+app.use(
+  '/api/features',
+  createFeaturesRoutes(featureLoader, settingsService, events, autoModeService)
+);
 app.use('/api/auto-mode', createAutoModeRoutes(autoModeService));
 app.use('/api/enhance-prompt', createEnhancePromptRoutes(settingsService));
 app.use('/api/worktree', createWorktreeRoutes(events, settingsService));
 app.use('/api/git', createGitRoutes());
-app.use('/api/suggestions', createSuggestionsRoutes(events, settingsService));
 app.use('/api/models', createModelsRoutes());
 app.use('/api/spec-regeneration', createSpecRegenerationRoutes(events, settingsService));
 app.use('/api/running-agents', createRunningAgentsRoutes(autoModeService));
@@ -344,6 +379,10 @@ app.use('/api/pipeline', createPipelineRoutes(pipelineService));
 app.use('/api/ideation', createIdeationRoutes(events, ideationService, featureLoader));
 app.use('/api/notifications', createNotificationsRoutes(notificationService));
 app.use('/api/event-history', createEventHistoryRoutes(eventHistoryService, settingsService));
+app.use(
+  '/api/projects',
+  createProjectsRoutes(featureLoader, autoModeService, settingsService, notificationService)
+);
 
 // Create HTTP server
 const server = createServer(app);
@@ -351,7 +390,7 @@ const server = createServer(app);
 // WebSocket servers using noServer mode for proper multi-path support
 const wss = new WebSocketServer({ noServer: true });
 const terminalWss = new WebSocketServer({ noServer: true });
-const terminalService = getTerminalService();
+const terminalService = getTerminalService(settingsService);
 
 /**
  * Authenticate WebSocket upgrade requests
@@ -761,21 +800,36 @@ process.on('uncaughtException', (error: Error) => {
   process.exit(1);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down...');
+// Graceful shutdown timeout (30 seconds)
+const SHUTDOWN_TIMEOUT_MS = 30000;
+
+// Graceful shutdown helper
+const gracefulShutdown = async (signal: string) => {
+  logger.info(`${signal} received, shutting down...`);
+
+  // Set up a force-exit timeout to prevent hanging
+  const forceExitTimeout = setTimeout(() => {
+    logger.error(`Shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit`);
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+
+  // Mark all running features as interrupted before shutdown
+  // This ensures they can be resumed when the server restarts
+  // Note: markAllRunningFeaturesInterrupted handles errors internally and never rejects
+  await autoModeService.markAllRunningFeaturesInterrupted(`${signal} signal received`);
+
   terminalService.cleanup();
   server.close(() => {
+    clearTimeout(forceExitTimeout);
     logger.info('Server closed');
     process.exit(0);
   });
+};
+
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM');
 });
 
 process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down...');
-  terminalService.cleanup();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
+  gracefulShutdown('SIGINT');
 });

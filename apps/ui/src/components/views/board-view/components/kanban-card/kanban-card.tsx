@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - dnd-kit draggable/droppable ref combination type incompatibilities
 import React, { memo, useLayoutEffect, useState, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
@@ -136,8 +136,9 @@ export const KanbanCard = memo(function KanbanCard({
   });
 
   // Make the card a drop target for creating dependency links
-  // Only backlog cards can be link targets (to avoid complexity with running features)
-  const isDroppable = !isOverlay && feature.status === 'backlog' && !isSelectionMode;
+  // All non-completed cards can be link targets to allow flexible dependency creation
+  // (completed features are excluded as they're already done)
+  const isDroppable = !isOverlay && feature.status !== 'completed' && !isSelectionMode;
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: `card-drop-${feature.id}`,
     disabled: !isDroppable,
@@ -236,7 +237,7 @@ export const KanbanCard = memo(function KanbanCard({
       </div>
 
       {/* Priority and Manual Verification badges */}
-      <PriorityBadges feature={feature} />
+      <PriorityBadges feature={feature} projectPath={currentProject?.path} />
 
       {/* Card Header */}
       <CardHeaderSection

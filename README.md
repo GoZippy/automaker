@@ -14,6 +14,10 @@
 
 **Stop typing code. Start directing AI agents.**
 
+> **[!WARNING]**
+>
+> **This project is no longer actively maintained.** The codebase is provided as-is. No bug fixes, security updates, or new features are being developed.
+
 <details open>
 <summary><h2>Table of Contents</h2></summary>
 
@@ -287,6 +291,31 @@ services:
 ```
 
 **Note:** The Claude CLI config must be writable (do not use `:ro` flag) as the CLI writes debug files.
+
+> **⚠️ Important: Linux/WSL Users**
+>
+> The container runs as UID 1001 by default. If your host user has a different UID (common on Linux/WSL where the first user is UID 1000), you must create a `.env` file to match your host user:
+>
+> ```bash
+> # Check your UID/GID
+> id -u  # outputs your UID (e.g., 1000)
+> id -g  # outputs your GID (e.g., 1000)
+> ```
+>
+> Create a `.env` file in the automaker directory:
+>
+> ```
+> UID=1000
+> GID=1000
+> ```
+>
+> Then rebuild the images:
+>
+> ```bash
+> docker compose build
+> ```
+>
+> Without this, files written by the container will be inaccessible to your host user.
 
 ##### GitHub CLI Authentication (For Git Push/PR Operations)
 
@@ -644,26 +673,10 @@ Join the **Agentic Jumpstart** Discord to connect with other builders exploring 
 
 👉 [Agentic Jumpstart Discord](https://discord.gg/jjem7aEDKU)
 
+## Project Status
+
+**This project is no longer actively maintained.** The codebase is provided as-is for those who wish to use, study, or fork it. No bug fixes, security updates, or new features are being developed. Community contributions may still be accepted, but there is no guarantee of review or merge.
+
 ## License
 
-This project is licensed under the **Automaker License Agreement**. See [LICENSE](LICENSE) for the full text.
-
-**Summary of Terms:**
-
-- **Allowed:**
-  - **Build Anything:** You can clone and use Automaker locally or in your organization to build ANY product (commercial or free).
-  - **Internal Use:** You can use it internally within your company (commercial or non-profit) without restriction.
-  - **Modify:** You can modify the code for internal use within your organization (commercial or non-profit).
-
-- **Restricted (The "No Monetization of the Tool" Rule):**
-  - **No Resale:** You cannot resell Automaker itself.
-  - **No SaaS:** You cannot host Automaker as a service for others.
-  - **No Monetizing Mods:** You cannot distribute modified versions of Automaker for money.
-
-- **Liability:**
-  - **Use at Own Risk:** This tool uses AI. We are **NOT** responsible if it breaks your computer, deletes your files, or generates bad code. You assume all risk.
-
-- **Contributing:**
-  - By contributing to this repository, you grant the Core Contributors full, irrevocable rights to your code (copyright assignment).
-
-**Core Contributors** (Cody Seibert (webdevcody), SuperComboGamer (SCG), Kacper Lachowicz (Shironex, Shirone), and Ben Scott (trueheads)) are granted perpetual, royalty-free licenses for any use, including monetization.
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for the full text.

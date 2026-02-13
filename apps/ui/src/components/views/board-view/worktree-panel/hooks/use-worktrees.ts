@@ -95,12 +95,20 @@ export function useWorktrees({
   );
 
   // fetchWorktrees for backward compatibility - now just triggers a refetch
-  const fetchWorktrees = useCallback(async () => {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.worktrees.all(projectPath),
-    });
-    return refetch();
-  }, [projectPath, queryClient, refetch]);
+  // The silent option is accepted but not used (React Query handles loading states)
+  // Returns removed worktrees array if any were detected, undefined otherwise
+  const fetchWorktrees = useCallback(
+    async (_options?: {
+      silent?: boolean;
+    }): Promise<Array<{ path: string; branch: string }> | undefined> => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.worktrees.all(projectPath),
+      });
+      const result = await refetch();
+      return result.data?.removedWorktrees;
+    },
+    [projectPath, queryClient, refetch]
+  );
 
   const currentWorktreePath = currentWorktree?.path ?? null;
   const selectedWorktree = currentWorktreePath

@@ -89,7 +89,17 @@ export function ClaudeCliStatus({ status, authStatus, isChecking, onRefresh }: C
     setIsAuthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.authClaude();
+      // Check if authClaude method exists on the API
+      const authClaude = (api.setup as Record<string, unknown> | undefined)?.authClaude as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!authClaude) {
+        toast.error('Authentication Failed', {
+          description: 'Claude authentication is not available',
+        });
+        return;
+      }
+      const result = await authClaude();
 
       if (result.success) {
         toast.success('Signed In', {
@@ -114,7 +124,17 @@ export function ClaudeCliStatus({ status, authStatus, isChecking, onRefresh }: C
     setIsDeauthenticating(true);
     try {
       const api = getElectronAPI();
-      const result = await api.setup.deauthClaude();
+      // Check if deauthClaude method exists on the API
+      const deauthClaude = (api.setup as Record<string, unknown> | undefined)?.deauthClaude as
+        | (() => Promise<{ success: boolean; error?: string }>)
+        | undefined;
+      if (!deauthClaude) {
+        toast.error('Sign Out Failed', {
+          description: 'Claude sign out is not available',
+        });
+        return;
+      }
+      const result = await deauthClaude();
 
       if (result.success) {
         toast.success('Signed Out', {

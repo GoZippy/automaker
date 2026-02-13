@@ -27,6 +27,10 @@ import type {
   CreateIdeaInput,
   UpdateIdeaInput,
   ConvertToFeatureOptions,
+  IdeationContextSources,
+  Feature,
+  IdeationStreamEvent,
+  IdeationAnalysisEvent,
 } from '@automaker/types';
 import { DEFAULT_MAX_CONCURRENCY } from '@automaker/types';
 import { getJSON, setJSON, removeItem } from './storage';
@@ -114,7 +118,8 @@ export interface IdeationAPI {
     projectPath: string,
     promptId: string,
     category: IdeaCategory,
-    count?: number
+    count?: number,
+    contextSources?: IdeationContextSources
   ) => Promise<{ success: boolean; suggestions?: AnalysisSuggestion[]; error?: string }>;
 
   // Convert to feature
@@ -122,7 +127,7 @@ export interface IdeationAPI {
     projectPath: string,
     ideaId: string,
     options?: ConvertToFeatureOptions
-  ) => Promise<{ success: boolean; feature?: any; featureId?: string; error?: string }>;
+  ) => Promise<{ success: boolean; feature?: Feature; featureId?: string; error?: string }>;
 
   // Add suggestion directly to board as feature
   addSuggestionToBoard: (
@@ -139,8 +144,8 @@ export interface IdeationAPI {
   }>;
 
   // Event subscriptions
-  onStream: (callback: (event: any) => void) => () => void;
-  onAnalysisEvent: (callback: (event: any) => void) => () => void;
+  onStream: (callback: (event: IdeationStreamEvent) => void) => () => void;
+  onAnalysisEvent: (callback: (event: IdeationAnalysisEvent) => void) => () => void;
 }
 
 export interface FileEntry {
@@ -184,6 +189,16 @@ export interface StatResult {
   error?: string;
 }
 
+// Options for creating a pull request
+export interface CreatePROptions {
+  projectPath?: string;
+  commitMessage?: string;
+  prTitle?: string;
+  prBody?: string;
+  baseBranch?: string;
+  draft?: boolean;
+}
+
 // Re-export types from electron.d.ts for external use
 export type {
   AutoModeEvent,
@@ -210,9 +225,6 @@ import type {
 // Import HTTP API client (ES module)
 import { getHttpApiClient, getServerUrlSync } from './http-api-client';
 
-// Feature type - Import from app-store
-import type { Feature } from '@/store/app-store';
-
 // Running Agent type
 export interface RunningAgent {
   featureId: string;
@@ -221,6 +233,7 @@ export interface RunningAgent {
   isAutoMode: boolean;
   title?: string;
   description?: string;
+  branchName?: string;
 }
 
 export interface RunningAgentsResult {
@@ -368,40 +381,6 @@ export interface GitHubAPI {
     endCursor?: string;
     error?: string;
   }>;
-}
-
-// Feature Suggestions types
-export interface FeatureSuggestion {
-  id: string;
-  category: string;
-  description: string;
-  priority: number;
-  reasoning: string;
-}
-
-export interface SuggestionsEvent {
-  type: 'suggestions_progress' | 'suggestions_tool' | 'suggestions_complete' | 'suggestions_error';
-  content?: string;
-  tool?: string;
-  input?: unknown;
-  suggestions?: FeatureSuggestion[];
-  error?: string;
-}
-
-export type SuggestionType = 'features' | 'refactoring' | 'security' | 'performance';
-
-export interface SuggestionsAPI {
-  generate: (
-    projectPath: string,
-    suggestionType?: SuggestionType
-  ) => Promise<{ success: boolean; error?: string }>;
-  stop: () => Promise<{ success: boolean; error?: string }>;
-  status: () => Promise<{
-    success: boolean;
-    isRunning?: boolean;
-    error?: string;
-  }>;
-  onEvent: (callback: (event: SuggestionsEvent) => void) => () => void;
 }
 
 // Spec Regeneration types
@@ -702,7 +681,6 @@ export interface ElectronAPI {
   };
   worktree?: WorktreeAPI;
   git?: GitAPI;
-  suggestions?: SuggestionsAPI;
   specRegeneration?: SpecRegenerationAPI;
   autoMode?: AutoModeAPI;
   features?: FeaturesAPI;
@@ -782,7 +760,7 @@ export interface ElectronAPI {
   };
   // Setup API surface is implemented by the main process and mirrored by HttpApiClient.
   // Keep this intentionally loose to avoid tight coupling between front-end and server types.
-  setup?: any;
+  setup?: SetupAPI;
   agent?: {
     start: (
       sessionId: string,
@@ -807,6 +785,18 @@ export interface ElectronAPI {
     }>;
     stop: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
     clear: (sessionId: string) => Promise<{ success: boolean; error?: string }>;
+    queueList: (sessionId: string) => Promise<{
+      success: boolean;
+      queue?: Array<{
+        id: string;
+        message: string;
+        imagePaths?: string[];
+        model?: string;
+        thinkingLevel?: string;
+        addedAt: string;
+      }>;
+      error?: string;
+    }>;
     onStream: (callback: (data: unknown) => void) => () => void;
   };
   sessions?: {
@@ -958,12 +948,16 @@ export interface ElectronAPI {
 // Do not redeclare here to avoid type conflicts
 
 // Mock data for web development
-const mockFeatures = [
+const mockFeatures: Feature[] = [
   {
+    id: 'mock-feature-1',
+    title: 'Sample Feature',
     category: 'Core',
     description: 'Sample Feature',
+    status: 'backlog',
     steps: ['Step 1', 'Step 2'],
     passes: false,
+    createdAt: new Date().toISOString(),
   },
 ];
 
@@ -983,13 +977,11 @@ export const isElectron = (): boolean => {
     return false;
   }
 
-  const w = window as any;
-
-  if (w.isElectron === true) {
+  if (window.isElectron === true) {
     return true;
   }
 
-  return !!w.electronAPI?.isElectron;
+  return !!window.electronAPI?.isElectron;
 };
 
 // Check if backend server is available
@@ -1063,14 +1055,15 @@ export const getCurrentApiMode = (): 'http' => {
 
 // Debug helpers
 if (typeof window !== 'undefined') {
-  (window as any).__checkApiMode = () => {
+  window.__checkApiMode = () => {
     console.log('Current API mode:', getCurrentApiMode());
     console.log('isElectron():', isElectron());
   };
 }
 
 // Mock API for development/fallback when no backend is available
-const getMockElectronAPI = (): ElectronAPI => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _getMockElectronAPI = (): ElectronAPI => {
   return {
     ping: async () => 'pong (mock)',
 
@@ -1333,9 +1326,6 @@ const getMockElectronAPI = (): ElectronAPI => {
     // Mock Git API (for non-worktree operations)
     git: createMockGitAPI(),
 
-    // Mock Suggestions API
-    suggestions: createMockSuggestionsAPI(),
-
     // Mock Spec Regeneration API
     specRegeneration: createMockSpecRegenerationAPI(),
 
@@ -1377,6 +1367,13 @@ const getMockElectronAPI = (): ElectronAPI => {
   };
 };
 
+// Install progress event type used by useCliInstallation hook
+interface InstallProgressEvent {
+  cli?: string;
+  data?: string;
+  type?: string;
+}
+
 // Setup API interface
 interface SetupAPI {
   getClaudeStatus: () => Promise<{
@@ -1415,7 +1412,15 @@ interface SetupAPI {
     message?: string;
     output?: string;
   }>;
+  deauthClaude?: () => Promise<{
+    success: boolean;
+    requiresManualDeauth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
   storeApiKey: (provider: string, apiKey: string) => Promise<{ success: boolean; error?: string }>;
+  saveApiKey?: (provider: string, apiKey: string) => Promise<{ success: boolean; error?: string }>;
   getApiKeys: () => Promise<{
     success: boolean;
     hasAnthropicKey: boolean;
@@ -1448,12 +1453,252 @@ interface SetupAPI {
     user: string | null;
     error?: string;
   }>;
-  onInstallProgress?: (callback: (progress: any) => void) => () => void;
-  onAuthProgress?: (callback: (progress: any) => void) => () => void;
+  // Cursor CLI methods
+  getCursorStatus?: () => Promise<{
+    success: boolean;
+    installed?: boolean;
+    version?: string | null;
+    path?: string | null;
+    auth?: {
+      authenticated: boolean;
+      method: string;
+    };
+    installCommand?: string;
+    loginCommand?: string;
+    error?: string;
+  }>;
+  authCursor?: () => Promise<{
+    success: boolean;
+    token?: string;
+    requiresManualAuth?: boolean;
+    terminalOpened?: boolean;
+    command?: string;
+    message?: string;
+    output?: string;
+  }>;
+  deauthCursor?: () => Promise<{
+    success: boolean;
+    requiresManualDeauth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
+  // Codex CLI methods
+  getCodexStatus?: () => Promise<{
+    success: boolean;
+    status?: string;
+    installed?: boolean;
+    method?: string;
+    version?: string;
+    path?: string;
+    auth?: {
+      authenticated: boolean;
+      method: string;
+      hasAuthFile?: boolean;
+      hasOAuthToken?: boolean;
+      hasApiKey?: boolean;
+      hasStoredApiKey?: boolean;
+      hasEnvApiKey?: boolean;
+    };
+    error?: string;
+  }>;
+  installCodex?: () => Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+  }>;
+  authCodex?: () => Promise<{
+    success: boolean;
+    token?: string;
+    requiresManualAuth?: boolean;
+    terminalOpened?: boolean;
+    command?: string;
+    error?: string;
+    message?: string;
+    output?: string;
+  }>;
+  deauthCodex?: () => Promise<{
+    success: boolean;
+    requiresManualDeauth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
+  verifyCodexAuth?: (
+    authMethod: 'cli' | 'api_key',
+    apiKey?: string
+  ) => Promise<{
+    success: boolean;
+    authenticated: boolean;
+    error?: string;
+  }>;
+  // OpenCode CLI methods
+  getOpencodeStatus?: () => Promise<{
+    success: boolean;
+    status?: string;
+    installed?: boolean;
+    method?: string;
+    version?: string;
+    path?: string;
+    recommendation?: string;
+    installCommands?: {
+      macos?: string;
+      linux?: string;
+      npm?: string;
+    };
+    auth?: {
+      authenticated: boolean;
+      method: string;
+      hasAuthFile?: boolean;
+      hasOAuthToken?: boolean;
+      hasApiKey?: boolean;
+      hasStoredApiKey?: boolean;
+      hasEnvApiKey?: boolean;
+    };
+    error?: string;
+  }>;
+  authOpencode?: () => Promise<{
+    success: boolean;
+    token?: string;
+    requiresManualAuth?: boolean;
+    terminalOpened?: boolean;
+    command?: string;
+    message?: string;
+    output?: string;
+  }>;
+  deauthOpencode?: () => Promise<{
+    success: boolean;
+    requiresManualDeauth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
+  getOpencodeModels?: (refresh?: boolean) => Promise<{
+    success: boolean;
+    models?: Array<{
+      id: string;
+      name: string;
+      modelString: string;
+      provider: string;
+      description: string;
+      supportsTools: boolean;
+      supportsVision: boolean;
+      tier: string;
+      default?: boolean;
+    }>;
+    count?: number;
+    cached?: boolean;
+    error?: string;
+  }>;
+  refreshOpencodeModels?: () => Promise<{
+    success: boolean;
+    models?: Array<{
+      id: string;
+      name: string;
+      modelString: string;
+      provider: string;
+      description: string;
+      supportsTools: boolean;
+      supportsVision: boolean;
+      tier: string;
+      default?: boolean;
+    }>;
+    count?: number;
+    error?: string;
+  }>;
+  getOpencodeProviders?: () => Promise<{
+    success: boolean;
+    providers?: Array<{
+      id: string;
+      name: string;
+      authenticated: boolean;
+      authMethod?: 'oauth' | 'api_key';
+    }>;
+    authenticated?: Array<{
+      id: string;
+      name: string;
+      authenticated: boolean;
+      authMethod?: 'oauth' | 'api_key';
+    }>;
+    error?: string;
+  }>;
+  clearOpencodeCache?: () => Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+  }>;
+  // Gemini CLI methods
+  getGeminiStatus?: () => Promise<{
+    success: boolean;
+    status?: string;
+    installed?: boolean;
+    method?: string;
+    version?: string;
+    path?: string;
+    recommendation?: string;
+    installCommands?: {
+      macos?: string;
+      linux?: string;
+      npm?: string;
+    };
+    auth?: {
+      authenticated: boolean;
+      method: string;
+      hasApiKey?: boolean;
+      hasEnvApiKey?: boolean;
+      error?: string;
+    };
+    loginCommand?: string;
+    installCommand?: string;
+    error?: string;
+  }>;
+  authGemini?: () => Promise<{
+    success: boolean;
+    requiresManualAuth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
+  deauthGemini?: () => Promise<{
+    success: boolean;
+    requiresManualDeauth?: boolean;
+    command?: string;
+    message?: string;
+    error?: string;
+  }>;
+  // Copilot SDK methods
+  getCopilotStatus?: () => Promise<{
+    success: boolean;
+    status?: string;
+    installed?: boolean;
+    method?: string;
+    version?: string;
+    path?: string;
+    recommendation?: string;
+    auth?: {
+      authenticated: boolean;
+      method: string;
+      login?: string;
+      host?: string;
+      error?: string;
+    };
+    loginCommand?: string;
+    installCommand?: string;
+    error?: string;
+  }>;
+  onInstallProgress?: (
+    callback: (progress: InstallProgressEvent) => void
+  ) => (() => void) | undefined;
+  onAuthProgress?: (callback: (progress: InstallProgressEvent) => void) => (() => void) | undefined;
 }
 
 // Mock Setup API implementation
 function createMockSetupAPI(): SetupAPI {
+  const mockStoreApiKey = async (provider: string, _apiKey: string) => {
+    console.log('[Mock] Storing API key for:', provider);
+    return { success: true };
+  };
+
   return {
     getClaudeStatus: async () => {
       console.log('[Mock] Getting Claude status');
@@ -1492,11 +1737,17 @@ function createMockSetupAPI(): SetupAPI {
       };
     },
 
-    storeApiKey: async (provider: string, apiKey: string) => {
-      console.log('[Mock] Storing API key for:', provider);
-      // In mock mode, we just pretend to store it (it's already in the app store)
-      return { success: true };
+    deauthClaude: async () => {
+      console.log('[Mock] Deauth Claude CLI');
+      return {
+        success: true,
+        requiresManualDeauth: true,
+        command: 'claude logout',
+      };
     },
+
+    storeApiKey: mockStoreApiKey,
+    saveApiKey: mockStoreApiKey,
 
     getApiKeys: async () => {
       console.log('[Mock] Getting API keys');
@@ -1547,12 +1798,193 @@ function createMockSetupAPI(): SetupAPI {
       };
     },
 
-    onInstallProgress: (callback) => {
+    // Cursor CLI mock methods
+    getCursorStatus: async () => {
+      console.log('[Mock] Getting Cursor status');
+      return {
+        success: true,
+        installed: false,
+        version: null,
+        path: null,
+        auth: { authenticated: false, method: 'none' },
+      };
+    },
+
+    authCursor: async () => {
+      console.log('[Mock] Auth Cursor CLI');
+      return {
+        success: true,
+        requiresManualAuth: true,
+        command: 'cursor --login',
+      };
+    },
+
+    deauthCursor: async () => {
+      console.log('[Mock] Deauth Cursor CLI');
+      return {
+        success: true,
+        requiresManualDeauth: true,
+        command: 'cursor --logout',
+      };
+    },
+
+    // Codex CLI mock methods
+    getCodexStatus: async () => {
+      console.log('[Mock] Getting Codex status');
+      return {
+        success: true,
+        status: 'not_installed',
+        installed: false,
+        auth: { authenticated: false, method: 'none' },
+      };
+    },
+
+    installCodex: async () => {
+      console.log('[Mock] Installing Codex CLI');
+      return {
+        success: false,
+        error: 'CLI installation is only available in the Electron app.',
+      };
+    },
+
+    authCodex: async () => {
+      console.log('[Mock] Auth Codex CLI');
+      return {
+        success: true,
+        requiresManualAuth: true,
+        command: 'codex login',
+      };
+    },
+
+    deauthCodex: async () => {
+      console.log('[Mock] Deauth Codex CLI');
+      return {
+        success: true,
+        requiresManualDeauth: true,
+        command: 'codex logout',
+      };
+    },
+
+    verifyCodexAuth: async (authMethod: 'cli' | 'api_key') => {
+      console.log('[Mock] Verifying Codex auth with method:', authMethod);
+      return {
+        success: true,
+        authenticated: false,
+        error: 'Mock environment - authentication not available',
+      };
+    },
+
+    // OpenCode CLI mock methods
+    getOpencodeStatus: async () => {
+      console.log('[Mock] Getting OpenCode status');
+      return {
+        success: true,
+        status: 'not_installed',
+        installed: false,
+        auth: { authenticated: false, method: 'none' },
+      };
+    },
+
+    authOpencode: async () => {
+      console.log('[Mock] Auth OpenCode CLI');
+      return {
+        success: true,
+        requiresManualAuth: true,
+        command: 'opencode auth login',
+      };
+    },
+
+    deauthOpencode: async () => {
+      console.log('[Mock] Deauth OpenCode CLI');
+      return {
+        success: true,
+        requiresManualDeauth: true,
+        command: 'opencode auth logout',
+      };
+    },
+
+    getOpencodeModels: async () => {
+      console.log('[Mock] Getting OpenCode models');
+      return {
+        success: true,
+        models: [],
+        count: 0,
+        cached: false,
+      };
+    },
+
+    refreshOpencodeModels: async () => {
+      console.log('[Mock] Refreshing OpenCode models');
+      return {
+        success: true,
+        models: [],
+        count: 0,
+      };
+    },
+
+    getOpencodeProviders: async () => {
+      console.log('[Mock] Getting OpenCode providers');
+      return {
+        success: true,
+        providers: [],
+        authenticated: [],
+      };
+    },
+
+    clearOpencodeCache: async () => {
+      console.log('[Mock] Clearing OpenCode cache');
+      return {
+        success: true,
+        message: 'Cache cleared',
+      };
+    },
+
+    // Gemini CLI mock methods
+    getGeminiStatus: async () => {
+      console.log('[Mock] Getting Gemini status');
+      return {
+        success: true,
+        status: 'not_installed',
+        installed: false,
+        auth: { authenticated: false, method: 'none' },
+      };
+    },
+
+    authGemini: async () => {
+      console.log('[Mock] Auth Gemini CLI');
+      return {
+        success: true,
+        requiresManualAuth: true,
+        command: 'gemini auth login',
+      };
+    },
+
+    deauthGemini: async () => {
+      console.log('[Mock] Deauth Gemini CLI');
+      return {
+        success: true,
+        requiresManualDeauth: true,
+        command: 'gemini auth logout',
+      };
+    },
+
+    // Copilot SDK mock methods
+    getCopilotStatus: async () => {
+      console.log('[Mock] Getting Copilot status');
+      return {
+        success: true,
+        status: 'not_installed',
+        installed: false,
+        auth: { authenticated: false, method: 'none' },
+      };
+    },
+
+    onInstallProgress: (_callback) => {
       // Mock progress events
       return () => {};
     },
 
-    onAuthProgress: (callback) => {
+    onAuthProgress: (_callback) => {
       // Mock auth events
       return () => {};
     },
@@ -1700,7 +2132,7 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    createPR: async (worktreePath: string, options?: any) => {
+    createPR: async (worktreePath: string, options?: CreatePROptions) => {
       console.log('[Mock] Creating PR:', { worktreePath, options });
       return {
         success: true,
@@ -1782,6 +2214,7 @@ function createMockWorktreeAPI(): WorktreeAPI {
           aheadCount: 2,
           behindCount: 0,
           hasRemoteBranch: true,
+          hasAnyRemotes: true,
         },
       };
     },
@@ -1814,6 +2247,19 @@ function createMockWorktreeAPI(): WorktreeAPI {
               ],
             },
           ],
+        },
+      };
+    },
+
+    addRemote: async (worktreePath: string, remoteName: string, remoteUrl: string) => {
+      console.log('[Mock] Adding remote:', { worktreePath, remoteName, remoteUrl });
+      return {
+        success: true,
+        result: {
+          remoteName,
+          remoteUrl,
+          fetched: true,
+          message: `Added remote '${remoteName}' (${remoteUrl})`,
         },
       };
     },
@@ -1990,7 +2436,7 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    onDevServerLogEvent: (callback) => {
+    onDevServerLogEvent: (_callback) => {
       console.log('[Mock] Subscribing to dev server log events');
       // Return unsubscribe function
       return () => {
@@ -2042,7 +2488,7 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    onInitScriptEvent: (callback) => {
+    onInitScriptEvent: (_callback) => {
       console.log('[Mock] Subscribing to init script events');
       // Return unsubscribe function
       return () => {
@@ -2061,6 +2507,52 @@ function createMockWorktreeAPI(): WorktreeAPI {
           branch: 'main',
           message: 'Mock: Changes discarded successfully',
         },
+      };
+    },
+
+    // Test runner methods
+    startTests: async (
+      worktreePath: string,
+      options?: { projectPath?: string; testFile?: string }
+    ) => {
+      console.log('[Mock] Starting tests:', { worktreePath, options });
+      return {
+        success: true,
+        result: {
+          sessionId: 'mock-session-123',
+          worktreePath,
+          command: 'npm run test',
+          status: 'running' as const,
+          testFile: options?.testFile,
+          message: 'Tests started (mock)',
+        },
+      };
+    },
+
+    stopTests: async (sessionId: string) => {
+      console.log('[Mock] Stopping tests:', { sessionId });
+      return {
+        success: true,
+        result: {
+          sessionId,
+          message: 'Tests stopped (mock)',
+        },
+      };
+    },
+
+    getTestLogs: async (worktreePath?: string, sessionId?: string) => {
+      console.log('[Mock] Getting test logs:', { worktreePath, sessionId });
+      return {
+        success: false,
+        error: 'No test sessions found (mock)',
+      };
+    },
+
+    onTestRunnerEvent: (_callback) => {
+      console.log('[Mock] Subscribing to test runner events');
+      // Return unsubscribe function
+      return () => {
+        console.log('[Mock] Unsubscribing from test runner events');
       };
     },
   };
@@ -2101,14 +2593,14 @@ let mockAutoModeTimeouts = new Map<string, NodeJS.Timeout>(); // Track timeouts 
 
 function createMockAutoModeAPI(): AutoModeAPI {
   return {
-    start: async (projectPath: string, maxConcurrency?: number) => {
+    start: async (projectPath: string, branchName?: string | null, maxConcurrency?: number) => {
       if (mockAutoModeRunning) {
         return { success: false, error: 'Auto mode is already running' };
       }
 
       mockAutoModeRunning = true;
       console.log(
-        `[Mock] Auto mode started with maxConcurrency: ${maxConcurrency || DEFAULT_MAX_CONCURRENCY}`
+        `[Mock] Auto mode started with branchName: ${branchName}, maxConcurrency: ${maxConcurrency || DEFAULT_MAX_CONCURRENCY}`
       );
       const featureId = 'auto-mode-0';
       mockRunningFeatures.add(featureId);
@@ -2119,7 +2611,7 @@ function createMockAutoModeAPI(): AutoModeAPI {
       return { success: true };
     },
 
-    stop: async (_projectPath: string) => {
+    stop: async (_projectPath: string, _branchName?: string | null) => {
       mockAutoModeRunning = false;
       const runningCount = mockRunningFeatures.size;
       mockRunningFeatures.clear();
@@ -2201,7 +2693,7 @@ function createMockAutoModeAPI(): AutoModeAPI {
       return { success: true, passes: true };
     },
 
-    resumeFeature: async (projectPath: string, featureId: string, useWorktrees?: boolean) => {
+    resumeFeature: async (projectPath: string, featureId: string, _useWorktrees?: boolean) => {
       if (mockRunningFeatures.has(featureId)) {
         return {
           success: false,
@@ -2337,7 +2829,7 @@ function createMockAutoModeAPI(): AutoModeAPI {
       featureId: string,
       prompt: string,
       imagePaths?: string[],
-      useWorktrees?: boolean
+      _useWorktrees?: boolean
     ) => {
       if (mockRunningFeatures.has(featureId)) {
         return {
@@ -2558,226 +3050,6 @@ function delay(ms: number, featureId: string): Promise<void> {
   });
 }
 
-// Mock Suggestions state and implementation
-let mockSuggestionsRunning = false;
-let mockSuggestionsCallbacks: ((event: SuggestionsEvent) => void)[] = [];
-let mockSuggestionsTimeout: NodeJS.Timeout | null = null;
-
-function createMockSuggestionsAPI(): SuggestionsAPI {
-  return {
-    generate: async (projectPath: string, suggestionType: SuggestionType = 'features') => {
-      if (mockSuggestionsRunning) {
-        return {
-          success: false,
-          error: 'Suggestions generation is already running',
-        };
-      }
-
-      mockSuggestionsRunning = true;
-      console.log(`[Mock] Generating ${suggestionType} suggestions for: ${projectPath}`);
-
-      // Simulate async suggestion generation
-      simulateSuggestionsGeneration(suggestionType);
-
-      return { success: true };
-    },
-
-    stop: async () => {
-      mockSuggestionsRunning = false;
-      if (mockSuggestionsTimeout) {
-        clearTimeout(mockSuggestionsTimeout);
-        mockSuggestionsTimeout = null;
-      }
-      return { success: true };
-    },
-
-    status: async () => {
-      return {
-        success: true,
-        isRunning: mockSuggestionsRunning,
-      };
-    },
-
-    onEvent: (callback: (event: SuggestionsEvent) => void) => {
-      mockSuggestionsCallbacks.push(callback);
-      return () => {
-        mockSuggestionsCallbacks = mockSuggestionsCallbacks.filter((cb) => cb !== callback);
-      };
-    },
-  };
-}
-
-function emitSuggestionsEvent(event: SuggestionsEvent) {
-  mockSuggestionsCallbacks.forEach((cb) => cb(event));
-}
-
-async function simulateSuggestionsGeneration(suggestionType: SuggestionType = 'features') {
-  const typeLabels: Record<SuggestionType, string> = {
-    features: 'feature suggestions',
-    refactoring: 'refactoring opportunities',
-    security: 'security vulnerabilities',
-    performance: 'performance issues',
-  };
-
-  // Emit progress events
-  emitSuggestionsEvent({
-    type: 'suggestions_progress',
-    content: `Starting project analysis for ${typeLabels[suggestionType]}...\n`,
-  });
-
-  await new Promise((resolve) => {
-    mockSuggestionsTimeout = setTimeout(resolve, 500);
-  });
-  if (!mockSuggestionsRunning) return;
-
-  emitSuggestionsEvent({
-    type: 'suggestions_tool',
-    tool: 'Glob',
-    input: { pattern: '**/*.{ts,tsx,js,jsx}' },
-  });
-
-  await new Promise((resolve) => {
-    mockSuggestionsTimeout = setTimeout(resolve, 500);
-  });
-  if (!mockSuggestionsRunning) return;
-
-  emitSuggestionsEvent({
-    type: 'suggestions_progress',
-    content: 'Analyzing codebase structure...\n',
-  });
-
-  await new Promise((resolve) => {
-    mockSuggestionsTimeout = setTimeout(resolve, 500);
-  });
-  if (!mockSuggestionsRunning) return;
-
-  emitSuggestionsEvent({
-    type: 'suggestions_progress',
-    content: `Identifying ${typeLabels[suggestionType]}...\n`,
-  });
-
-  await new Promise((resolve) => {
-    mockSuggestionsTimeout = setTimeout(resolve, 500);
-  });
-  if (!mockSuggestionsRunning) return;
-
-  // Generate mock suggestions based on type
-  let mockSuggestions: FeatureSuggestion[];
-
-  switch (suggestionType) {
-    case 'refactoring':
-      mockSuggestions = [
-        {
-          id: `suggestion-${Date.now()}-0`,
-          category: 'Code Smell',
-          description: 'Extract duplicate validation logic into reusable utility',
-          priority: 1,
-          reasoning: 'Reduces code duplication and improves maintainability',
-        },
-        {
-          id: `suggestion-${Date.now()}-1`,
-          category: 'Complexity',
-          description: 'Break down large handleSubmit function into smaller functions',
-          priority: 2,
-          reasoning: 'Function is too long and handles multiple responsibilities',
-        },
-        {
-          id: `suggestion-${Date.now()}-2`,
-          category: 'Architecture',
-          description: 'Move business logic out of React components into hooks',
-          priority: 3,
-          reasoning: 'Improves separation of concerns and testability',
-        },
-      ];
-      break;
-
-    case 'security':
-      mockSuggestions = [
-        {
-          id: `suggestion-${Date.now()}-0`,
-          category: 'High',
-          description: 'Sanitize user input before rendering to prevent XSS',
-          priority: 1,
-          reasoning: 'User input is rendered without proper sanitization',
-        },
-        {
-          id: `suggestion-${Date.now()}-1`,
-          category: 'Medium',
-          description: 'Add rate limiting to authentication endpoints',
-          priority: 2,
-          reasoning: 'Prevents brute force attacks on authentication',
-        },
-        {
-          id: `suggestion-${Date.now()}-2`,
-          category: 'Low',
-          description: 'Remove sensitive information from error messages',
-          priority: 3,
-          reasoning: 'Error messages may leak implementation details',
-        },
-      ];
-      break;
-
-    case 'performance':
-      mockSuggestions = [
-        {
-          id: `suggestion-${Date.now()}-0`,
-          category: 'Rendering',
-          description: 'Add React.memo to prevent unnecessary re-renders',
-          priority: 1,
-          reasoning: "Components re-render even when props haven't changed",
-        },
-        {
-          id: `suggestion-${Date.now()}-1`,
-          category: 'Bundle Size',
-          description: 'Implement code splitting for route components',
-          priority: 2,
-          reasoning: 'Initial bundle is larger than necessary',
-        },
-        {
-          id: `suggestion-${Date.now()}-2`,
-          category: 'Caching',
-          description: 'Add memoization for expensive computations',
-          priority: 3,
-          reasoning: 'Expensive computations run on every render',
-        },
-      ];
-      break;
-
-    default: // "features"
-      mockSuggestions = [
-        {
-          id: `suggestion-${Date.now()}-0`,
-          category: 'User Experience',
-          description: 'Add dark mode toggle with system preference detection',
-          priority: 1,
-          reasoning: 'Dark mode is a standard feature that improves accessibility and user comfort',
-        },
-        {
-          id: `suggestion-${Date.now()}-1`,
-          category: 'Performance',
-          description: 'Implement lazy loading for heavy components',
-          priority: 2,
-          reasoning: 'Improves initial load time and reduces bundle size',
-        },
-        {
-          id: `suggestion-${Date.now()}-2`,
-          category: 'Accessibility',
-          description: 'Add keyboard navigation support throughout the app',
-          priority: 3,
-          reasoning: 'Improves accessibility for users who rely on keyboard navigation',
-        },
-      ];
-  }
-
-  emitSuggestionsEvent({
-    type: 'suggestions_complete',
-    suggestions: mockSuggestions,
-  });
-
-  mockSuggestionsRunning = false;
-  mockSuggestionsTimeout = null;
-}
-
 // Mock Spec Regeneration state and implementation
 let mockSpecRegenerationRunning = false;
 let mockSpecRegenerationPhase = '';
@@ -2912,7 +3184,7 @@ function emitSpecRegenerationEvent(event: SpecRegenerationEvent) {
 async function simulateSpecCreation(
   projectPath: string,
   projectOverview: string,
-  generateFeatures = true
+  _generateFeatures = true
 ) {
   mockSpecRegenerationPhase = 'initialization';
   emitSpecRegenerationEvent({
@@ -3135,7 +3407,7 @@ function createMockFeaturesAPI(): FeaturesAPI {
       console.log('[Mock] Getting all features for:', projectPath);
 
       // Check if test has set mock features via global variable
-      const testFeatures = (window as any).__mockFeatures;
+      const testFeatures = window.__mockFeatures;
       if (testFeatures !== undefined) {
         return { success: true, features: testFeatures };
       }
@@ -3412,6 +3684,11 @@ export interface Project {
    * If a phase is not present, the global setting is used.
    */
   phaseModelOverrides?: Partial<import('@automaker/types').PhaseModelConfig>;
+  /**
+   * Override the default model for new feature cards in this project.
+   * If not specified, falls back to the global defaultFeatureModel setting.
+   */
+  defaultFeatureModel?: import('@automaker/types').PhaseModelEntry;
 }
 
 export interface TrashedProject extends Project {

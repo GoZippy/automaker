@@ -174,7 +174,7 @@ export function useGraphNodes({
               type: 'dependency',
               animated: enableEdgeAnimations && (isRunning || runningTaskIds.has(depId)),
               data: {
-                sourceStatus: sourceFeature.status,
+                sourceStatus: sourceFeature.status as Feature['status'],
                 targetStatus: feature.status,
                 isHighlighted: edgeIsHighlighted,
                 isDimmed: edgeIsDimmed,

@@ -4,12 +4,16 @@
  * Provides centralized model resolution logic:
  * - Maps Claude model aliases to full model strings
  * - Passes through Cursor models unchanged (handled by CursorProvider)
+ * - Passes through Copilot models unchanged (handled by CopilotProvider)
+ * - Passes through Gemini models unchanged (handled by GeminiProvider)
  * - Provides default models per provider
  * - Handles multiple model sources with priority
  *
  * With canonical model IDs:
  * - Cursor: cursor-auto, cursor-composer-1, cursor-gpt-5.2
  * - OpenCode: opencode-big-pickle, opencode-grok-code
+ * - Copilot: copilot-gpt-5.1, copilot-claude-sonnet-4.5, copilot-gemini-3-pro-preview
+ * - Gemini: gemini-2.5-flash, gemini-2.5-pro
  * - Claude: claude-haiku, claude-sonnet, claude-opus (also supports legacy aliases)
  */
 
@@ -22,10 +26,13 @@ import {
   PROVIDER_PREFIXES,
   isCursorModel,
   isOpencodeModel,
+  isCopilotModel,
+  isGeminiModel,
   stripProviderPrefix,
   migrateModelId,
   type PhaseModelEntry,
   type ThinkingLevel,
+  type ReasoningEffort,
 } from '@automaker/types';
 
 // Pattern definitions for Codex/OpenAI models
@@ -80,6 +87,18 @@ export function resolveModelString(
   // OpenCode model (static with opencode- prefix or dynamic with provider/model format)
   if (isOpencodeModel(canonicalKey)) {
     console.log(`[ModelResolver] Using OpenCode model: ${canonicalKey}`);
+    return canonicalKey;
+  }
+
+  // Copilot model with explicit prefix (e.g., "copilot-gpt-5.1", "copilot-claude-sonnet-4.5")
+  if (isCopilotModel(canonicalKey)) {
+    console.log(`[ModelResolver] Using Copilot model: ${canonicalKey}`);
+    return canonicalKey;
+  }
+
+  // Gemini model with explicit prefix (e.g., "gemini-2.5-flash", "gemini-2.5-pro")
+  if (isGeminiModel(canonicalKey)) {
+    console.log(`[ModelResolver] Using Gemini model: ${canonicalKey}`);
     return canonicalKey;
   }
 
@@ -144,8 +163,10 @@ export function getEffectiveModel(
 export interface ResolvedPhaseModel {
   /** Resolved model string (full model ID) */
   model: string;
-  /** Optional thinking level for extended thinking */
+  /** Optional thinking level for extended thinking (Claude models) */
   thinkingLevel?: ThinkingLevel;
+  /** Optional reasoning effort for timeout calculation (Codex models) */
+  reasoningEffort?: ReasoningEffort;
   /** Provider ID if using a ClaudeCompatibleProvider */
   providerId?: string;
 }
@@ -187,6 +208,7 @@ export function resolvePhaseModel(
     return {
       model: resolveModelString(undefined, defaultModel),
       thinkingLevel: undefined,
+      reasoningEffort: undefined,
     };
   }
 
@@ -196,12 +218,13 @@ export function resolvePhaseModel(
     return {
       model: resolveModelString(phaseModel, defaultModel),
       thinkingLevel: undefined,
+      reasoningEffort: undefined,
     };
   }
 
   // Handle new PhaseModelEntry object format
   console.log(
-    `[ModelResolver] phaseModel is object format: model="${phaseModel.model}", thinkingLevel="${phaseModel.thinkingLevel}", providerId="${phaseModel.providerId}"`
+    `[ModelResolver] phaseModel is object format: model="${phaseModel.model}", thinkingLevel="${phaseModel.thinkingLevel}", reasoningEffort="${phaseModel.reasoningEffort}", providerId="${phaseModel.providerId}"`
   );
 
   // If providerId is set, pass through the model string unchanged
@@ -213,6 +236,7 @@ export function resolvePhaseModel(
     return {
       model: phaseModel.model, // Pass through unchanged
       thinkingLevel: phaseModel.thinkingLevel,
+      reasoningEffort: phaseModel.reasoningEffort,
       providerId: phaseModel.providerId,
     };
   }
@@ -221,5 +245,6 @@ export function resolvePhaseModel(
   return {
     model: resolveModelString(phaseModel.model, defaultModel),
     thinkingLevel: phaseModel.thinkingLevel,
+    reasoningEffort: phaseModel.reasoningEffort,
   };
 }

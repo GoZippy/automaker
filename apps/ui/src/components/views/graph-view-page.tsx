@@ -1,6 +1,5 @@
-// @ts-nocheck
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { useAppStore, Feature } from '@/store/app-store';
+import { useAppStore, Feature, FeatureImagePath } from '@/store/app-store';
 import { useShallow } from 'zustand/react/shallow';
 import { GraphView } from './graph-view';
 import {
@@ -9,12 +8,7 @@ import {
   AgentOutputModal,
   BacklogPlanDialog,
 } from './board-view/dialogs';
-import {
-  useBoardFeatures,
-  useBoardActions,
-  useBoardBackground,
-  useBoardPersistence,
-} from './board-view/hooks';
+import { useBoardFeatures, useBoardActions, useBoardPersistence } from './board-view/hooks';
 import { useWorktrees } from './board-view/worktree-panel/hooks';
 import { useAutoMode } from '@/hooks/use-auto-mode';
 import { pathsEqual } from '@/lib/utils';
@@ -155,33 +149,32 @@ export function GraphViewPage() {
       return;
     }
 
-    const unsubscribe = api.backlogPlan.onEvent(
-      (event: { type: string; result?: BacklogPlanResult; error?: string }) => {
-        logger.debug('Backlog plan event received', {
-          type: event.type,
-          hasResult: Boolean(event.result),
-          hasError: Boolean(event.error),
-        });
-        if (event.type === 'backlog_plan_complete') {
-          setIsGeneratingPlan(false);
-          if (event.result && event.result.changes?.length > 0) {
-            setPendingBacklogPlan(event.result);
-            toast.success('Plan ready! Click to review.', {
-              duration: 10000,
-              action: {
-                label: 'Review',
-                onClick: () => setShowPlanDialog(true),
-              },
-            });
-          } else {
-            toast.info('No changes generated. Try again with a different prompt.');
-          }
-        } else if (event.type === 'backlog_plan_error') {
-          setIsGeneratingPlan(false);
-          toast.error(`Plan generation failed: ${event.error}`);
+    const unsubscribe = api.backlogPlan.onEvent((data: unknown) => {
+      const event = data as { type: string; result?: BacklogPlanResult; error?: string };
+      logger.debug('Backlog plan event received', {
+        type: event.type,
+        hasResult: Boolean(event.result),
+        hasError: Boolean(event.error),
+      });
+      if (event.type === 'backlog_plan_complete') {
+        setIsGeneratingPlan(false);
+        if (event.result && event.result.changes?.length > 0) {
+          setPendingBacklogPlan(event.result);
+          toast.success('Plan ready! Click to review.', {
+            duration: 10000,
+            action: {
+              label: 'Review',
+              onClick: () => setShowPlanDialog(true),
+            },
+          });
+        } else {
+          toast.info('No changes generated. Try again with a different prompt.');
         }
+      } else if (event.type === 'backlog_plan_error') {
+        setIsGeneratingPlan(false);
+        toast.error(`Plan generation failed: ${event.error}`);
       }
-    );
+    });
 
     return unsubscribe;
   }, []);
@@ -217,7 +210,7 @@ export function GraphViewPage() {
     return hookFeatures.reduce(
       (counts, feature) => {
         if (feature.status !== 'completed') {
-          const branch = feature.branchName ?? 'main';
+          const branch = (feature.branchName as string | undefined) ?? 'main';
           counts[branch] = (counts[branch] || 0) + 1;
         }
         return counts;
@@ -241,8 +234,8 @@ export function GraphViewPage() {
   // Follow-up state (simplified for graph view)
   const [followUpFeature, setFollowUpFeature] = useState<Feature | null>(null);
   const [followUpPrompt, setFollowUpPrompt] = useState('');
-  const [followUpImagePaths, setFollowUpImagePaths] = useState<any[]>([]);
-  const [followUpPreviewMap, setFollowUpPreviewMap] = useState<Map<string, string>>(new Map());
+  const [followUpImagePaths, setFollowUpImagePaths] = useState<FeatureImagePath[]>([]);
+  const [, setFollowUpPreviewMap] = useState<Map<string, string>>(new Map());
 
   // In-progress features for shortcuts
   const inProgressFeaturesForShortcuts = useMemo(() => {
@@ -392,6 +385,7 @@ export function GraphViewPage() {
         currentBranch={currentWorktreeBranch || undefined}
         isMaximized={false}
         allFeatures={hookFeatures}
+        projectPath={currentProject?.path}
       />
 
       {/* Add Feature Dialog (for spawning) */}
@@ -414,6 +408,7 @@ export function GraphViewPage() {
         isMaximized={false}
         parentFeature={spawnParentFeature}
         allFeatures={hookFeatures}
+        projectPath={currentProject?.path}
         // When setting is enabled and a non-main worktree is selected, pass its branch to default to 'custom' work mode
         selectedNonMainWorktreeBranch={
           addFeatureUseSelectedWorktreeBranch && currentWorktreePath !== null

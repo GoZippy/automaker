@@ -1,7 +1,6 @@
 import { CircleDot, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 import type { IssuesStateFilter } from '../types';
 import { IssuesFilterControls } from './issues-filter-controls';
 

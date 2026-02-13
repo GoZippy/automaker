@@ -53,17 +53,6 @@ interface MigrationState {
   error: string | null;
 }
 
-/**
- * localStorage keys that may contain settings to migrate
- */
-const LOCALSTORAGE_KEYS = [
-  'automaker-storage',
-  'automaker-setup',
-  'worktree-panel-collapsed',
-  'file-browser-recent-folders',
-  'automaker:lastProjectDir',
-] as const;
-
 // NOTE: We intentionally do NOT clear any localStorage keys after migration.
 // This allows users to switch back to older versions of Automaker that relied on localStorage.
 // The `localStorageMigrated` flag in server settings prevents re-migration on subsequent app loads.
@@ -136,7 +125,7 @@ export function parseLocalStorageSettings(): Partial<GlobalSettings> | null {
         const cacheProjectCount = cached?.projects?.length ?? 0;
         logger.info(`[CACHE_LOADED] projects=${cacheProjectCount}, theme=${cached?.theme}`);
         return cached;
-      } catch (e) {
+      } catch {
         logger.warn('Failed to parse settings cache, falling back to old storage');
       }
     } else {
@@ -181,6 +170,7 @@ export function parseLocalStorageSettings(): Partial<GlobalSettings> | null {
       defaultPlanningMode: state.defaultPlanningMode as GlobalSettings['defaultPlanningMode'],
       defaultRequirePlanApproval: state.defaultRequirePlanApproval as boolean,
       muteDoneSound: state.muteDoneSound as boolean,
+      disableSplashScreen: state.disableSplashScreen as boolean,
       enhancementModel: state.enhancementModel as GlobalSettings['enhancementModel'],
       validationModel: state.validationModel as GlobalSettings['validationModel'],
       phaseModels: state.phaseModels as GlobalSettings['phaseModels'],
@@ -678,8 +668,9 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
       maxConcurrency: number;
     }
   > = {};
-  if ((settings as Record<string, unknown>).autoModeByWorktree) {
-    const persistedSettings = (settings as Record<string, unknown>).autoModeByWorktree as Record<
+  if ((settings as unknown as Record<string, unknown>).autoModeByWorktree) {
+    const persistedSettings = (settings as unknown as Record<string, unknown>)
+      .autoModeByWorktree as Record<
       string,
       { maxConcurrency?: number; branchName?: string | null }
     >;
@@ -698,6 +689,8 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
     fontFamilySans: settings.fontFamilySans ?? null,
     fontFamilyMono: settings.fontFamilyMono ?? null,
     sidebarOpen: settings.sidebarOpen ?? true,
+    sidebarStyle: settings.sidebarStyle ?? 'unified',
+    collapsedNavSections: settings.collapsedNavSections ?? {},
     chatHistoryOpen: settings.chatHistoryOpen ?? false,
     maxConcurrency: settings.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
     autoModeByWorktree: restoredAutoModeByWorktree,
@@ -711,8 +704,10 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
       model: 'claude-opus',
     },
     muteDoneSound: settings.muteDoneSound ?? false,
+    disableSplashScreen: settings.disableSplashScreen ?? false,
     serverLogLevel: settings.serverLogLevel ?? 'info',
     enableRequestLogging: settings.enableRequestLogging ?? true,
+    showQueryDevtools: settings.showQueryDevtools ?? true,
     enhancementModel: settings.enhancementModel ?? 'claude-sonnet',
     validationModel: settings.validationModel ?? 'claude-opus',
     phaseModels: settings.phaseModels ?? current.phaseModels,
@@ -797,6 +792,7 @@ function buildSettingsUpdateFromStore(): Record<string, unknown> {
     defaultPlanningMode: state.defaultPlanningMode,
     defaultRequirePlanApproval: state.defaultRequirePlanApproval,
     muteDoneSound: state.muteDoneSound,
+    disableSplashScreen: state.disableSplashScreen,
     serverLogLevel: state.serverLogLevel,
     enableRequestLogging: state.enableRequestLogging,
     enhancementModel: state.enhancementModel,

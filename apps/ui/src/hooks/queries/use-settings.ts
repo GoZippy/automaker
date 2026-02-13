@@ -25,11 +25,14 @@ export function useGlobalSettings() {
     queryKey: queryKeys.settings.global(),
     queryFn: async (): Promise<GlobalSettings> => {
       const api = getElectronAPI();
+      if (!api.settings) {
+        throw new Error('Settings API not available');
+      }
       const result = await api.settings.getGlobal();
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch global settings');
       }
-      return result.settings as GlobalSettings;
+      return result.settings as unknown as GlobalSettings;
     },
     staleTime: STALE_TIMES.SETTINGS,
   });
@@ -47,11 +50,14 @@ export function useProjectSettings(projectPath: string | undefined) {
     queryFn: async (): Promise<ProjectSettings> => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.settings) {
+        throw new Error('Settings API not available');
+      }
       const result = await api.settings.getProject(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch project settings');
       }
-      return result.settings as ProjectSettings;
+      return result.settings as unknown as ProjectSettings;
     },
     enabled: !!projectPath,
     staleTime: STALE_TIMES.SETTINGS,
@@ -68,6 +74,9 @@ export function useSettingsStatus() {
     queryKey: queryKeys.settings.status(),
     queryFn: async () => {
       const api = getElectronAPI();
+      if (!api.settings) {
+        throw new Error('Settings API not available');
+      }
       const result = await api.settings.getStatus();
       return result;
     },
@@ -85,6 +94,9 @@ export function useCredentials() {
     queryKey: queryKeys.settings.credentials(),
     queryFn: async () => {
       const api = getElectronAPI();
+      if (!api.settings) {
+        throw new Error('Settings API not available');
+      }
       const result = await api.settings.getCredentials();
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch credentials');
@@ -111,6 +123,9 @@ export function useDiscoveredAgents(
     queryKey: queryKeys.settings.agents(projectPath ?? '', sources),
     queryFn: async () => {
       const api = getElectronAPI();
+      if (!api.settings) {
+        throw new Error('Settings API not available');
+      }
       const result = await api.settings.discoverAgents(projectPath, sources);
       if (!result.success) {
         throw new Error(result.error || 'Failed to discover agents');

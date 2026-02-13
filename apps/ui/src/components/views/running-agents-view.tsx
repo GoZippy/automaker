@@ -12,7 +12,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI, type RunningAgent } from '@/lib/electron';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { useNavigate } from '@tanstack/react-router';
 import { AgentOutputModal } from './board-view/dialogs/agent-output-modal';
 import { useRunningAgents } from '@/hooks/queries';

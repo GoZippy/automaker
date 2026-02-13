@@ -23,14 +23,7 @@ import { getHttpApiClient } from '@/lib/http-api-client';
 import { toast } from 'sonner';
 import { GitMerge, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
-
-interface WorktreeInfo {
-  path: string;
-  branch: string;
-  isMain: boolean;
-  hasChanges?: boolean;
-  changedFilesCount?: number;
-}
+import type { WorktreeInfo } from '../worktree-panel/types';
 
 interface RemoteBranch {
   name: string;
@@ -49,7 +42,7 @@ interface PullResolveConflictsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
-  onConfirm: (worktree: WorktreeInfo, remoteBranch: string) => void;
+  onConfirm: (worktree: WorktreeInfo, remoteBranch: string) => void | Promise<void>;
 }
 
 export function PullResolveConflictsDialog({

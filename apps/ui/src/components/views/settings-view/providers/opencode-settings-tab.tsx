@@ -54,13 +54,15 @@ export function OpencodeSettingsTab() {
   // Transform auth status to the expected format
   const authStatus = useMemo((): OpencodeAuthStatus | null => {
     if (!cliStatusData?.auth) return null;
+    // Cast auth to include optional error field for type compatibility
+    const auth = cliStatusData.auth as typeof cliStatusData.auth & { error?: string };
     return {
-      authenticated: cliStatusData.auth.authenticated,
-      method: (cliStatusData.auth.method as OpencodeAuthStatus['method']) || 'none',
-      hasApiKey: cliStatusData.auth.hasApiKey,
-      hasEnvApiKey: cliStatusData.auth.hasEnvApiKey,
-      hasOAuthToken: cliStatusData.auth.hasOAuthToken,
-      error: cliStatusData.auth.error,
+      authenticated: auth.authenticated,
+      method: (auth.method as OpencodeAuthStatus['method']) || 'none',
+      hasApiKey: auth.hasApiKey,
+      hasEnvApiKey: auth.hasEnvApiKey,
+      hasOAuthToken: auth.hasOAuthToken,
+      error: auth.error,
     };
   }, [cliStatusData]);
 

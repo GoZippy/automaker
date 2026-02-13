@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - column filtering logic with dependency resolution and status mapping
 import { useMemo, useCallback } from 'react';
 import { Feature, useAppStore } from '@/store/app-store';
 import {
@@ -51,7 +51,6 @@ export function useBoardColumnFeatures({
 
     // Determine the effective worktree path and branch for filtering
     // If currentWorktreePath is null, we're on the main worktree
-    const effectiveWorktreePath = currentWorktreePath || projectPath;
     // Use the branch name from the selected worktree
     // If we're selecting main (currentWorktreePath is null), currentWorktreeBranch
     // should contain the main branch's actual name, defaulting to "main"

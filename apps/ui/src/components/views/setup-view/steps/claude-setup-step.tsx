@@ -38,11 +38,6 @@ interface ClaudeSetupStepProps {
   onSkip: () => void;
 }
 
-interface ClaudeSetupContentProps {
-  /** Hide header and navigation for embedded use */
-  embedded?: boolean;
-}
-
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'error';
 
 // Claude Setup Step
@@ -272,12 +267,6 @@ export function ClaudeSetupStep({ onNext, onBack, onSkip }: ClaudeSetupStepProps
   const isApiKeyVerified = apiKeyVerificationStatus === 'verified';
   const isReady = isCliVerified || isApiKeyVerified;
 
-  const getAuthMethodLabel = () => {
-    if (isApiKeyVerified) return 'API Key';
-    if (isCliVerified) return 'Claude CLI';
-    return null;
-  };
-
   // Helper to get status badge for CLI
   const getCliStatusBadge = () => {
     if (cliVerificationStatus === 'verified') {
@@ -412,7 +401,7 @@ export function ClaudeSetupStep({ onNext, onBack, onSkip }: ClaudeSetupStepProps
                     >
                       {isInstalling ? (
                         <>
-                          <Spinner size="sm" className="mr-2" />
+                          <Spinner size="sm" variant="foreground" className="mr-2" />
                           Installing...
                         </>
                       ) : (
@@ -574,7 +563,7 @@ export function ClaudeSetupStep({ onNext, onBack, onSkip }: ClaudeSetupStepProps
                     >
                       {isSavingApiKey ? (
                         <>
-                          <Spinner size="sm" className="mr-2" />
+                          <Spinner size="sm" variant="foreground" className="mr-2" />
                           Saving...
                         </>
                       ) : (

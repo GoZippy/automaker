@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - header component props with optional handlers and status variants
 import { memo, useState } from 'react';
 import { Feature } from '@/store/app-store';
 import { cn } from '@/lib/utils';

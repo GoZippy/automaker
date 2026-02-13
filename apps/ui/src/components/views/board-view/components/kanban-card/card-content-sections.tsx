@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - content section prop typing with feature data extraction
 import { memo } from 'react';
 import { Feature } from '@/store/app-store';
 import { GitBranch, GitPullRequest, ExternalLink } from 'lucide-react';

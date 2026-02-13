@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import { useAppStore, Feature } from '@/store/app-store';
@@ -324,7 +323,7 @@ export function InterviewView() {
       const api = getElectronAPI();
       // Use platform-specific path separator
       const pathSep =
-        typeof window !== 'undefined' && (window as any).electronAPI
+        typeof window !== 'undefined' && window.electronAPI
           ? navigator.platform.indexOf('Win') !== -1
             ? '\\'
             : '/'
@@ -349,8 +348,9 @@ export function InterviewView() {
         id: generateUUID(),
         category: 'Core',
         description: 'Initial project setup',
-        status: 'backlog' as const,
+        status: 'backlog',
         skipTests: true,
+        steps: [],
       };
 
       if (!api.features) {
@@ -572,7 +572,7 @@ export function InterviewView() {
                   >
                     {isGenerating ? (
                       <>
-                        <Spinner size="sm" className="mr-2" />
+                        <Spinner size="sm" variant="foreground" className="mr-2" />
                         Creating...
                       </>
                     ) : (

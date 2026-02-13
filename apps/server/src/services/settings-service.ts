@@ -621,6 +621,21 @@ export class SettingsService {
       };
     }
 
+    // Deep merge autoModeByWorktree if provided (preserves other worktree entries)
+    if (sanitizedUpdates.autoModeByWorktree) {
+      type WorktreeEntry = { maxConcurrency: number; branchName: string | null };
+      const mergedAutoModeByWorktree: Record<string, WorktreeEntry> = {
+        ...current.autoModeByWorktree,
+      };
+      for (const [key, value] of Object.entries(sanitizedUpdates.autoModeByWorktree)) {
+        mergedAutoModeByWorktree[key] = {
+          ...mergedAutoModeByWorktree[key],
+          ...value,
+        };
+      }
+      updated.autoModeByWorktree = mergedAutoModeByWorktree;
+    }
+
     await writeSettingsJson(settingsPath, updated);
     logger.info('Global settings updated');
 
@@ -825,6 +840,30 @@ export class SettingsService {
       (updates as Record<string, unknown>).phaseModelOverrides === '__CLEAR__'
     ) {
       delete updated.phaseModelOverrides;
+    }
+
+    // Handle defaultFeatureModel special cases:
+    // - "__CLEAR__" marker means delete the key (use global setting)
+    // - object means project-specific override
+    if (
+      'defaultFeatureModel' in updates &&
+      (updates as Record<string, unknown>).defaultFeatureModel === '__CLEAR__'
+    ) {
+      delete updated.defaultFeatureModel;
+    }
+
+    // Handle devCommand special cases:
+    // - null means delete the key (use auto-detection)
+    // - string means custom command
+    if ('devCommand' in updates && updates.devCommand === null) {
+      delete updated.devCommand;
+    }
+
+    // Handle testCommand special cases:
+    // - null means delete the key (use auto-detection)
+    // - string means custom command
+    if ('testCommand' in updates && updates.testCommand === null) {
+      delete updated.testCommand;
     }
 
     await writeSettingsJson(settingsPath, updated);

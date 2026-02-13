@@ -185,8 +185,8 @@ export function useBoardFeatures({ currentProject }: UseBoardFeaturesProps) {
     features,
     isLoading,
     persistedCategories,
-    loadFeatures: () => {
-      queryClient.invalidateQueries({
+    loadFeatures: async () => {
+      await queryClient.invalidateQueries({
         queryKey: queryKeys.features.all(currentProject?.path ?? ''),
       });
     },

@@ -24,6 +24,7 @@ import {
   Trash2,
   Search,
   X,
+  LayoutDashboard,
   type LucideIcon,
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
@@ -556,9 +557,32 @@ export function DashboardView() {
             </div>
           </div>
 
+          {/* Projects Overview button */}
+          {hasProjects && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate({ to: '/overview' })}
+              className="hidden sm:flex gap-2 titlebar-no-drag"
+              data-testid="projects-overview-button"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Overview
+            </Button>
+          )}
+
           {/* Mobile action buttons in header */}
           {hasProjects && (
             <div className="flex sm:hidden gap-2 titlebar-no-drag">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => navigate({ to: '/overview' })}
+                title="Projects Overview"
+                data-testid="projects-overview-button-mobile"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+              </Button>
               <Button variant="outline" size="icon" onClick={handleOpenProject}>
                 <FolderOpen className="w-4 h-4" />
               </Button>

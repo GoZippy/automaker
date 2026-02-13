@@ -17,8 +17,6 @@ import {
   setupWelcomeView,
   authenticateForTests,
   handleLoginScreenIfPresent,
-  waitForNetworkIdle,
-  sanitizeForTestId,
 } from '../utils';
 
 // Create unique temp dir for this test run
@@ -116,7 +114,9 @@ test.describe('Open Project', () => {
 
         // Add to existing projects (or create array)
         const existingProjects = json.settings.projects || [];
-        const hasProject = existingProjects.some((p: any) => p.id === projectId);
+        const hasProject = existingProjects.some(
+          (p: { id: string; path: string }) => p.id === projectId
+        );
         if (!hasProject) {
           json.settings.projects = [testProject, ...existingProjects];
         }
@@ -169,11 +169,11 @@ test.describe('Open Project', () => {
     }
 
     // Wait for a project to be set as current and visible on the page
-    // The project name appears in the project switcher button
-    // Use ends-with selector since data-testid format is: project-switcher-{id}-{sanitizedName}
+    // The project name appears in the project dropdown trigger
     if (targetProjectName) {
-      const sanitizedName = sanitizeForTestId(targetProjectName);
-      await expect(page.locator(`[data-testid$="-${sanitizedName}"]`)).toBeVisible({
+      await expect(
+        page.locator('[data-testid="project-dropdown-trigger"]').getByText(targetProjectName)
+      ).toBeVisible({
         timeout: 15000,
       });
     }

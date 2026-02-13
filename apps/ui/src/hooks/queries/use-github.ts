@@ -8,7 +8,7 @@ import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
-import type { GitHubIssue, GitHubPR, GitHubComment, IssueValidation } from '@/lib/electron';
+import type { GitHubIssue, GitHubPR, GitHubComment, StoredValidation } from '@/lib/electron';
 
 interface GitHubIssuesResult {
   openIssues: GitHubIssue[];
@@ -38,6 +38,9 @@ export function useGitHubIssues(projectPath: string | undefined) {
     queryFn: async (): Promise<GitHubIssuesResult> => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.github) {
+        throw new Error('GitHub API not available');
+      }
       const result = await api.github.listIssues(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch issues');
@@ -64,6 +67,9 @@ export function useGitHubPRs(projectPath: string | undefined) {
     queryFn: async (): Promise<GitHubPRsResult> => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.github) {
+        throw new Error('GitHub API not available');
+      }
       const result = await api.github.listPRs(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch PRs');
@@ -90,9 +96,12 @@ export function useGitHubValidations(projectPath: string | undefined, issueNumbe
     queryKey: issueNumber
       ? queryKeys.github.validation(projectPath ?? '', issueNumber)
       : queryKeys.github.validations(projectPath ?? ''),
-    queryFn: async (): Promise<IssueValidation[]> => {
+    queryFn: async (): Promise<StoredValidation[]> => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.github) {
+        throw new Error('GitHub API not available');
+      }
       const result = await api.github.getValidations(projectPath, issueNumber);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch validations');
@@ -116,15 +125,18 @@ export function useGitHubRemote(projectPath: string | undefined) {
     queryFn: async () => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.github) {
+        throw new Error('GitHub API not available');
+      }
       const result = await api.github.checkRemote(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to check remote');
       }
       return {
-        hasRemote: result.hasRemote ?? false,
+        hasRemote: result.hasGitHubRemote ?? false,
         owner: result.owner,
         repo: result.repo,
-        url: result.url,
+        url: result.remoteUrl,
       };
     },
     enabled: !!projectPath,
@@ -165,6 +177,9 @@ export function useGitHubIssueComments(
     queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
       if (!projectPath || !issueNumber) throw new Error('Missing project path or issue number');
       const api = getElectronAPI();
+      if (!api.github) {
+        throw new Error('GitHub API not available');
+      }
       const result = await api.github.getIssueComments(projectPath, issueNumber, pageParam);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch comments');

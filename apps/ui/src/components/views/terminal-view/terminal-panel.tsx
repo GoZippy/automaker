@@ -45,7 +45,6 @@ import { matchesShortcutWithCode } from '@/hooks/use-keyboard-shortcuts';
 import {
   getTerminalTheme,
   TERMINAL_FONT_OPTIONS,
-  DEFAULT_TERMINAL_FONT,
   getTerminalFontFamily,
 } from '@/config/terminal-themes';
 import { DEFAULT_FONT_VALUE } from '@/config/ui-font-options';
@@ -102,7 +101,6 @@ interface TerminalPanelProps {
 type XTerminal = InstanceType<typeof import('@xterm/xterm').Terminal>;
 type XFitAddon = InstanceType<typeof import('@xterm/addon-fit').FitAddon>;
 type XSearchAddon = InstanceType<typeof import('@xterm/addon-search').SearchAddon>;
-type XWebLinksAddon = InstanceType<typeof import('@xterm/addon-web-links').WebLinksAddon>;
 
 export function TerminalPanel({
   sessionId,
@@ -285,8 +283,8 @@ export function TerminalPanel({
     // - CSI sequences: \x1b[...letter
     // - OSC sequences: \x1b]...ST
     // - Other escape sequences: \x1b followed by various characters
-    // eslint-disable-next-line no-control-regex
     return text.replace(
+      // eslint-disable-next-line no-control-regex
       /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\x1b[>=<]|\x1b[78HM]|\x1b#[0-9]|\x1b./g,
       ''
     );
@@ -670,8 +668,6 @@ export function TerminalPanel({
           while ((match = filePathRegex.exec(lineText)) !== null) {
             const fullMatch = match[1];
             const filePath = match[2];
-            const lineNum = match[3] ? parseInt(match[3], 10) : undefined;
-            const colNum = match[4] ? parseInt(match[4], 10) : undefined;
 
             // Skip common false positives (URLs, etc.)
             if (

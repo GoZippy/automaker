@@ -11,6 +11,10 @@ import type { CursorModelId } from './cursor-models.js';
 import { CURSOR_MODEL_MAP, getAllCursorModelIds } from './cursor-models.js';
 import type { OpencodeModelId } from './opencode-models.js';
 import { getAllOpencodeModelIds, DEFAULT_OPENCODE_MODEL } from './opencode-models.js';
+import type { GeminiModelId } from './gemini-models.js';
+import { getAllGeminiModelIds, DEFAULT_GEMINI_MODEL } from './gemini-models.js';
+import type { CopilotModelId } from './copilot-models.js';
+import { getAllCopilotModelIds, DEFAULT_COPILOT_MODEL } from './copilot-models.js';
 import type { PromptCustomization } from './prompts.js';
 import type { CodexSandboxMode, CodexApprovalPolicy } from './codex.js';
 import type { ReasoningEffort } from './provider.js';
@@ -23,14 +27,16 @@ export type { ModelAlias };
  *
  * Includes system theme and multiple color schemes organized by dark/light:
  * - System: Respects OS dark/light mode preference
- * - Dark themes (16): dark, retro, dracula, nord, monokai, tokyonight, solarized,
- *   gruvbox, catppuccin, onedark, synthwave, red, sunset, gray, forest, ocean
- * - Light themes (16): light, cream, solarizedlight, github, paper, rose, mint,
- *   lavender, sand, sky, peach, snow, sepia, gruvboxlight, nordlight, blossom
+ * - Dark themes (20): dark, retro, dracula, nord, monokai, tokyonight, solarized,
+ *   gruvbox, catppuccin, onedark, synthwave, red, sunset, gray, forest, ocean,
+ *   ember, ayu-dark, ayu-mirage, matcha
+ * - Light themes (20): light, cream, solarizedlight, github, paper, rose, mint,
+ *   lavender, sand, sky, peach, snow, sepia, gruvboxlight, nordlight, blossom,
+ *   ayu-light, onelight, bluloco, feather
  */
 export type ThemeMode =
   | 'system'
-  // Dark themes (16)
+  // Dark themes (20)
   | 'dark'
   | 'retro'
   | 'dracula'
@@ -47,7 +53,11 @@ export type ThemeMode =
   | 'gray'
   | 'forest'
   | 'ocean'
-  // Light themes (16)
+  | 'ember'
+  | 'ayu-dark'
+  | 'ayu-mirage'
+  | 'matcha'
+  // Light themes (20)
   | 'light'
   | 'cream'
   | 'solarizedlight'
@@ -63,7 +73,138 @@ export type ThemeMode =
   | 'sepia'
   | 'gruvboxlight'
   | 'nordlight'
-  | 'blossom';
+  | 'blossom'
+  | 'ayu-light'
+  | 'onelight'
+  | 'bluloco'
+  | 'feather';
+
+export type TerminalPromptTheme =
+  | 'custom'
+  | 'omp-1_shell'
+  | 'omp-agnoster'
+  | 'omp-agnoster.minimal'
+  | 'omp-agnosterplus'
+  | 'omp-aliens'
+  | 'omp-amro'
+  | 'omp-atomic'
+  | 'omp-atomicBit'
+  | 'omp-avit'
+  | 'omp-blue-owl'
+  | 'omp-blueish'
+  | 'omp-bubbles'
+  | 'omp-bubblesextra'
+  | 'omp-bubblesline'
+  | 'omp-capr4n'
+  | 'omp-catppuccin'
+  | 'omp-catppuccin_frappe'
+  | 'omp-catppuccin_latte'
+  | 'omp-catppuccin_macchiato'
+  | 'omp-catppuccin_mocha'
+  | 'omp-cert'
+  | 'omp-chips'
+  | 'omp-cinnamon'
+  | 'omp-clean-detailed'
+  | 'omp-cloud-context'
+  | 'omp-cloud-native-azure'
+  | 'omp-cobalt2'
+  | 'omp-craver'
+  | 'omp-darkblood'
+  | 'omp-devious-diamonds'
+  | 'omp-di4am0nd'
+  | 'omp-dracula'
+  | 'omp-easy-term'
+  | 'omp-emodipt'
+  | 'omp-emodipt-extend'
+  | 'omp-fish'
+  | 'omp-free-ukraine'
+  | 'omp-froczh'
+  | 'omp-gmay'
+  | 'omp-glowsticks'
+  | 'omp-grandpa-style'
+  | 'omp-gruvbox'
+  | 'omp-half-life'
+  | 'omp-honukai'
+  | 'omp-hotstick.minimal'
+  | 'omp-hul10'
+  | 'omp-hunk'
+  | 'omp-huvix'
+  | 'omp-if_tea'
+  | 'omp-illusi0n'
+  | 'omp-iterm2'
+  | 'omp-jandedobbeleer'
+  | 'omp-jblab_2021'
+  | 'omp-jonnychipz'
+  | 'omp-json'
+  | 'omp-jtracey93'
+  | 'omp-jv_sitecorian'
+  | 'omp-kali'
+  | 'omp-kushal'
+  | 'omp-lambda'
+  | 'omp-lambdageneration'
+  | 'omp-larserikfinholt'
+  | 'omp-lightgreen'
+  | 'omp-M365Princess'
+  | 'omp-marcduiker'
+  | 'omp-markbull'
+  | 'omp-material'
+  | 'omp-microverse-power'
+  | 'omp-mojada'
+  | 'omp-montys'
+  | 'omp-mt'
+  | 'omp-multiverse-neon'
+  | 'omp-negligible'
+  | 'omp-neko'
+  | 'omp-night-owl'
+  | 'omp-nordtron'
+  | 'omp-nu4a'
+  | 'omp-onehalf.minimal'
+  | 'omp-paradox'
+  | 'omp-pararussel'
+  | 'omp-patriksvensson'
+  | 'omp-peru'
+  | 'omp-pixelrobots'
+  | 'omp-plague'
+  | 'omp-poshmon'
+  | 'omp-powerlevel10k_classic'
+  | 'omp-powerlevel10k_lean'
+  | 'omp-powerlevel10k_modern'
+  | 'omp-powerlevel10k_rainbow'
+  | 'omp-powerline'
+  | 'omp-probua.minimal'
+  | 'omp-pure'
+  | 'omp-quick-term'
+  | 'omp-remk'
+  | 'omp-robbyrussell'
+  | 'omp-rudolfs-dark'
+  | 'omp-rudolfs-light'
+  | 'omp-sim-web'
+  | 'omp-slim'
+  | 'omp-slimfat'
+  | 'omp-smoothie'
+  | 'omp-sonicboom_dark'
+  | 'omp-sonicboom_light'
+  | 'omp-sorin'
+  | 'omp-space'
+  | 'omp-spaceship'
+  | 'omp-star'
+  | 'omp-stelbent-compact.minimal'
+  | 'omp-stelbent.minimal'
+  | 'omp-takuya'
+  | 'omp-the-unnamed'
+  | 'omp-thecyberden'
+  | 'omp-tiwahu'
+  | 'omp-tokyo'
+  | 'omp-tokyonight_storm'
+  | 'omp-tonybaloney'
+  | 'omp-uew'
+  | 'omp-unicorn'
+  | 'omp-velvet'
+  | 'omp-wholespace'
+  | 'omp-wopian'
+  | 'omp-xtoys'
+  | 'omp-ys'
+  | 'omp-zash';
 
 /** PlanningMode - Planning levels for feature generation workflows */
 export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full';
@@ -73,6 +214,14 @@ export type ServerLogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 /** ThinkingLevel - Extended thinking levels for Claude models (reasoning intensity) */
 export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
+
+/**
+ * SidebarStyle - Sidebar layout style options
+ *
+ * - 'unified': Single sidebar with integrated project dropdown (default, modern)
+ * - 'discord': Two sidebars - narrow project switcher + expandable navigation sidebar (classic)
+ */
+export type SidebarStyle = 'unified' | 'discord';
 
 /**
  * Thinking token budget mapping based on Claude SDK documentation.
@@ -99,7 +248,7 @@ export function getThinkingTokenBudget(level: ThinkingLevel | undefined): number
 }
 
 /** ModelProvider - AI model provider for credentials and API key management */
-export type ModelProvider = 'claude' | 'cursor' | 'codex' | 'opencode';
+export type ModelProvider = 'claude' | 'cursor' | 'codex' | 'opencode' | 'gemini' | 'copilot';
 
 // ============================================================================
 // Claude-Compatible Providers - Configuration for Claude-compatible API endpoints
@@ -598,8 +747,8 @@ export interface PhaseModelConfig {
   backlogPlanningModel: PhaseModelEntry;
   /** Model for analyzing project structure */
   projectAnalysisModel: PhaseModelEntry;
-  /** Model for AI suggestions (feature, refactoring, security, performance) */
-  suggestionsModel: PhaseModelEntry;
+  /** Model for ideation view (generating AI suggestions for features, security, performance) */
+  ideationModel: PhaseModelEntry;
 
   // Memory tasks - for learning extraction and memory operations
   /** Model for extracting learnings from completed agent sessions */
@@ -828,10 +977,47 @@ export interface GlobalSettings {
   // Terminal Configuration
   /** How to open terminals from "Open in Terminal" worktree action */
   openTerminalMode?: 'newTab' | 'split';
+  /** Custom terminal configuration settings (prompt theming, aliases, env vars) */
+  terminalConfig?: {
+    /** Enable custom terminal configurations (default: false) */
+    enabled: boolean;
+    /** Enable custom prompt (default: true when enabled) */
+    customPrompt: boolean;
+    /** Prompt format template */
+    promptFormat: 'standard' | 'minimal' | 'powerline' | 'starship';
+    /** Prompt theme preset */
+    promptTheme?: TerminalPromptTheme;
+    /** Show git branch in prompt (default: true) */
+    showGitBranch: boolean;
+    /** Show git status dirty indicator (default: true) */
+    showGitStatus: boolean;
+    /** Show user and host in prompt (default: true) */
+    showUserHost: boolean;
+    /** Show path in prompt (default: true) */
+    showPath: boolean;
+    /** Path display style */
+    pathStyle: 'full' | 'short' | 'basename';
+    /** Limit path depth (0 = full path) */
+    pathDepth: number;
+    /** Show current time in prompt (default: false) */
+    showTime: boolean;
+    /** Show last command exit status when non-zero (default: false) */
+    showExitStatus: boolean;
+    /** User-provided custom aliases (multiline string) */
+    customAliases: string;
+    /** User-provided custom env vars */
+    customEnvVars: Record<string, string>;
+    /** RC file format version (for migration) */
+    rcFileVersion?: number;
+  };
 
   // UI State Preferences
   /** Whether sidebar is currently open */
   sidebarOpen: boolean;
+  /** Sidebar layout style ('unified' = modern single sidebar, 'discord' = classic two-sidebar layout) */
+  sidebarStyle: SidebarStyle;
+  /** Collapsed state of sidebar navigation sections (key: section label, value: is collapsed) */
+  collapsedNavSections?: Record<string, boolean>;
   /** Whether chat history panel is open */
   chatHistoryOpen: boolean;
 
@@ -857,11 +1043,19 @@ export interface GlobalSettings {
   /** Mute completion notification sound */
   muteDoneSound: boolean;
 
+  // Splash Screen
+  /** Disable the splash screen overlay on app startup */
+  disableSplashScreen: boolean;
+
   // Server Logging Preferences
   /** Log level for the API server (error, warn, info, debug). Default: info */
   serverLogLevel?: ServerLogLevel;
   /** Enable HTTP request logging (Morgan). Default: true */
   enableRequestLogging?: boolean;
+
+  // Developer Tools
+  /** Show React Query DevTools panel (only in development mode). Default: true */
+  showQueryDevtools?: boolean;
 
   // AI Commit Message Generation
   /** Enable AI-generated commit messages when opening commit dialog (default: true) */
@@ -890,6 +1084,18 @@ export interface GlobalSettings {
   opencodeDefaultModel?: OpencodeModelId;
   /** Which dynamic OpenCode models are enabled (empty = all discovered) */
   enabledDynamicModelIds?: string[];
+
+  // Gemini CLI Settings (global)
+  /** Which Gemini models are available in feature modal (empty = all) */
+  enabledGeminiModels?: GeminiModelId[];
+  /** Default Gemini model selection when switching to Gemini CLI */
+  geminiDefaultModel?: GeminiModelId;
+
+  // Copilot CLI Settings (global)
+  /** Which Copilot models are available in feature modal (empty = all) */
+  enabledCopilotModels?: CopilotModelId[];
+  /** Default Copilot model selection when switching to Copilot CLI */
+  copilotDefaultModel?: CopilotModelId;
 
   // Provider Visibility Settings
   /** Providers that are disabled and should not appear in model dropdowns */
@@ -1178,6 +1384,22 @@ export interface ProjectSettings {
   /** Maximum concurrent agents for this project (overrides global maxConcurrency) */
   maxConcurrentAgents?: number;
 
+  // Test Runner Configuration
+  /**
+   * Custom command to run tests for this project.
+   * If not specified, auto-detection will be used based on project structure.
+   * Examples: "npm test", "yarn test", "pnpm test", "pytest", "go test ./..."
+   */
+  testCommand?: string;
+
+  // Dev Server Configuration
+  /**
+   * Custom command to start the development server for this project.
+   * If not specified, auto-detection will be used based on project structure.
+   * Examples: "npm run dev", "yarn dev", "pnpm dev", "cargo watch", "go run ."
+   */
+  devCommand?: string;
+
   // Phase Model Overrides (per-project)
   /**
    * Override phase model settings for this project.
@@ -1185,6 +1407,40 @@ export interface ProjectSettings {
    * Allows per-project customization of which models are used for each task.
    */
   phaseModelOverrides?: Partial<PhaseModelConfig>;
+
+  // Feature Defaults Override (per-project)
+  /**
+   * Override the default model for new feature cards in this project.
+   * If not specified, falls back to the global defaultFeatureModel setting.
+   */
+  defaultFeatureModel?: PhaseModelEntry;
+
+  // Terminal Configuration Override (per-project)
+  /** Project-specific terminal config overrides */
+  terminalConfig?: {
+    /** Override global enabled setting */
+    enabled?: boolean;
+    /** Override prompt theme preset */
+    promptTheme?: TerminalPromptTheme;
+    /** Override showing user/host */
+    showUserHost?: boolean;
+    /** Override showing path */
+    showPath?: boolean;
+    /** Override path style */
+    pathStyle?: 'full' | 'short' | 'basename';
+    /** Override path depth (0 = full path) */
+    pathDepth?: number;
+    /** Override showing time */
+    showTime?: boolean;
+    /** Override showing exit status */
+    showExitStatus?: boolean;
+    /** Project-specific custom aliases */
+    customAliases?: string;
+    /** Project-specific env vars */
+    customEnvVars?: Record<string, string>;
+    /** Custom welcome message for this project */
+    welcomeMessage?: string;
+  };
 
   // Deprecated Claude API Profile Override
   /**
@@ -1216,7 +1472,7 @@ export const DEFAULT_PHASE_MODELS: PhaseModelConfig = {
   featureGenerationModel: { model: 'claude-sonnet' },
   backlogPlanningModel: { model: 'claude-sonnet' },
   projectAnalysisModel: { model: 'claude-sonnet' },
-  suggestionsModel: { model: 'claude-sonnet' },
+  ideationModel: { model: 'claude-sonnet' },
 
   // Memory - use fast model for learning extraction (cost-effective)
   memoryExtractionModel: { model: 'claude-haiku' },
@@ -1267,6 +1523,8 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   skipClaudeSetup: false,
   theme: 'dark',
   sidebarOpen: true,
+  sidebarStyle: 'unified',
+  collapsedNavSections: {},
   chatHistoryOpen: false,
   maxConcurrency: DEFAULT_MAX_CONCURRENCY,
   defaultSkipTests: true,
@@ -1277,8 +1535,10 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   defaultRequirePlanApproval: false,
   defaultFeatureModel: { model: 'claude-opus' }, // Use canonical ID
   muteDoneSound: false,
+  disableSplashScreen: false,
   serverLogLevel: 'info',
   enableRequestLogging: true,
+  showQueryDevtools: true,
   enableAiCommitMessages: true,
   phaseModels: DEFAULT_PHASE_MODELS,
   enhancementModel: 'sonnet', // Legacy alias still supported
@@ -1288,6 +1548,10 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   enabledOpencodeModels: getAllOpencodeModelIds(), // Returns prefixed IDs
   opencodeDefaultModel: DEFAULT_OPENCODE_MODEL, // Already prefixed
   enabledDynamicModelIds: [],
+  enabledGeminiModels: getAllGeminiModelIds(), // Returns prefixed IDs
+  geminiDefaultModel: DEFAULT_GEMINI_MODEL, // Already prefixed
+  enabledCopilotModels: getAllCopilotModelIds(), // Returns prefixed IDs
+  copilotDefaultModel: DEFAULT_COPILOT_MODEL, // Already prefixed
   disabledProviders: [],
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
   projects: [],

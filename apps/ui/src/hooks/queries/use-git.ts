@@ -22,6 +22,9 @@ export function useGitDiffs(projectPath: string | undefined, enabled = true) {
     queryFn: async () => {
       if (!projectPath) throw new Error('No project path');
       const api = getElectronAPI();
+      if (!api.git) {
+        throw new Error('Git API not available');
+      }
       const result = await api.git.getDiffs(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch diffs');

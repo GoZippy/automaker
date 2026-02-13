@@ -36,6 +36,7 @@ export function useStartFeature(projectPath: string) {
       worktreePath?: string;
     }) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.runFeature(
         projectPath,
         featureId,
@@ -77,6 +78,7 @@ export function useResumeFeature(projectPath: string) {
       useWorktrees?: boolean;
     }) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.resumeFeature(projectPath, featureId, useWorktrees);
       if (!result.success) {
         throw new Error(result.error || 'Failed to resume feature');
@@ -116,6 +118,7 @@ export function useStopFeature() {
     mutationFn: async (input: string | { featureId: string; projectPath?: string }) => {
       const featureId = typeof input === 'string' ? input : input.featureId;
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.stopFeature(featureId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to stop feature');
@@ -151,6 +154,7 @@ export function useVerifyFeature(projectPath: string) {
   return useMutation({
     mutationFn: async (featureId: string) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.verifyFeature(projectPath, featureId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to verify feature');
@@ -196,6 +200,7 @@ export function useApprovePlan(projectPath: string) {
       feedback?: string;
     }) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.approvePlan(
         projectPath,
         featureId,
@@ -246,6 +251,7 @@ export function useFollowUpFeature(projectPath: string) {
       useWorktrees?: boolean;
     }) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.followUpFeature(
         projectPath,
         featureId,
@@ -282,6 +288,7 @@ export function useCommitFeature(projectPath: string) {
   return useMutation({
     mutationFn: async (featureId: string) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.commitFeature(projectPath, featureId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to commit changes');
@@ -310,6 +317,7 @@ export function useAnalyzeProject() {
   return useMutation({
     mutationFn: async (projectPath: string) => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.analyzeProject(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to analyze project');
@@ -339,7 +347,8 @@ export function useStartAutoMode(projectPath: string) {
   return useMutation({
     mutationFn: async (maxConcurrency?: number) => {
       const api = getElectronAPI();
-      const result = await api.autoMode.start(projectPath, maxConcurrency);
+      if (!api.autoMode) throw new Error('AutoMode API not available');
+      const result = await api.autoMode.start(projectPath, undefined, maxConcurrency);
       if (!result.success) {
         throw new Error(result.error || 'Failed to start auto mode');
       }
@@ -369,6 +378,7 @@ export function useStopAutoMode(projectPath: string) {
   return useMutation({
     mutationFn: async () => {
       const api = getElectronAPI();
+      if (!api.autoMode) throw new Error('AutoMode API not available');
       const result = await api.autoMode.stop(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to stop auto mode');

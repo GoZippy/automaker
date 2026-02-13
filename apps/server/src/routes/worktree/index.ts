@@ -42,6 +42,9 @@ import { createStartDevHandler } from './routes/start-dev.js';
 import { createStopDevHandler } from './routes/stop-dev.js';
 import { createListDevServersHandler } from './routes/list-dev-servers.js';
 import { createGetDevServerLogsHandler } from './routes/dev-server-logs.js';
+import { createStartTestsHandler } from './routes/start-tests.js';
+import { createStopTestsHandler } from './routes/stop-tests.js';
+import { createGetTestLogsHandler } from './routes/test-logs.js';
 import {
   createGetInitScriptHandler,
   createPutInitScriptHandler,
@@ -50,6 +53,7 @@ import {
 } from './routes/init-script.js';
 import { createDiscardChangesHandler } from './routes/discard-changes.js';
 import { createListRemotesHandler } from './routes/list-remotes.js';
+import { createAddRemoteHandler } from './routes/add-remote.js';
 import type { SettingsService } from '../../services/settings-service.js';
 
 export function createWorktreeRoutes(
@@ -130,7 +134,7 @@ export function createWorktreeRoutes(
   router.post(
     '/start-dev',
     validatePathParams('projectPath', 'worktreePath'),
-    createStartDevHandler()
+    createStartDevHandler(settingsService)
   );
   router.post('/stop-dev', createStopDevHandler());
   router.post('/list-dev-servers', createListDevServersHandler());
@@ -139,6 +143,15 @@ export function createWorktreeRoutes(
     validatePathParams('worktreePath'),
     createGetDevServerLogsHandler()
   );
+
+  // Test runner routes
+  router.post(
+    '/start-tests',
+    validatePathParams('worktreePath', 'projectPath?'),
+    createStartTestsHandler(settingsService)
+  );
+  router.post('/stop-tests', createStopTestsHandler());
+  router.get('/test-logs', validatePathParams('worktreePath?'), createGetTestLogsHandler());
 
   // Init script routes
   router.get('/init-script', createGetInitScriptHandler());
@@ -164,6 +177,14 @@ export function createWorktreeRoutes(
     validatePathParams('worktreePath'),
     requireValidWorktree,
     createListRemotesHandler()
+  );
+
+  // Add remote route
+  router.post(
+    '/add-remote',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createAddRemoteHandler()
   );
 
   return router;

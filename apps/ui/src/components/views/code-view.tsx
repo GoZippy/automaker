@@ -4,7 +4,7 @@ import { useAppStore } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { File, Folder, FolderOpen, ChevronRight, ChevronDown, Code } from 'lucide-react';
+import { File, Folder, FolderOpen, ChevronRight, ChevronDown, Code, RefreshCw } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 

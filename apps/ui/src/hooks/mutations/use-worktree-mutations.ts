@@ -22,6 +22,7 @@ export function useCreateWorktree(projectPath: string) {
   return useMutation({
     mutationFn: async ({ branchName, baseBranch }: { branchName: string; baseBranch?: string }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.create(projectPath, branchName, baseBranch);
       if (!result.success) {
         throw new Error(result.error || 'Failed to create worktree');
@@ -58,6 +59,7 @@ export function useDeleteWorktree(projectPath: string) {
       deleteBranch?: boolean;
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.delete(projectPath, worktreePath, deleteBranch);
       if (!result.success) {
         throw new Error(result.error || 'Failed to delete worktree');
@@ -87,13 +89,14 @@ export function useCommitWorktree() {
   return useMutation({
     mutationFn: async ({ worktreePath, message }: { worktreePath: string; message: string }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.commit(worktreePath, message);
       if (!result.success) {
         throw new Error(result.error || 'Failed to commit changes');
       }
       return result.result;
     },
-    onSuccess: (_, { worktreePath }) => {
+    onSuccess: (_, { worktreePath: _worktreePath }) => {
       // Invalidate all worktree queries since we don't know the project path
       queryClient.invalidateQueries({ queryKey: ['worktrees'] });
       toast.success('Changes committed');
@@ -117,6 +120,7 @@ export function usePushWorktree() {
   return useMutation({
     mutationFn: async ({ worktreePath, force }: { worktreePath: string; force?: boolean }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.push(worktreePath, force);
       if (!result.success) {
         throw new Error(result.error || 'Failed to push changes');
@@ -146,6 +150,7 @@ export function usePullWorktree() {
   return useMutation({
     mutationFn: async (worktreePath: string) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.pull(worktreePath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to pull changes');
@@ -188,6 +193,7 @@ export function useCreatePullRequest() {
       };
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.createPR(worktreePath, options);
       if (!result.success) {
         throw new Error(result.error || 'Failed to create pull request');
@@ -243,10 +249,12 @@ export function useMergeWorktree(projectPath: string) {
       };
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.mergeFeature(
         projectPath,
         branchName,
         worktreePath,
+        undefined, // targetBranch - use default (main)
         options
       );
       if (!result.success) {
@@ -284,6 +292,7 @@ export function useSwitchBranch() {
       branchName: string;
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.switchBranch(worktreePath, branchName);
       if (!result.success) {
         throw new Error(result.error || 'Failed to switch branch');
@@ -319,6 +328,7 @@ export function useCheckoutBranch() {
       branchName: string;
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.checkoutBranch(worktreePath, branchName);
       if (!result.success) {
         throw new Error(result.error || 'Failed to checkout branch');
@@ -346,6 +356,7 @@ export function useGenerateCommitMessage() {
   return useMutation({
     mutationFn: async (worktreePath: string) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.generateCommitMessage(worktreePath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to generate commit message');
@@ -375,6 +386,7 @@ export function useOpenInEditor() {
       editorCommand?: string;
     }) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.openInEditor(worktreePath, editorCommand);
       if (!result.success) {
         throw new Error(result.error || 'Failed to open in editor');
@@ -400,6 +412,7 @@ export function useInitGit() {
   return useMutation({
     mutationFn: async (projectPath: string) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.initGit(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to initialize git');
@@ -431,6 +444,7 @@ export function useSetInitScript(projectPath: string) {
   return useMutation({
     mutationFn: async (content: string) => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.setInitScript(projectPath, content);
       if (!result.success) {
         throw new Error(result.error || 'Failed to save init script');
@@ -461,6 +475,7 @@ export function useDeleteInitScript(projectPath: string) {
   return useMutation({
     mutationFn: async () => {
       const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.deleteInitScript(projectPath);
       if (!result.success) {
         throw new Error(result.error || 'Failed to delete init script');

@@ -3,6 +3,7 @@
  */
 
 import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
+import type { ParsedTask } from '@automaker/types';
 
 export interface ImageAttachment {
   id?: string; // Optional - may not be present in messages loaded from server
@@ -333,6 +334,20 @@ export type AutoModeEvent =
       featureId: string;
       projectPath?: string;
       phaseNumber: number;
+    }
+  | {
+      type: 'auto_mode_task_status';
+      featureId: string;
+      projectPath?: string;
+      taskId: string;
+      status: ParsedTask['status'];
+      tasks: ParsedTask[];
+    }
+  | {
+      type: 'auto_mode_summary';
+      featureId: string;
+      projectPath?: string;
+      summary: string;
     }
   | {
       type: 'auto_mode_resuming_features';
@@ -951,6 +966,7 @@ export interface WorktreeAPI {
       aheadCount: number;
       behindCount: number;
       hasRemoteBranch: boolean;
+      hasAnyRemotes: boolean;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS'; // Error codes for git status issues
@@ -986,6 +1002,23 @@ export interface WorktreeAPI {
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS';
+  }>;
+
+  // Add a new remote to a git repository
+  addRemote: (
+    worktreePath: string,
+    remoteName: string,
+    remoteUrl: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      remoteName: string;
+      remoteUrl: string;
+      fetched: boolean;
+      message: string;
+    };
+    error?: string;
+    code?: 'REMOTE_EXISTS';
   }>;
 
   // Open a worktree directory in the editor
@@ -1267,6 +1300,107 @@ export interface WorktreeAPI {
     };
     error?: string;
   }>;
+
+  // Test runner methods
+
+  // Start tests for a worktree
+  startTests: (
+    worktreePath: string,
+    options?: { projectPath?: string; testFile?: string }
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      sessionId: string;
+      worktreePath: string;
+      /** The test command being run (from project settings) */
+      command: string;
+      status: TestRunStatus;
+      testFile?: string;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Stop a running test session
+  stopTests: (sessionId: string) => Promise<{
+    success: boolean;
+    result?: {
+      sessionId: string;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Get test logs for a session
+  getTestLogs: (
+    worktreePath?: string,
+    sessionId?: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      sessionId: string;
+      worktreePath: string;
+      command: string;
+      status: TestRunStatus;
+      testFile?: string;
+      logs: string;
+      startedAt: string;
+      finishedAt: string | null;
+      exitCode: number | null;
+    };
+    error?: string;
+  }>;
+
+  // Subscribe to test runner events (started, output, completed)
+  onTestRunnerEvent: (
+    callback: (
+      event:
+        | {
+            type: 'test-runner:started';
+            payload: TestRunnerStartedEvent;
+          }
+        | {
+            type: 'test-runner:output';
+            payload: TestRunnerOutputEvent;
+          }
+        | {
+            type: 'test-runner:completed';
+            payload: TestRunnerCompletedEvent;
+          }
+    ) => void
+  ) => () => void;
+}
+
+// Test runner status type
+export type TestRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled' | 'error';
+
+// Test runner event payloads
+export interface TestRunnerStartedEvent {
+  sessionId: string;
+  worktreePath: string;
+  /** The test command being run (from project settings) */
+  command: string;
+  testFile?: string;
+  timestamp: string;
+}
+
+export interface TestRunnerOutputEvent {
+  sessionId: string;
+  worktreePath: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface TestRunnerCompletedEvent {
+  sessionId: string;
+  worktreePath: string;
+  /** The test command that was run */
+  command: string;
+  status: TestRunStatus;
+  testFile?: string;
+  exitCode: number | null;
+  duration: number;
+  timestamp: string;
 }
 
 export interface GitAPI {
@@ -1282,10 +1416,15 @@ export interface ModelDefinition {
   id: string;
   name: string;
   modelString: string;
-  provider: 'claude';
-  description?: string;
-  tier?: 'basic' | 'standard' | 'premium';
+  provider: string;
+  description: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsVision?: boolean;
+  supportsTools?: boolean;
+  tier?: 'basic' | 'standard' | 'premium' | string;
   default?: boolean;
+  hasReasoning?: boolean;
 }
 
 // Provider status type
@@ -1303,10 +1442,27 @@ export interface ProviderStatus {
   };
 }
 
+/**
+ * Extended Electron API with additional Electron-specific methods
+ * that are exposed via the preload script but not part of the shared interface.
+ */
+export interface ExtendedElectronAPI extends ElectronAPI {
+  /** Runtime marker indicating Electron environment */
+  isElectron?: boolean;
+  /** Get the server URL (Electron-only) */
+  getServerUrl?: () => Promise<string>;
+  /** Get the API key (Electron-only) */
+  getApiKey?: () => Promise<string | null>;
+  /** Check if running in external server mode (Electron-only) */
+  isExternalServerMode?: () => Promise<boolean>;
+  /** Get system paths (Electron-only) */
+  getPath?: (name: 'documents' | 'home' | 'appData' | 'userData') => Promise<string>;
+}
+
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
-    isElectron: boolean;
+    electronAPI?: ExtendedElectronAPI;
+    isElectron?: boolean;
   }
 }
 

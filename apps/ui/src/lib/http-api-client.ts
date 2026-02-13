@@ -16,12 +16,9 @@ import type {
   SaveImageResult,
   AutoModeAPI,
   FeaturesAPI,
-  SuggestionsAPI,
   SpecRegenerationAPI,
   AutoModeEvent,
-  SuggestionsEvent,
   SpecRegenerationEvent,
-  SuggestionType,
   GitHubAPI,
   IssueValidationInput,
   IssueValidationEvent,
@@ -34,12 +31,19 @@ import type {
   ConvertToFeatureOptions,
   NotificationsAPI,
   EventHistoryAPI,
+  CreatePROptions,
 } from './electron';
-import type { EventHistoryFilter } from '@automaker/types';
+import type {
+  IdeationContextSources,
+  EventHistoryFilter,
+  IdeationStreamEvent,
+  IdeationAnalysisEvent,
+  Notification,
+} from '@automaker/types';
 import type { Message, SessionListItem } from '@/types/electron';
-import type { Feature, ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
+import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
-import type { ModelId, ThinkingLevel, ReasoningEffort } from '@automaker/types';
+import type { ModelId, ThinkingLevel, ReasoningEffort, Feature } from '@automaker/types';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
 const logger = createLogger('HttpClient');
@@ -133,9 +137,7 @@ export const handleServerOffline = (): void => {
  * Must be called early in Electron mode before making API requests.
  */
 export const initServerUrl = async (): Promise<void> => {
-  // window.electronAPI is typed as ElectronAPI, but some Electron-only helpers
-  // (like getServerUrl) are not part of the shared interface. Narrow via `any`.
-  const electron = typeof window !== 'undefined' ? (window.electronAPI as any) : null;
+  const electron = typeof window !== 'undefined' ? window.electronAPI : null;
   if (electron?.getServerUrl) {
     try {
       cachedServerUrl = await electron.getServerUrl();
@@ -159,7 +161,7 @@ const getServerUrl = (): string => {
 
     // In web mode (not Electron), use relative URL to leverage Vite proxy
     // This avoids CORS issues since requests appear same-origin
-    if (!window.electron) {
+    if (!window.isElectron) {
       return '';
     }
   }
@@ -251,7 +253,7 @@ export const isElectronMode = (): boolean => {
   // Prefer a stable runtime marker from preload.
   // In some dev/electron setups, method availability can be temporarily undefined
   // during early startup, but `isElectron` remains reliable.
-  const api = window.electronAPI as any;
+  const api = window.electronAPI;
   return api?.isElectron === true || !!api?.getApiKey;
 };
 
@@ -268,7 +270,7 @@ export const checkExternalServerMode = async (): Promise<boolean> => {
   }
 
   if (typeof window !== 'undefined') {
-    const api = window.electronAPI as any;
+    const api = window.electronAPI;
     if (api?.isExternalServerMode) {
       try {
         cachedExternalServerMode = Boolean(await api.isExternalServerMode());
@@ -550,7 +552,6 @@ export const checkSandboxEnvironment = async (): Promise<{
 type EventType =
   | 'agent:stream'
   | 'auto-mode:event'
-  | 'suggestions:event'
   | 'spec-regeneration:event'
   | 'issue-validation:event'
   | 'backlog-plan:event'
@@ -562,6 +563,9 @@ type EventType =
   | 'dev-server:started'
   | 'dev-server:output'
   | 'dev-server:stopped'
+  | 'test-runner:started'
+  | 'test-runner:output'
+  | 'test-runner:completed'
   | 'notification:created';
 
 /**
@@ -594,6 +598,44 @@ export type DevServerLogEvent =
   | { type: 'dev-server:stopped'; payload: DevServerStoppedEvent };
 
 /**
+ * Test runner event payloads for WebSocket streaming
+ */
+export type TestRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled' | 'error';
+
+export interface TestRunnerStartedEvent {
+  sessionId: string;
+  worktreePath: string;
+  /** The test command being run (from project settings) */
+  command: string;
+  testFile?: string;
+  timestamp: string;
+}
+
+export interface TestRunnerOutputEvent {
+  sessionId: string;
+  worktreePath: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface TestRunnerCompletedEvent {
+  sessionId: string;
+  worktreePath: string;
+  /** The test command that was run */
+  command: string;
+  status: TestRunStatus;
+  testFile?: string;
+  exitCode: number | null;
+  duration: number;
+  timestamp: string;
+}
+
+export type TestRunnerEvent =
+  | { type: 'test-runner:started'; payload: TestRunnerStartedEvent }
+  | { type: 'test-runner:output'; payload: TestRunnerOutputEvent }
+  | { type: 'test-runner:completed'; payload: TestRunnerCompletedEvent };
+
+/**
  * Response type for fetching dev server logs
  */
 export interface DevServerLogsResponse {
@@ -604,6 +646,26 @@ export interface DevServerLogsResponse {
     url: string;
     logs: string;
     startedAt: string;
+  };
+  error?: string;
+}
+
+/**
+ * Response type for fetching test logs
+ */
+export interface TestLogsResponse {
+  success: boolean;
+  result?: {
+    sessionId: string;
+    worktreePath: string;
+    /** The test command that was/is being run */
+    command: string;
+    status: TestRunStatus;
+    testFile?: string;
+    logs: string;
+    startedAt: string;
+    finishedAt: string | null;
+    exitCode: number | null;
   };
   error?: string;
 }
@@ -884,7 +946,7 @@ export class HttpApiClient implements ElectronAPI {
     return response.json();
   }
 
-  private async get<T>(endpoint: string): Promise<T> {
+  async get<T>(endpoint: string): Promise<T> {
     // Ensure API key is initialized before making request
     await waitForApiKeyInit();
     const response = await fetch(`${this.serverUrl}${endpoint}`, {
@@ -914,7 +976,7 @@ export class HttpApiClient implements ElectronAPI {
     return response.json();
   }
 
-  private async put<T>(endpoint: string, body?: unknown): Promise<T> {
+  async put<T>(endpoint: string, body?: unknown): Promise<T> {
     // Ensure API key is initialized before making request
     await waitForApiKeyInit();
     const response = await fetch(`${this.serverUrl}${endpoint}`, {
@@ -1598,12 +1660,79 @@ export class HttpApiClient implements ElectronAPI {
       error?: string;
     }> => this.post('/api/setup/opencode/cache/clear'),
 
-    onInstallProgress: (callback: (progress: unknown) => void) => {
-      return this.subscribeToEvent('agent:stream', callback);
+    // Gemini CLI methods
+    getGeminiStatus: (): Promise<{
+      success: boolean;
+      status?: string;
+      installed?: boolean;
+      method?: string;
+      version?: string;
+      path?: string;
+      recommendation?: string;
+      installCommands?: {
+        macos?: string;
+        linux?: string;
+        npm?: string;
+      };
+      auth?: {
+        authenticated: boolean;
+        method: string;
+        hasApiKey?: boolean;
+        hasEnvApiKey?: boolean;
+        error?: string;
+      };
+      loginCommand?: string;
+      installCommand?: string;
+      error?: string;
+    }> => this.get('/api/setup/gemini-status'),
+
+    authGemini: (): Promise<{
+      success: boolean;
+      requiresManualAuth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/auth-gemini'),
+
+    deauthGemini: (): Promise<{
+      success: boolean;
+      requiresManualDeauth?: boolean;
+      command?: string;
+      message?: string;
+      error?: string;
+    }> => this.post('/api/setup/deauth-gemini'),
+
+    // Copilot SDK methods
+    getCopilotStatus: (): Promise<{
+      success: boolean;
+      status?: string;
+      installed?: boolean;
+      method?: string;
+      version?: string;
+      path?: string;
+      recommendation?: string;
+      auth?: {
+        authenticated: boolean;
+        method: string;
+        login?: string;
+        host?: string;
+        error?: string;
+      };
+      loginCommand?: string;
+      installCommand?: string;
+      error?: string;
+    }> => this.get('/api/setup/copilot-status'),
+
+    onInstallProgress: (
+      callback: (progress: { cli?: string; data?: string; type?: string }) => void
+    ) => {
+      return this.subscribeToEvent('agent:stream', callback as EventCallback);
     },
 
-    onAuthProgress: (callback: (progress: unknown) => void) => {
-      return this.subscribeToEvent('agent:stream', callback);
+    onAuthProgress: (
+      callback: (progress: { cli?: string; data?: string; type?: string }) => void
+    ) => {
+      return this.subscribeToEvent('agent:stream', callback as EventCallback);
     },
   };
 
@@ -1629,6 +1758,64 @@ export class HttpApiClient implements ElectronAPI {
       deletedCount?: number;
       failedCount?: number;
       results?: Array<{ featureId: string; success: boolean; error?: string }>;
+      error?: string;
+    }>;
+    export: (
+      projectPath: string,
+      options?: {
+        featureIds?: string[];
+        format?: 'json' | 'yaml';
+        includeHistory?: boolean;
+        includePlanSpec?: boolean;
+        category?: string;
+        status?: string;
+        prettyPrint?: boolean;
+        metadata?: Record<string, unknown>;
+      }
+    ) => Promise<{
+      success: boolean;
+      data?: string;
+      format?: 'json' | 'yaml';
+      contentType?: string;
+      filename?: string;
+      error?: string;
+    }>;
+    import: (
+      projectPath: string,
+      data: string,
+      options?: {
+        overwrite?: boolean;
+        preserveBranchInfo?: boolean;
+        targetCategory?: string;
+      }
+    ) => Promise<{
+      success: boolean;
+      importedCount?: number;
+      failedCount?: number;
+      results?: Array<{
+        success: boolean;
+        featureId?: string;
+        importedAt: string;
+        warnings?: string[];
+        errors?: string[];
+        wasOverwritten?: boolean;
+      }>;
+      error?: string;
+    }>;
+    checkConflicts: (
+      projectPath: string,
+      data: string
+    ) => Promise<{
+      success: boolean;
+      hasConflicts?: boolean;
+      conflicts?: Array<{
+        featureId: string;
+        title?: string;
+        existingTitle?: string;
+        hasConflict: boolean;
+      }>;
+      totalFeatures?: number;
+      conflictCount?: number;
       error?: string;
     }>;
   } = {
@@ -1663,6 +1850,64 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/bulk-update', { projectPath, featureIds, updates }),
     bulkDelete: (projectPath: string, featureIds: string[]) =>
       this.post('/api/features/bulk-delete', { projectPath, featureIds }),
+    export: (
+      projectPath: string,
+      options?: {
+        featureIds?: string[];
+        format?: 'json' | 'yaml';
+        includeHistory?: boolean;
+        includePlanSpec?: boolean;
+        category?: string;
+        status?: string;
+        prettyPrint?: boolean;
+        metadata?: Record<string, unknown>;
+      }
+    ): Promise<{
+      success: boolean;
+      data?: string;
+      format?: 'json' | 'yaml';
+      contentType?: string;
+      filename?: string;
+      error?: string;
+    }> => this.post('/api/features/export', { projectPath, ...options }),
+    import: (
+      projectPath: string,
+      data: string,
+      options?: {
+        overwrite?: boolean;
+        preserveBranchInfo?: boolean;
+        targetCategory?: string;
+      }
+    ): Promise<{
+      success: boolean;
+      importedCount?: number;
+      failedCount?: number;
+      results?: Array<{
+        success: boolean;
+        featureId?: string;
+        importedAt: string;
+        warnings?: string[];
+        errors?: string[];
+        wasOverwritten?: boolean;
+      }>;
+      error?: string;
+    }> => this.post('/api/features/import', { projectPath, data, ...options }),
+    checkConflicts: (
+      projectPath: string,
+      data: string
+    ): Promise<{
+      success: boolean;
+      hasConflicts?: boolean;
+      conflicts?: Array<{
+        featureId: string;
+        title?: string;
+        existingTitle?: string;
+        hasConflict: boolean;
+      }>;
+      totalFeatures?: number;
+      conflictCount?: number;
+      error?: string;
+    }> => this.post('/api/features/check-conflicts', { projectPath, data }),
   };
 
   // Auto Mode API
@@ -1798,7 +2043,7 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/generate-commit-message', { worktreePath }),
     push: (worktreePath: string, force?: boolean, remote?: string) =>
       this.post('/api/worktree/push', { worktreePath, force, remote }),
-    createPR: (worktreePath: string, options?: any) =>
+    createPR: (worktreePath: string, options?: CreatePROptions) =>
       this.post('/api/worktree/create-pr', { worktreePath, ...options }),
     getDiffs: (projectPath: string, featureId: string) =>
       this.post('/api/worktree/diffs', { projectPath, featureId }),
@@ -1817,6 +2062,8 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/switch-branch', { worktreePath, branchName }),
     listRemotes: (worktreePath: string) =>
       this.post('/api/worktree/list-remotes', { worktreePath }),
+    addRemote: (worktreePath: string, remoteName: string, remoteUrl: string) =>
+      this.post('/api/worktree/add-remote', { worktreePath, remoteName, remoteUrl }),
     openInEditor: (worktreePath: string, editorCommand?: string) =>
       this.post('/api/worktree/open-in-editor', { worktreePath, editorCommand }),
     getDefaultEditor: () => this.get('/api/worktree/default-editor'),
@@ -1885,6 +2132,32 @@ export class HttpApiClient implements ElectronAPI {
         unsub3();
       };
     },
+    // Test runner methods
+    startTests: (worktreePath: string, options?: { projectPath?: string; testFile?: string }) =>
+      this.post('/api/worktree/start-tests', { worktreePath, ...options }),
+    stopTests: (sessionId: string) => this.post('/api/worktree/stop-tests', { sessionId }),
+    getTestLogs: (worktreePath?: string, sessionId?: string): Promise<TestLogsResponse> => {
+      const params = new URLSearchParams();
+      if (worktreePath) params.append('worktreePath', worktreePath);
+      if (sessionId) params.append('sessionId', sessionId);
+      return this.get(`/api/worktree/test-logs?${params.toString()}`);
+    },
+    onTestRunnerEvent: (callback: (event: TestRunnerEvent) => void) => {
+      const unsub1 = this.subscribeToEvent('test-runner:started', (payload) =>
+        callback({ type: 'test-runner:started', payload: payload as TestRunnerStartedEvent })
+      );
+      const unsub2 = this.subscribeToEvent('test-runner:output', (payload) =>
+        callback({ type: 'test-runner:output', payload: payload as TestRunnerOutputEvent })
+      );
+      const unsub3 = this.subscribeToEvent('test-runner:completed', (payload) =>
+        callback({ type: 'test-runner:completed', payload: payload as TestRunnerCompletedEvent })
+      );
+      return () => {
+        unsub1();
+        unsub2();
+        unsub3();
+      };
+    },
   };
 
   // Git API
@@ -1892,22 +2165,6 @@ export class HttpApiClient implements ElectronAPI {
     getDiffs: (projectPath: string) => this.post('/api/git/diffs', { projectPath }),
     getFileDiff: (projectPath: string, filePath: string) =>
       this.post('/api/git/file-diff', { projectPath, filePath }),
-  };
-
-  // Suggestions API
-  suggestions: SuggestionsAPI = {
-    generate: (
-      projectPath: string,
-      suggestionType?: SuggestionType,
-      model?: string,
-      thinkingLevel?: string
-    ) =>
-      this.post('/api/suggestions/generate', { projectPath, suggestionType, model, thinkingLevel }),
-    stop: () => this.post('/api/suggestions/stop'),
-    status: () => this.get('/api/suggestions/status'),
-    onEvent: (callback: (event: SuggestionsEvent) => void) => {
-      return this.subscribeToEvent('suggestions:event', callback as EventCallback);
-    },
   };
 
   // Spec Regeneration API
@@ -2246,6 +2503,7 @@ export class HttpApiClient implements ElectronAPI {
         defaultDeleteBranchWithWorktree?: boolean;
         autoDismissInitScriptIndicator?: boolean;
         lastSelectedSessionId?: string;
+        testCommand?: string;
       };
       error?: string;
     }> => this.post('/api/settings/project', { projectPath }),
@@ -2490,9 +2748,16 @@ export class HttpApiClient implements ElectronAPI {
       projectPath: string,
       promptId: string,
       category: IdeaCategory,
-      count?: number
+      count?: number,
+      contextSources?: IdeationContextSources
     ) =>
-      this.post('/api/ideation/suggestions/generate', { projectPath, promptId, category, count }),
+      this.post('/api/ideation/suggestions/generate', {
+        projectPath,
+        promptId,
+        category,
+        count,
+        contextSources,
+      }),
 
     convertToFeature: (projectPath: string, ideaId: string, options?: ConvertToFeatureOptions) =>
       this.post('/api/ideation/convert', { projectPath, ideaId, ...options }),
@@ -2505,18 +2770,18 @@ export class HttpApiClient implements ElectronAPI {
 
     getPrompts: () => this.get('/api/ideation/prompts'),
 
-    onStream: (callback: (event: any) => void): (() => void) => {
+    onStream: (callback: (event: IdeationStreamEvent) => void): (() => void) => {
       return this.subscribeToEvent('ideation:stream', callback as EventCallback);
     },
 
-    onAnalysisEvent: (callback: (event: any) => void): (() => void) => {
+    onAnalysisEvent: (callback: (event: IdeationAnalysisEvent) => void): (() => void) => {
       return this.subscribeToEvent('ideation:analysis', callback as EventCallback);
     },
   };
 
   // Notifications API - project-level notifications
   notifications: NotificationsAPI & {
-    onNotificationCreated: (callback: (notification: any) => void) => () => void;
+    onNotificationCreated: (callback: (notification: Notification) => void) => () => void;
   } = {
     list: (projectPath: string) => this.post('/api/notifications/list', { projectPath }),
 
@@ -2529,7 +2794,7 @@ export class HttpApiClient implements ElectronAPI {
     dismiss: (projectPath: string, notificationId?: string) =>
       this.post('/api/notifications/dismiss', { projectPath, notificationId }),
 
-    onNotificationCreated: (callback: (notification: any) => void): (() => void) => {
+    onNotificationCreated: (callback: (notification: Notification) => void): (() => void) => {
       return this.subscribeToEvent('notification:created', callback as EventCallback);
     },
   };

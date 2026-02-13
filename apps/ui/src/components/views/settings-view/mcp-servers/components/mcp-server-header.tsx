@@ -1,7 +1,6 @@
 import { Plug, RefreshCw, Download, Code, FileJson, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { cn } from '@/lib/utils';
 
 interface MCPServerHeaderProps {
   isRefreshing: boolean;

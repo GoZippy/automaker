@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - optional callback prop typing with feature status narrowing
 import { memo } from 'react';
 import { Feature } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
@@ -36,7 +36,7 @@ interface CardActionsProps {
 export const CardActions = memo(function CardActions({
   feature,
   isCurrentAutoTask,
-  hasContext,
+  hasContext: _hasContext,
   shortcutKey,
   isSelectionMode = false,
   onEdit,

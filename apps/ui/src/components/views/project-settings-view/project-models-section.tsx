@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
-import { Workflow, RotateCcw, Globe, Check, Replace } from 'lucide-react';
+import { Workflow, RotateCcw, Globe, Check, Replace, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Project } from '@/lib/electron';
 import { PhaseModelSelector } from '@/components/views/settings-view/model-defaults/phase-model-selector';
 import { ProjectBulkReplaceDialog } from './project-bulk-replace-dialog';
 import type { PhaseModelKey, PhaseModelEntry } from '@automaker/types';
-import { DEFAULT_PHASE_MODELS } from '@automaker/types';
+import { DEFAULT_PHASE_MODELS, DEFAULT_GLOBAL_SETTINGS } from '@automaker/types';
 
 interface ProjectModelsSectionProps {
   project: Project;
@@ -72,9 +72,9 @@ const GENERATION_TASKS: PhaseConfig[] = [
     description: 'Analyzes project structure for suggestions',
   },
   {
-    key: 'suggestionsModel',
-    label: 'AI Suggestions',
-    description: 'Model for feature, refactoring, security, and performance suggestions',
+    key: 'ideationModel',
+    label: 'Ideation',
+    description: 'Model for ideation view (generating AI suggestions)',
   },
 ];
 
@@ -86,25 +86,26 @@ const MEMORY_TASKS: PhaseConfig[] = [
   },
 ];
 
-const ALL_PHASES = [...QUICK_TASKS, ...VALIDATION_TASKS, ...GENERATION_TASKS, ...MEMORY_TASKS];
+/**
+ * Default feature model override section for per-project settings.
+ */
+function FeatureDefaultModelOverrideSection({ project }: { project: Project }) {
+  const {
+    defaultFeatureModel: globalDefaultFeatureModel,
+    setProjectDefaultFeatureModel,
+    claudeCompatibleProviders,
+  } = useAppStore();
 
-function PhaseOverrideItem({
-  phase,
-  project,
-  globalValue,
-  projectOverride,
-}: {
-  phase: PhaseConfig;
-  project: Project;
-  globalValue: PhaseModelEntry;
-  projectOverride?: PhaseModelEntry;
-}) {
-  const { setProjectPhaseModelOverride, claudeCompatibleProviders } = useAppStore();
-
+  const globalValue: PhaseModelEntry =
+    globalDefaultFeatureModel ?? DEFAULT_GLOBAL_SETTINGS.defaultFeatureModel;
+  const projectOverride = project.defaultFeatureModel;
   const hasOverride = !!projectOverride;
   const effectiveValue = projectOverride || globalValue;
 
-  // Get display name for a model
+  /**
+   * Formats a user-friendly model label using provider metadata when available,
+   * falling back to known Claude aliases or the raw model id.
+   */
   const getModelDisplayName = (entry: PhaseModelEntry): string => {
     if (entry.providerId) {
       const provider = (claudeCompatibleProviders || []).find((p) => p.id === entry.providerId);
@@ -127,10 +128,150 @@ function PhaseOverrideItem({
     return modelMap[entry.model] || entry.model;
   };
 
+  /**
+   * Clears the project-level model override for this scope.
+   */
+  const handleClearOverride = () => {
+    setProjectDefaultFeatureModel(project.id, null);
+  };
+
+  /**
+   * Sets the project-level model override for this scope.
+   */
+  const handleSetOverride = (entry: PhaseModelEntry) => {
+    setProjectDefaultFeatureModel(project.id, entry);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-medium text-foreground">Feature Defaults</h3>
+        <p className="text-xs text-muted-foreground">
+          Default model for new feature cards in this project
+        </p>
+      </div>
+      <div className="space-y-3">
+        <div
+          className={cn(
+            'flex items-center justify-between p-4 rounded-xl',
+            'bg-accent/20 border',
+            hasOverride ? 'border-brand-500/30 bg-brand-500/5' : 'border-border/30',
+            'hover:bg-accent/30 transition-colors'
+          )}
+        >
+          <div className="flex-1 pr-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-brand-500/10 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-brand-500" />
+              </div>
+              <h4 className="text-sm font-medium text-foreground">Default Feature Model</h4>
+              {hasOverride ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-500/20 text-brand-500">
+                  Override
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground">
+                  <Globe className="w-3 h-3" />
+                  Global
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 ml-10">
+              Model and thinking level used when creating new feature cards
+            </p>
+            {hasOverride && (
+              <p className="text-xs text-brand-500 mt-1 ml-10">
+                Using: {getModelDisplayName(effectiveValue)}
+              </p>
+            )}
+            {!hasOverride && (
+              <p className="text-xs text-muted-foreground/70 mt-1 ml-10">
+                Using global: {getModelDisplayName(globalValue)}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {hasOverride && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearOverride}
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                Reset
+              </Button>
+            )}
+            <PhaseModelSelector
+              compact
+              value={effectiveValue}
+              onChange={handleSetOverride}
+              align="end"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a single phase override row, showing the effective model
+ * (project override or global default) and wiring selector/reset actions.
+ */
+function PhaseOverrideItem({
+  phase,
+  project,
+  globalValue,
+  projectOverride,
+}: {
+  phase: PhaseConfig;
+  project: Project;
+  globalValue: PhaseModelEntry;
+  projectOverride?: PhaseModelEntry;
+}) {
+  const { setProjectPhaseModelOverride, claudeCompatibleProviders } = useAppStore();
+
+  const hasOverride = !!projectOverride;
+  const effectiveValue = projectOverride || globalValue;
+
+  /**
+   * Formats a user-friendly model label using provider metadata when available,
+   * falling back to known Claude aliases or the raw model id.
+   */
+  const getModelDisplayName = (entry: PhaseModelEntry): string => {
+    if (entry.providerId) {
+      const provider = (claudeCompatibleProviders || []).find((p) => p.id === entry.providerId);
+      if (provider) {
+        const model = provider.models?.find((m) => m.id === entry.model);
+        if (model) {
+          return `${model.displayName} (${provider.name})`;
+        }
+      }
+    }
+    // Default to model ID for built-in models (both short aliases and canonical IDs)
+    const modelMap: Record<string, string> = {
+      haiku: 'Claude Haiku',
+      sonnet: 'Claude Sonnet',
+      opus: 'Claude Opus',
+      'claude-haiku': 'Claude Haiku',
+      'claude-sonnet': 'Claude Sonnet',
+      'claude-opus': 'Claude Opus',
+    };
+    return modelMap[entry.model] || entry.model;
+  };
+
+  /**
+   * Clears the project-level model override for this scope.
+   */
   const handleClearOverride = () => {
     setProjectPhaseModelOverride(project.id, phase.key, null);
   };
 
+  /**
+   * Sets the project-level model override for this scope.
+   */
   const handleSetOverride = (entry: PhaseModelEntry) => {
     setProjectPhaseModelOverride(project.id, phase.key, entry);
   };
@@ -194,6 +335,10 @@ function PhaseOverrideItem({
   );
 }
 
+/**
+ * Renders a titled group of phase override rows and resolves each phase's
+ * global default model with a fallback to DEFAULT_PHASE_MODELS.
+ */
 function PhaseGroup({
   title,
   subtitle,
@@ -229,33 +374,25 @@ function PhaseGroup({
   );
 }
 
+/**
+ * Renders the per-project model overrides UI for all phase models.
+ */
 export function ProjectModelsSection({ project }: ProjectModelsSectionProps) {
-  const { clearAllProjectPhaseModelOverrides, disabledProviders, claudeCompatibleProviders } =
-    useAppStore();
+  const { clearAllProjectPhaseModelOverrides, claudeCompatibleProviders } = useAppStore();
   const [showBulkReplace, setShowBulkReplace] = useState(false);
 
-  // Count how many overrides are set
-  const overrideCount = Object.keys(project.phaseModelOverrides || {}).length;
-
-  // Check if Claude is available
-  const isClaudeDisabled = disabledProviders.includes('claude');
+  // Count how many overrides are set (including defaultFeatureModel)
+  const phaseOverrideCount = Object.keys(project.phaseModelOverrides || {}).length;
+  const hasDefaultFeatureModelOverride = !!project.defaultFeatureModel;
+  const overrideCount = phaseOverrideCount + (hasDefaultFeatureModelOverride ? 1 : 0);
 
   // Check if there are any enabled ClaudeCompatibleProviders
   const hasEnabledProviders =
     claudeCompatibleProviders && claudeCompatibleProviders.some((p) => p.enabled !== false);
 
-  if (isClaudeDisabled) {
-    return (
-      <div className="text-center py-12 text-muted-foreground">
-        <Workflow className="w-12 h-12 mx-auto mb-3 opacity-50" />
-        <p className="text-sm">Claude not configured</p>
-        <p className="text-xs mt-1">
-          Enable Claude in global settings to configure per-project model overrides.
-        </p>
-      </div>
-    );
-  }
-
+  /**
+   * Clears all project-level phase model overrides for this project.
+   */
   const handleClearAll = () => {
     clearAllProjectPhaseModelOverrides(project.id);
   };
@@ -328,6 +465,9 @@ export function ProjectModelsSection({ project }: ProjectModelsSectionProps) {
 
       {/* Content */}
       <div className="p-6 space-y-8">
+        {/* Feature Defaults */}
+        <FeatureDefaultModelOverrideSection project={project} />
+
         {/* Quick Tasks */}
         <PhaseGroup
           title="Quick Tasks"

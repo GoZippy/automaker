@@ -1,11 +1,16 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { ModelAlias, ModelProvider } from '@/store/app-store';
-import { CODEX_MODEL_CONFIG_MAP, codexModelHasThinking } from '@automaker/types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+// Re-export getErrorMessage from @automaker/utils to maintain backward compatibility
+// for components that already import it from here
+// NOTE: Using subpath export to avoid pulling in Node.js-specific dependencies
+// (the main @automaker/utils barrel imports modules that depend on @automaker/platform)
+export { getErrorMessage } from '@automaker/utils/error-handler';
 
 /**
  * Determine if the current model supports extended thinking controls
@@ -156,35 +161,23 @@ export function sanitizeForTestId(name: string): string {
 /**
  * Generate a UUID v4 string.
  *
- * Uses crypto.randomUUID() when available (secure contexts: HTTPS or localhost).
- * Falls back to crypto.getRandomValues() for non-secure contexts (e.g., Docker via HTTP).
+ * Uses crypto.getRandomValues() which works in all modern browsers,
+ * including non-secure contexts (e.g., Docker via HTTP).
  *
  * @returns A RFC 4122 compliant UUID v4 string (e.g., "550e8400-e29b-41d4-a716-446655440000")
  */
 export function generateUUID(): string {
-  // Use native randomUUID if available (secure contexts: HTTPS or localhost)
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues === 'undefined') {
+    throw new Error('Cryptographically secure random number generator not available.');
   }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
 
-  // Fallback using crypto.getRandomValues() (works in all modern browsers, including non-secure contexts)
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
+  // Set version (4) and variant (RFC 4122) bits
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant RFC 4122
 
-    // Set version (4) and variant (RFC 4122) bits
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant RFC 4122
-
-    // Convert to hex string with proper UUID format
-    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  }
-
-  // Last resort fallback using Math.random() - less secure but ensures functionality
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  // Convert to hex string with proper UUID format
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

@@ -60,7 +60,7 @@ export function CliInstallationCard({
         >
           {isInstalling ? (
             <>
-              <Spinner size="sm" className="mr-2" />
+              <Spinner size="sm" variant="foreground" className="mr-2" />
               Installing...
             </>
           ) : (

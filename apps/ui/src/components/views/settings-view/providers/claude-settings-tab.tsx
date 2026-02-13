@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck - Claude settings form with CLI status and authentication state
 import { useAppStore } from '@/store/app-store';
 import { useSetupStore } from '@/store/setup-store';
 import { useCliStatus } from '../hooks/use-cli-status';

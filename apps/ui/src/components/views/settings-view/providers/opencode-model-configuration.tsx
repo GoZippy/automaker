@@ -23,13 +23,8 @@ import { OPENCODE_MODELS, OPENCODE_MODEL_CONFIG_MAP } from '@automaker/types';
 import type { OpenCodeProviderInfo } from '../cli-status/opencode-cli-status';
 import {
   OpenCodeIcon,
-  DeepSeekIcon,
-  QwenIcon,
-  NovaIcon,
   AnthropicIcon,
   OpenRouterIcon,
-  MistralIcon,
-  MetaIcon,
   GeminiIcon,
   OpenAIIcon,
   GrokIcon,
@@ -226,8 +221,6 @@ export function OpencodeModelConfiguration({
   const selectableStaticModelIds = allStaticModelIds.filter(
     (modelId) => modelId !== opencodeDefaultModel
   );
-  const allDynamicModelIds = dynamicModels.map((model) => model.id);
-  const hasDynamicModels = allDynamicModelIds.length > 0;
   const staticSelectState = getSelectionState(selectableStaticModelIds, enabledOpencodeModels);
 
   // Order: Free tier first, then Claude, then others

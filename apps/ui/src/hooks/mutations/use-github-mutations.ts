@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getElectronAPI, GitHubIssue, GitHubComment } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { toast } from 'sonner';
-import type { LinkedPRInfo, ModelId } from '@automaker/types';
+import type { LinkedPRInfo, ModelId, ThinkingLevel, ReasoningEffort } from '@automaker/types';
 import { resolveModelString } from '@automaker/model-resolver';
 
 /**
@@ -17,8 +17,8 @@ import { resolveModelString } from '@automaker/model-resolver';
 interface ValidateIssueInput {
   issue: GitHubIssue;
   model?: ModelId;
-  thinkingLevel?: number;
-  reasoningEffort?: string;
+  thinkingLevel?: ThinkingLevel;
+  reasoningEffort?: ReasoningEffort;
   comments?: GitHubComment[];
   linkedPRs?: LinkedPRInfo[];
 }
@@ -45,8 +45,6 @@ interface ValidateIssueInput {
  * ```
  */
 export function useValidateIssue(projectPath: string) {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: async (input: ValidateIssueInput) => {
       const { issue, model, thinkingLevel, reasoningEffort, comments, linkedPRs } = input;

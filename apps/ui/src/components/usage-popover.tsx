@@ -25,8 +25,7 @@ type UsageError = {
   message: string;
 };
 
-// Fixed refresh interval (45 seconds)
-const REFRESH_INTERVAL_SECONDS = 45;
+const CLAUDE_SESSION_WINDOW_HOURS = 5;
 
 // Helper to format reset time for Codex
 function formatCodexResetTime(unixTimestamp: number): string {
@@ -226,19 +225,7 @@ export function UsagePopover() {
   };
 
   // Calculate max percentage for header button
-  const claudeMaxPercentage = claudeUsage
-    ? Math.max(claudeUsage.sessionPercentage || 0, claudeUsage.weeklyPercentage || 0)
-    : 0;
-
-  const codexMaxPercentage = codexUsage?.rateLimits
-    ? Math.max(
-        codexUsage.rateLimits.primary?.usedPercent || 0,
-        codexUsage.rateLimits.secondary?.usedPercent || 0
-      )
-    : 0;
-
-  const maxPercentage = Math.max(claudeMaxPercentage, codexMaxPercentage);
-  const isStale = activeTab === 'claude' ? isClaudeStale : isCodexStale;
+  const claudeSessionPercentage = claudeUsage?.sessionPercentage || 0;
 
   const getProgressBarColor = (percentage: number) => {
     if (percentage >= 80) return 'bg-red-500';
@@ -246,25 +233,38 @@ export function UsagePopover() {
     return 'bg-green-500';
   };
 
-  // Determine which provider icon and percentage to show based on active tab
-  const getTabInfo = () => {
-    if (activeTab === 'claude') {
-      return {
-        icon: AnthropicIcon,
-        percentage: claudeMaxPercentage,
-        isStale: isClaudeStale,
-      };
-    }
-    return {
-      icon: OpenAIIcon,
-      percentage: codexMaxPercentage,
-      isStale: isCodexStale,
-    };
-  };
+  const codexPrimaryWindowMinutes = codexUsage?.rateLimits?.primary?.windowDurationMins ?? null;
+  const codexSecondaryWindowMinutes = codexUsage?.rateLimits?.secondary?.windowDurationMins ?? null;
+  const codexWindowMinutes =
+    codexSecondaryWindowMinutes && codexPrimaryWindowMinutes
+      ? Math.min(codexPrimaryWindowMinutes, codexSecondaryWindowMinutes)
+      : (codexSecondaryWindowMinutes ?? codexPrimaryWindowMinutes);
+  const codexWindowLabel = codexWindowMinutes
+    ? getCodexWindowLabel(codexWindowMinutes).title
+    : 'Window';
+  const codexWindowUsage =
+    codexWindowMinutes === codexSecondaryWindowMinutes
+      ? codexUsage?.rateLimits?.secondary?.usedPercent
+      : codexUsage?.rateLimits?.primary?.usedPercent;
 
-  const tabInfo = getTabInfo();
-  const statusColor = getStatusInfo(tabInfo.percentage).color;
-  const ProviderIcon = tabInfo.icon;
+  // Determine which provider icon and percentage to show based on active tab
+  const indicatorInfo =
+    activeTab === 'claude'
+      ? {
+          icon: AnthropicIcon,
+          percentage: claudeSessionPercentage,
+          isStale: isClaudeStale,
+          title: `Session usage (${CLAUDE_SESSION_WINDOW_HOURS}h window)`,
+        }
+      : {
+          icon: OpenAIIcon,
+          percentage: codexWindowUsage ?? 0,
+          isStale: isCodexStale,
+          title: `Usage (${codexWindowLabel})`,
+        };
+
+  const statusColor = getStatusInfo(indicatorInfo.percentage).color;
+  const ProviderIcon = indicatorInfo.icon;
 
   const trigger = (
     <Button variant="ghost" size="sm" className="h-9 gap-2 bg-secondary border border-border px-3">
@@ -272,17 +272,18 @@ export function UsagePopover() {
       <span className="text-sm font-medium">Usage</span>
       {(claudeUsage || codexUsage) && (
         <div
+          title={indicatorInfo.title}
           className={cn(
             'h-1.5 w-16 bg-muted-foreground/20 rounded-full overflow-hidden transition-opacity',
-            tabInfo.isStale && 'opacity-60'
+            indicatorInfo.isStale && 'opacity-60'
           )}
         >
           <div
             className={cn(
               'h-full transition-all duration-500',
-              getProgressBarColor(tabInfo.percentage)
+              getProgressBarColor(indicatorInfo.percentage)
             )}
-            style={{ width: `${Math.min(tabInfo.percentage, 100)}%` }}
+            style={{ width: `${Math.min(indicatorInfo.percentage, 100)}%` }}
           />
         </div>
       )}
@@ -378,17 +379,17 @@ export function UsagePopover() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <UsageCard
-                      title="Weekly"
-                      subtitle="All models"
-                      percentage={claudeUsage.weeklyPercentage}
-                      resetText={claudeUsage.weeklyResetText}
-                      stale={isClaudeStale}
-                    />
-                    <UsageCard
                       title="Sonnet"
                       subtitle="Weekly"
                       percentage={claudeUsage.sonnetWeeklyPercentage}
                       resetText={claudeUsage.sonnetResetText}
+                      stale={isClaudeStale}
+                    />
+                    <UsageCard
+                      title="Weekly"
+                      subtitle="All models"
+                      percentage={claudeUsage.weeklyPercentage}
+                      resetText={claudeUsage.weeklyResetText}
                       stale={isClaudeStale}
                     />
                   </div>

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import type { Feature as ApiFeature } from '@automaker/types';
 import { Feature } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
 import { useAppStore } from '@/store/app-store';
@@ -48,14 +49,14 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           feature: result.feature,
         });
         if (result.success && result.feature) {
-          const updatedFeature = result.feature;
-          updateFeature(updatedFeature.id, updatedFeature);
+          const updatedFeature = result.feature as Feature;
+          updateFeature(updatedFeature.id, updatedFeature as Partial<Feature>);
           queryClient.setQueryData<Feature[]>(
             queryKeys.features.all(currentProject.path),
             (features) => {
               if (!features) return features;
               return features.map((feature) =>
-                feature.id === updatedFeature.id ? updatedFeature : feature
+                feature.id === updatedFeature.id ? { ...feature, ...updatedFeature } : feature
               );
             }
           );
@@ -85,9 +86,9 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           return;
         }
 
-        const result = await api.features.create(currentProject.path, feature);
+        const result = await api.features.create(currentProject.path, feature as ApiFeature);
         if (result.success && result.feature) {
-          updateFeature(result.feature.id, result.feature);
+          updateFeature(result.feature.id, result.feature as Partial<Feature>);
           // Invalidate React Query cache to sync UI
           queryClient.invalidateQueries({
             queryKey: queryKeys.features.all(currentProject.path),
