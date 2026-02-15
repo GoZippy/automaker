@@ -7,6 +7,7 @@ import * as secureFs from '../../../lib/secure-fs.js';
 import path from 'path';
 import { getErrorMessage, logError } from '../common.js';
 import { getImagesDir } from '@automaker/platform';
+import { sanitizeFilename } from '@automaker/utils';
 
 export function createSaveImageHandler() {
   return async (req: Request, res: Response): Promise<void> => {
@@ -39,7 +40,7 @@ export function createSaveImageHandler() {
       // Generate unique filename with timestamp
       const timestamp = Date.now();
       const ext = path.extname(filename) || '.png';
-      const baseName = path.basename(filename, ext);
+      const baseName = sanitizeFilename(path.basename(filename, ext), 'image');
       const uniqueFilename = `${baseName}-${timestamp}${ext}`;
       const filePath = path.join(imagesDir, uniqueFilename);
 

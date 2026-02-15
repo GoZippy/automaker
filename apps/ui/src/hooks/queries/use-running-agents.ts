@@ -9,9 +9,11 @@ import { useQuery } from '@tanstack/react-query';
 import { getElectronAPI, type RunningAgent } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
+import { createSmartPollingInterval } from '@/hooks/use-event-recency';
 
 const RUNNING_AGENTS_REFETCH_ON_FOCUS = false;
 const RUNNING_AGENTS_REFETCH_ON_RECONNECT = false;
+const RUNNING_AGENTS_POLLING_INTERVAL = 30000;
 
 interface RunningAgentsResult {
   agents: RunningAgent[];
@@ -47,8 +49,7 @@ export function useRunningAgents() {
       };
     },
     staleTime: STALE_TIMES.RUNNING_AGENTS,
-    // Note: Don't use refetchInterval here - rely on WebSocket invalidation
-    // for real-time updates instead of polling
+    refetchInterval: createSmartPollingInterval(RUNNING_AGENTS_POLLING_INTERVAL),
     refetchOnWindowFocus: RUNNING_AGENTS_REFETCH_ON_FOCUS,
     refetchOnReconnect: RUNNING_AGENTS_REFETCH_ON_RECONNECT,
   });

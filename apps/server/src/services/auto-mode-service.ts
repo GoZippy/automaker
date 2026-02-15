@@ -2657,13 +2657,67 @@ Address the follow-up instructions above. Review the previous work and make the 
       // Load feature for commit message
       const feature = await this.loadFeature(projectPath, featureId);
       const commitMessage = feature
-        ? `feat: ${this.extractTitleFromDescription(
-            feature.description
-          )}\n\nImplemented by Automaker auto-mode`
-        : `feat: Feature ${featureId}`;
+        ? await this.generateCommitMessage(feature, workDir)
+        : `feat: Feature ${featureId}\n\nImplemented by Automaker auto-mode`;
 
-      // Stage and commit
-      await execAsync('git add -A', { cwd: workDir });
+      // Determine which files to stage
+      // For feature branches, only stage files changed on this branch to avoid committing unrelated changes
+      let filesToStage: string[] = [];
+
+      try {
+        // Get the current branch
+        const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', {
+          cwd: workDir,
+        });
+        const branch = currentBranch.trim();
+
+        // Get the base branch (usually main/master)
+        const { stdout: baseBranchOutput } = await execAsync(
+          'git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo "refs/remotes/origin/main"',
+          { cwd: workDir }
+        );
+        const baseBranch = baseBranchOutput.trim().replace('refs/remotes/origin/', '');
+
+        // If we're on a feature branch (not the base branch), only stage files changed on this branch
+        if (branch !== baseBranch && feature?.branchName) {
+          try {
+            // Get files changed on this branch compared to base
+            const { stdout: branchFiles } = await execAsync(
+              `git diff --name-only ${baseBranch}...HEAD`,
+              { cwd: workDir }
+            );
+
+            if (branchFiles.trim()) {
+              filesToStage = branchFiles.trim().split('\n').filter(Boolean);
+              logger.info(`Staging ${filesToStage.length} files changed on branch ${branch}`);
+            }
+          } catch (diffError) {
+            // If diff fails (e.g., base branch doesn't exist), fall back to staging all changes
+            logger.warn(`Could not diff against base branch, staging all changes: ${diffError}`);
+            filesToStage = [];
+          }
+        }
+      } catch (error) {
+        logger.warn(`Could not determine branch-specific files: ${error}`);
+      }
+
+      // Stage files
+      if (filesToStage.length > 0) {
+        // Stage only the specific files changed on this branch
+        for (const file of filesToStage) {
+          try {
+            await execAsync(`git add "${file.replace(/"/g, '\\"')}"`, { cwd: workDir });
+          } catch (error) {
+            logger.warn(`Failed to stage file ${file}: ${error}`);
+          }
+        }
+      } else {
+        // Fallback: stage all changes (original behavior)
+        // This happens for main branch features or when branch detection fails
+        await execAsync('git add -A', { cwd: workDir });
+      }
+
+      // Commit
       await execAsync(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`, {
         cwd: workDir,
       });
@@ -3664,13 +3718,14 @@ Format your response as a structured markdown document.`;
           // Recovery cases:
           // 1. Standard pending/ready/backlog statuses
           // 2. Features with approved plans that have incomplete tasks (crash recovery)
-          // 3. Features stuck in 'in_progress' status (crash recovery)
+          // 3. Features stuck in 'in_progress' or 'interrupted' status (crash recovery)
           // 4. Features with 'generating' planSpec status (spec generation was interrupted)
           const needsRecovery =
             feature.status === 'pending' ||
             feature.status === 'ready' ||
             feature.status === 'backlog' ||
             feature.status === 'in_progress' || // Recover features that were in progress when server crashed
+            feature.status === 'interrupted' || // Recover features explicitly marked interrupted on shutdown
             (feature.planSpec?.status === 'approved' &&
               (feature.planSpec.tasksCompleted ?? 0) < (feature.planSpec.tasksTotal ?? 0)) ||
             feature.planSpec?.status === 'generating'; // Recover interrupted spec generation
@@ -3710,7 +3765,7 @@ Format your response as a structured markdown document.`;
 
       const worktreeDesc = branchName ? `worktree ${branchName}` : 'main worktree';
       logger.info(
-        `[loadPendingFeatures] Found ${allFeatures.length} total features, ${pendingFeatures.length} candidates (pending/ready/backlog/in_progress/approved_with_pending_tasks/generating) for ${worktreeDesc}`
+        `[loadPendingFeatures] Found ${allFeatures.length} total features, ${pendingFeatures.length} candidates (pending/ready/backlog/in_progress/interrupted/approved_with_pending_tasks/generating) for ${worktreeDesc}`
       );
 
       if (pendingFeatures.length === 0) {
@@ -3838,6 +3893,58 @@ Format your response as a structured markdown document.`;
 
     // Truncate to 60 characters and add ellipsis
     return firstLine.substring(0, 57) + '...';
+  }
+
+  /**
+   * Generate a comprehensive commit message for a feature
+   * Includes title, description summary, and file statistics
+   */
+  private async generateCommitMessage(feature: Feature, workDir: string): Promise<string> {
+    const title = this.extractTitleFromDescription(feature.description);
+
+    // Extract description summary (first 3-5 lines, up to 300 chars)
+    let descriptionSummary = '';
+    if (feature.description && feature.description.trim()) {
+      const lines = feature.description.split('\n').filter((l) => l.trim());
+      const summaryLines = lines.slice(0, 5); // First 5 non-empty lines
+      descriptionSummary = summaryLines.join('\n');
+
+      // Limit to 300 characters
+      if (descriptionSummary.length > 300) {
+        descriptionSummary = descriptionSummary.substring(0, 297) + '...';
+      }
+    }
+
+    // Get file statistics to add context
+    let fileStats = '';
+    try {
+      const { stdout: diffStat } = await execAsync('git diff --cached --stat', { cwd: workDir });
+      if (diffStat.trim()) {
+        // Extract just the summary line (last line with file count)
+        const statLines = diffStat.trim().split('\n');
+        const summaryLine = statLines[statLines.length - 1];
+        if (summaryLine && summaryLine.includes('file')) {
+          fileStats = `\n${summaryLine.trim()}`;
+        }
+      }
+    } catch {
+      // Ignore errors getting stats
+    }
+
+    // Build commit message
+    let message = `feat: ${title}`;
+
+    if (descriptionSummary && descriptionSummary !== title) {
+      message += `\n\n${descriptionSummary}`;
+    }
+
+    if (fileStats) {
+      message += fileStats;
+    }
+
+    message += '\n\nImplemented by Automaker auto-mode';
+
+    return message;
   }
 
   /**
@@ -5430,9 +5537,10 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
             continue;
           }
 
-          // Check if feature was interrupted (in_progress or pipeline_*)
+          // Check if feature was interrupted (in_progress/interrupted or pipeline_*)
           if (
             feature.status === 'in_progress' ||
+            feature.status === 'interrupted' ||
             (feature.status && feature.status.startsWith('pipeline_'))
           ) {
             // Check if context (agent-output.md) exists

@@ -405,9 +405,28 @@ export function Sidebar() {
         </div>
 
         {/* Scroll indicator - shows there's more content below */}
-        {canScrollDown && sidebarOpen && (
-          <div className="flex justify-center py-1 border-t border-border/30">
-            <ChevronDown className="w-4 h-4 text-muted-foreground/50 animate-bounce" />
+        {canScrollDown && (
+          <div
+            className={cn(
+              'relative flex justify-center py-2 border-t border-border/30',
+              'bg-gradient-to-t from-background via-background/95 to-transparent',
+              '-mt-8 pt-8',
+              'pointer-events-none'
+            )}
+          >
+            <div className="pointer-events-auto flex flex-col items-center gap-0.5">
+              <ChevronDown
+                className={cn(
+                  'w-4 h-4 text-brand-500/70 animate-bounce',
+                  sidebarOpen ? 'block' : 'w-3 h-3'
+                )}
+              />
+              {sidebarOpen && (
+                <span className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-wide">
+                  Scroll
+                </span>
+              )}
+            </div>
           </div>
         )}
 

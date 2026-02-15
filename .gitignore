@@ -95,3 +95,5 @@ data/.api-key
 data/credentials.json
 data/
 .codex/
+.mcp.json
+.planning

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AutoModeService } from '@/services/auto-mode-service.js';
 import type { Feature } from '@automaker/types';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 
 describe('auto-mode-service.ts', () => {
   let service: AutoModeService;
@@ -840,6 +843,78 @@ describe('auto-mode-service.ts', () => {
       expect(service.isFeatureRunning('feature-1')).toBe(true);
       expect(service.isFeatureRunning('feature-2')).toBe(true);
       expect(service.isFeatureRunning('feature-3')).toBe(false);
+    });
+  });
+
+  describe('interrupted recovery', () => {
+    async function createFeatureFixture(
+      projectPath: string,
+      feature: Partial<Feature> & Pick<Feature, 'id'>
+    ): Promise<string> {
+      const featureDir = path.join(projectPath, '.automaker', 'features', feature.id);
+      await fs.mkdir(featureDir, { recursive: true });
+      await fs.writeFile(
+        path.join(featureDir, 'feature.json'),
+        JSON.stringify(
+          {
+            title: 'Feature',
+            description: 'Feature description',
+            category: 'implementation',
+            status: 'backlog',
+            ...feature,
+          },
+          null,
+          2
+        )
+      );
+      return featureDir;
+    }
+
+    it('should resume features marked as interrupted after restart', async () => {
+      const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'automaker-resume-'));
+      try {
+        const featureDir = await createFeatureFixture(projectPath, {
+          id: 'feature-interrupted',
+          status: 'interrupted',
+        });
+        await fs.writeFile(path.join(featureDir, 'agent-output.md'), 'partial progress');
+        await createFeatureFixture(projectPath, {
+          id: 'feature-complete',
+          status: 'completed',
+        });
+
+        const resumeFeatureMock = vi.fn().mockResolvedValue(undefined);
+        (service as any).resumeFeature = resumeFeatureMock;
+
+        await (service as any).resumeInterruptedFeatures(projectPath);
+
+        expect(resumeFeatureMock).toHaveBeenCalledTimes(1);
+        expect(resumeFeatureMock).toHaveBeenCalledWith(projectPath, 'feature-interrupted', true);
+      } finally {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      }
+    });
+
+    it('should include interrupted features in pending recovery candidates', async () => {
+      const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'automaker-pending-'));
+      try {
+        await createFeatureFixture(projectPath, {
+          id: 'feature-interrupted',
+          status: 'interrupted',
+        });
+        await createFeatureFixture(projectPath, {
+          id: 'feature-waiting-approval',
+          status: 'waiting_approval',
+        });
+
+        const pendingFeatures = await (service as any).loadPendingFeatures(projectPath, null);
+        const pendingIds = pendingFeatures.map((feature: Feature) => feature.id);
+
+        expect(pendingIds).toContain('feature-interrupted');
+        expect(pendingIds).not.toContain('feature-waiting-approval');
+      } finally {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      }
     });
   });
 });

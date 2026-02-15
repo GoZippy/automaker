@@ -10,11 +10,12 @@ import { useQuery } from '@tanstack/react-query';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
-import { getGlobalEventsRecent } from '@/hooks/use-event-recency';
+import { createSmartPollingInterval, getGlobalEventsRecent } from '@/hooks/use-event-recency';
 import type { Feature } from '@/store/app-store';
 
 const FEATURES_REFETCH_ON_FOCUS = false;
 const FEATURES_REFETCH_ON_RECONNECT = false;
+const FEATURES_POLLING_INTERVAL = 30000;
 /** Default polling interval for agent output when WebSocket is inactive */
 const AGENT_OUTPUT_POLLING_INTERVAL = 5000;
 
@@ -43,6 +44,7 @@ export function useFeatures(projectPath: string | undefined) {
     },
     enabled: !!projectPath,
     staleTime: STALE_TIMES.FEATURES,
+    refetchInterval: createSmartPollingInterval(FEATURES_POLLING_INTERVAL),
     refetchOnWindowFocus: FEATURES_REFETCH_ON_FOCUS,
     refetchOnReconnect: FEATURES_REFETCH_ON_RECONNECT,
   });

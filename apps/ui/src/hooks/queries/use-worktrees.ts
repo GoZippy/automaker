@@ -8,9 +8,11 @@ import { useQuery } from '@tanstack/react-query';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
+import { createSmartPollingInterval } from '@/hooks/use-event-recency';
 
 const WORKTREE_REFETCH_ON_FOCUS = false;
 const WORKTREE_REFETCH_ON_RECONNECT = false;
+const WORKTREES_POLLING_INTERVAL = 30000;
 
 interface WorktreeInfo {
   path: string;
@@ -65,6 +67,7 @@ export function useWorktrees(projectPath: string | undefined, includeDetails = t
     },
     enabled: !!projectPath,
     staleTime: STALE_TIMES.WORKTREES,
+    refetchInterval: createSmartPollingInterval(WORKTREES_POLLING_INTERVAL),
     refetchOnWindowFocus: WORKTREE_REFETCH_ON_FOCUS,
     refetchOnReconnect: WORKTREE_REFETCH_ON_RECONNECT,
   });

@@ -6,10 +6,12 @@ import { useAppStore } from '@/store/app-store';
 import { getElectronAPI } from '@/lib/electron';
 import type { AutoModeEvent } from '@/types/electron';
 import type { WorktreeInfo } from '@/components/views/board-view/worktree-panel/types';
+import { getGlobalEventsRecent } from '@/hooks/use-event-recency';
 
 const logger = createLogger('AutoMode');
 
 const AUTO_MODE_SESSION_KEY = 'automaker:autoModeRunningByWorktreeKey';
+const AUTO_MODE_POLLING_INTERVAL = 30000;
 
 /**
  * Generate a worktree key for session storage
@@ -140,42 +142,54 @@ export function useAutoMode(worktree?: WorktreeInfo) {
   // Check if we can start a new task based on concurrency limit
   const canStartNewTask = runningAutoTasks.length < maxConcurrency;
 
+  const refreshStatus = useCallback(async () => {
+    if (!currentProject) return;
+
+    try {
+      const api = getElectronAPI();
+      if (!api?.autoMode?.status) return;
+
+      const result = await api.autoMode.status(currentProject.path, branchName);
+      if (result.success && result.isAutoLoopRunning !== undefined) {
+        const backendIsRunning = result.isAutoLoopRunning;
+
+        if (backendIsRunning !== isAutoModeRunning) {
+          const worktreeDesc = branchName ? `worktree ${branchName}` : 'main worktree';
+          logger.info(
+            `[AutoMode] Syncing UI state with backend for ${worktreeDesc} in ${currentProject.path}: ${backendIsRunning ? 'ON' : 'OFF'}`
+          );
+          setAutoModeRunning(
+            currentProject.id,
+            branchName,
+            backendIsRunning,
+            result.maxConcurrency,
+            result.runningFeatures
+          );
+          setAutoModeSessionForWorktree(currentProject.path, branchName, backendIsRunning);
+        }
+      }
+    } catch (error) {
+      logger.error('Error syncing auto mode state with backend:', error);
+    }
+  }, [branchName, currentProject, isAutoModeRunning, setAutoModeRunning]);
+
   // On mount, query backend for current auto loop status and sync UI state.
   // This handles cases where the backend is still running after a page refresh.
   useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  // Periodic polling fallback when WebSocket events are stale.
+  useEffect(() => {
     if (!currentProject) return;
 
-    const syncWithBackend = async () => {
-      try {
-        const api = getElectronAPI();
-        if (!api?.autoMode?.status) return;
+    const interval = setInterval(() => {
+      if (getGlobalEventsRecent()) return;
+      void refreshStatus();
+    }, AUTO_MODE_POLLING_INTERVAL);
 
-        const result = await api.autoMode.status(currentProject.path, branchName);
-        if (result.success && result.isAutoLoopRunning !== undefined) {
-          const backendIsRunning = result.isAutoLoopRunning;
-
-          if (backendIsRunning !== isAutoModeRunning) {
-            const worktreeDesc = branchName ? `worktree ${branchName}` : 'main worktree';
-            logger.info(
-              `[AutoMode] Syncing UI state with backend for ${worktreeDesc} in ${currentProject.path}: ${backendIsRunning ? 'ON' : 'OFF'}`
-            );
-            setAutoModeRunning(
-              currentProject.id,
-              branchName,
-              backendIsRunning,
-              result.maxConcurrency,
-              result.runningFeatures
-            );
-            setAutoModeSessionForWorktree(currentProject.path, branchName, backendIsRunning);
-          }
-        }
-      } catch (error) {
-        logger.error('Error syncing auto mode state with backend:', error);
-      }
-    };
-
-    syncWithBackend();
-  }, [currentProject, branchName, setAutoModeRunning]);
+    return () => clearInterval(interval);
+  }, [currentProject, refreshStatus]);
 
   // Handle auto mode events - listen globally for all projects/worktrees
   useEffect(() => {
@@ -672,5 +686,6 @@ export function useAutoMode(worktree?: WorktreeInfo) {
     start,
     stop,
     stopFeature,
+    refreshStatus,
   };
 }
