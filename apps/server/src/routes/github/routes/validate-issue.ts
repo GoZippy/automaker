@@ -188,8 +188,11 @@ ${basePrompt}`;
       }
     }
 
-    // Use provider resolved model if available, otherwise use original model
-    const effectiveModel = providerResolvedModel || (model as string);
+    // CRITICAL: For custom providers (GLM, MiniMax), pass the provider's model ID (e.g. "GLM-4.7")
+    // to the API, NOT the resolved Claude model - otherwise we get "model not found"
+    const effectiveModel = claudeCompatibleProvider
+      ? (model as string)
+      : providerResolvedModel || (model as string);
     logger.info(`Using model: ${effectiveModel}`);
 
     // Use streamingQuery with event callbacks

@@ -20,7 +20,7 @@ import { createLogger, loadContextFiles, classifyError } from '@automaker/utils'
 import { getFeatureDir } from '@automaker/platform';
 import * as secureFs from '../../lib/secure-fs.js';
 import { validateWorkingDirectory } from '../../lib/sdk-options.js';
-import { getPromptCustomization } from '../../lib/settings-helpers.js';
+import { getPromptCustomization, getProviderByModelId } from '../../lib/settings-helpers.js';
 import { TypedEventBus } from '../typed-event-bus.js';
 import { ConcurrencyManager } from '../concurrency-manager.js';
 import { WorktreeResolver } from '../worktree-resolver.js';
@@ -169,6 +169,23 @@ export class AutoModeServiceFacade {
         const provider = ProviderFactory.getProviderForModel(resolvedModel);
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
 
+        // Resolve custom provider (GLM, MiniMax, etc.) for baseUrl and credentials
+        let claudeCompatibleProvider:
+          | import('@automaker/types').ClaudeCompatibleProvider
+          | undefined;
+        let credentials: import('@automaker/types').Credentials | undefined;
+        if (resolvedModel && settingsService) {
+          const providerResult = await getProviderByModelId(
+            resolvedModel,
+            settingsService,
+            '[AutoModeFacade]'
+          );
+          if (providerResult.provider) {
+            claudeCompatibleProvider = providerResult.provider;
+            credentials = providerResult.credentials;
+          }
+        }
+
         await agentExecutor.execute(
           {
             workDir,
@@ -187,6 +204,8 @@ export class AutoModeServiceFacade {
             branchName: opts?.branchName as string | null | undefined,
             provider,
             effectiveBareModel,
+            credentials,
+            claudeCompatibleProvider,
           },
           {
             waitForApproval: (fId, projPath) => planApprovalService.waitForApproval(fId, projPath),
@@ -273,6 +292,23 @@ export class AutoModeServiceFacade {
         const provider = ProviderFactory.getProviderForModel(resolvedModel);
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
 
+        // Resolve custom provider (GLM, MiniMax, etc.) for baseUrl and credentials
+        let claudeCompatibleProvider:
+          | import('@automaker/types').ClaudeCompatibleProvider
+          | undefined;
+        let credentials: import('@automaker/types').Credentials | undefined;
+        if (resolvedModel && settingsService) {
+          const providerResult = await getProviderByModelId(
+            resolvedModel,
+            settingsService,
+            '[AutoModeFacade]'
+          );
+          if (providerResult.provider) {
+            claudeCompatibleProvider = providerResult.provider;
+            credentials = providerResult.credentials;
+          }
+        }
+
         await agentExecutor.execute(
           {
             workDir,
@@ -290,6 +326,8 @@ export class AutoModeServiceFacade {
             branchName: opts?.branchName,
             provider,
             effectiveBareModel,
+            credentials,
+            claudeCompatibleProvider,
           },
           {
             waitForApproval: (fId, projPath) => planApprovalService.waitForApproval(fId, projPath),
