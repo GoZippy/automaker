@@ -757,7 +757,7 @@ Address the follow-up instructions above. Review the previous work and make the 
    * Get status for this project/worktree
    * @param branchName - The branch name, or null for main worktree
    */
-  getStatusForProject(branchName: string | null = null): ProjectAutoModeStatus {
+  async getStatusForProject(branchName: string | null = null): Promise<ProjectAutoModeStatus> {
     const isAutoLoopRunning = this.autoLoopCoordinator.isAutoLoopRunningForProject(
       this.projectPath,
       branchName
@@ -766,10 +766,12 @@ Address the follow-up instructions above. Review the previous work and make the 
       this.projectPath,
       branchName
     );
-    const runningFeatures = this.concurrencyManager
-      .getAllRunning()
-      .filter((f) => f.projectPath === this.projectPath && f.branchName === branchName)
-      .map((f) => f.featureId);
+    // Use branchName-normalized filter so features with branchName "main"
+    // are correctly matched when querying for the main worktree (null)
+    const runningFeatures = await this.concurrencyManager.getRunningFeaturesForWorktree(
+      this.projectPath,
+      branchName
+    );
 
     return {
       isAutoLoopRunning,

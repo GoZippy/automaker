@@ -89,16 +89,16 @@ export class AutoModeServiceCompat {
   // PER-PROJECT OPERATIONS (delegated to facades)
   // ===========================================================================
 
-  getStatusForProject(
+  async getStatusForProject(
     projectPath: string,
     branchName: string | null = null
-  ): {
+  ): Promise<{
     isAutoLoopRunning: boolean;
     runningFeatures: string[];
     runningCount: number;
     maxConcurrency: number;
     branchName: string | null;
-  } {
+  }> {
     const facade = this.createFacade(projectPath);
     return facade.getStatusForProject(branchName);
   }

@@ -593,7 +593,7 @@ export function BoardView() {
   } = useBoardActions({
     currentProject,
     features: hookFeatures,
-    runningAutoTasks,
+    runningAutoTasks: runningAutoTasksAllWorktrees,
     loadFeatures,
     persistFeatureCreate,
     persistFeatureUpdate,
@@ -1092,7 +1092,7 @@ export function BoardView() {
   } = useBoardDragDrop({
     features: hookFeatures,
     currentProject,
-    runningAutoTasks,
+    runningAutoTasks: runningAutoTasksAllWorktrees,
     persistFeatureUpdate,
     handleStartImplementation,
   });
@@ -1472,7 +1472,7 @@ export function BoardView() {
                   setShowAddDialog(true);
                 },
               }}
-              runningAutoTasks={runningAutoTasks}
+              runningAutoTasks={runningAutoTasksAllWorktrees}
               pipelineConfig={pipelineConfig}
               onAddFeature={() => setShowAddDialog(true)}
               isSelectionMode={isSelectionMode}
@@ -1511,7 +1511,7 @@ export function BoardView() {
                 setShowAddDialog(true);
               }}
               featuresWithContext={featuresWithContext}
-              runningAutoTasks={runningAutoTasks}
+              runningAutoTasks={runningAutoTasksAllWorktrees}
               onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}
               onAddFeature={() => setShowAddDialog(true)}
               onShowCompletedModal={() => setShowCompletedModal(true)}

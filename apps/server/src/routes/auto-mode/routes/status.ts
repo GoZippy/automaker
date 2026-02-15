@@ -25,7 +25,7 @@ export function createStatusHandler(autoModeService: AutoModeServiceCompat) {
         // Normalize branchName: undefined becomes null
         const normalizedBranchName = branchName ?? null;
 
-        const projectStatus = autoModeService.getStatusForProject(
+        const projectStatus = await autoModeService.getStatusForProject(
           projectPath,
           normalizedBranchName
         );

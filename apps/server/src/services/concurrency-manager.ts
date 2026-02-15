@@ -210,6 +210,41 @@ export class ConcurrencyManager {
   }
 
   /**
+   * Get running feature IDs for a specific worktree, with proper primary branch normalization.
+   *
+   * When branchName is null (main worktree), matches features with branchName === null
+   * OR branchName matching the primary branch (e.g., "main", "master").
+   *
+   * @param projectPath - The project path
+   * @param branchName - The branch name, or null for main worktree
+   * @returns Array of feature IDs running in the specified worktree
+   */
+  async getRunningFeaturesForWorktree(
+    projectPath: string,
+    branchName: string | null
+  ): Promise<string[]> {
+    const primaryBranch = await this.getCurrentBranch(projectPath);
+    const featureIds: string[] = [];
+
+    for (const [, feature] of this.runningFeatures) {
+      if (feature.projectPath !== projectPath) continue;
+      const featureBranch = feature.branchName ?? null;
+
+      if (branchName === null) {
+        // Main worktree: match features with null branchName OR primary branch name
+        const isPrimaryBranch =
+          featureBranch === null || (primaryBranch && featureBranch === primaryBranch);
+        if (isPrimaryBranch) featureIds.push(feature.featureId);
+      } else {
+        // Feature worktree: exact match
+        if (featureBranch === branchName) featureIds.push(feature.featureId);
+      }
+    }
+
+    return featureIds;
+  }
+
+  /**
    * Update properties of a running feature
    *
    * @param featureId - ID of the feature to update

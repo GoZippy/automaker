@@ -173,7 +173,7 @@ export function createOverviewHandler(
           const totalFeatures = features.length;
 
           // Get auto-mode status for this project (main worktree, branchName = null)
-          const autoModeStatus: ProjectAutoModeStatus = autoModeService.getStatusForProject(
+          const autoModeStatus: ProjectAutoModeStatus = await autoModeService.getStatusForProject(
             projectRef.path,
             null
           );
