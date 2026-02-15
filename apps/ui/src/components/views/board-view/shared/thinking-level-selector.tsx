@@ -9,7 +9,8 @@ interface ThinkingLevelSelectorProps {
   selectedLevel: ThinkingLevel;
   onLevelSelect: (level: ThinkingLevel) => void;
   testIdPrefix?: string;
-  /** Optional model ID to filter available thinking levels (e.g., Opus 4.6 only shows None/Adaptive) */
+  /** Model ID is required for correct thinking level filtering.
+   *  Without it, adaptive thinking won't be available for Opus 4.6. */
   model?: string;
 }
 

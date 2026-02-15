@@ -322,11 +322,12 @@ export function createVerifyClaudeAuthHandler() {
       });
 
       // Determine specific auth type for success messages
+      const effectiveAuthMethod = authMethod ?? 'api_key';
       let authType: 'oauth' | 'api_key' | 'cli' | undefined;
       if (authenticated) {
-        if (authMethod === 'api_key') {
+        if (effectiveAuthMethod === 'api_key') {
           authType = 'api_key';
-        } else if (authMethod === 'cli') {
+        } else if (effectiveAuthMethod === 'cli') {
           // Check if CLI auth is via OAuth (Claude Code subscription) or generic CLI
           try {
             const indicators = await getClaudeAuthIndicators();

@@ -34,7 +34,7 @@ export const DEFAULT_MODEL = 'claude-opus-4-6';
  */
 export function formatModelName(model: string): string {
   // Claude models
-  if (model.includes('opus-4-6')) return 'Opus 4.6';
+  if (model.includes('opus-4-6') || model === 'claude-opus') return 'Opus 4.6';
   if (model.includes('opus')) return 'Opus 4.5';
   if (model.includes('sonnet')) return 'Sonnet 4.5';
   if (model.includes('haiku')) return 'Haiku 4.5';

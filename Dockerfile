@@ -154,7 +154,7 @@ COPY --from=server-builder /app/node_modules ./node_modules
 USER automaker
 RUN ./node_modules/.bin/playwright install chromium && \
     echo "=== Playwright Chromium installed ===" && \
-    ls -la /home/automaker/.cache/ms-playwright/ || echo "Playwright browsers installed"
+    ls -la /home/automaker/.cache/ms-playwright/
 USER root
 
 # Create data and projects directories

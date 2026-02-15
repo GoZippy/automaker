@@ -211,7 +211,13 @@ const BOX_CONTENT_WIDTH = 67;
       pathsCheckedInfo = `
 ║                                                                     ║
 ║  ${'Paths checked:'.padEnd(BOX_CONTENT_WIDTH)}║
-${pathsChecked.map((p) => `║    ${p.substring(0, BOX_CONTENT_WIDTH - 4).padEnd(BOX_CONTENT_WIDTH - 4)}  ║`).join('\n')}`;
+${pathsChecked
+  .map((p) => {
+    const maxLen = BOX_CONTENT_WIDTH - 4;
+    const display = p.length > maxLen ? '...' + p.slice(-(maxLen - 3)) : p;
+    return `║    ${display.padEnd(maxLen)}  ║`;
+  })
+  .join('\n')}`;
     }
   }
 
