@@ -325,6 +325,9 @@ export function GraphViewPage() {
         }
       } catch (error) {
         logger.error('Failed to add and start feature:', error);
+        toast.error(
+          `Failed to add and start feature: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
     },
     [handleAddFeature, handleStartImplementation]

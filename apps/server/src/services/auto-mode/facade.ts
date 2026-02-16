@@ -227,7 +227,7 @@ export class AutoModeServiceFacade {
                 .replace(/\{\{taskName\}\}/g, task.description)
                 .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
                 .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
-                .replace(/\{\{taskDescription\}\}/g, task.description || task.description);
+                .replace(/\{\{taskDescription\}\}/g, task.description || task.name);
               if (feedback) {
                 taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
               }
@@ -636,15 +636,23 @@ Address the follow-up instructions above. Review the previous work and make the 
    */
   async verifyFeature(featureId: string): Promise<boolean> {
     const feature = await this.featureStateManager.loadFeature(this.projectPath, featureId);
-    const sanitizedFeatureId = featureId.replace(/[^a-zA-Z0-9_-]/g, '-');
-    const worktreePath = path.join(this.projectPath, '.worktrees', sanitizedFeatureId);
     let workDir = this.projectPath;
 
-    try {
-      await secureFs.access(worktreePath);
-      workDir = worktreePath;
-    } catch {
-      // No worktree
+    // Use worktreeResolver to find worktree path (consistent with commitFeature)
+    const branchName = feature?.branchName;
+    if (branchName) {
+      const resolved = await this.worktreeResolver.findWorktreeForBranch(
+        this.projectPath,
+        branchName
+      );
+      if (resolved) {
+        try {
+          await secureFs.access(resolved);
+          workDir = resolved;
+        } catch {
+          // Fall back to project path
+        }
+      }
     }
 
     const verificationChecks = [

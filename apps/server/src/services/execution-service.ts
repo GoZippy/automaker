@@ -339,6 +339,7 @@ ${feature.spec}
     } catch (error) {
       const errorInfo = classifyError(error);
       if (errorInfo.isAbort) {
+        await this.updateFeatureStatusFn(projectPath, featureId, 'interrupted');
         this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
           featureId,
           featureName: feature?.title,

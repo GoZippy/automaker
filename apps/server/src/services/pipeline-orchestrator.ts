@@ -361,8 +361,14 @@ export class PipelineOrchestrator {
 
       await this.executePipeline(context);
 
+      // Re-fetch feature to check if executePipeline set a terminal status (e.g., merge_conflict)
+      const reloadedFeature = await this.featureLoader.getById(projectPath, featureId);
       const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
-      await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
+
+      // Only update status if not already in a terminal state
+      if (reloadedFeature && reloadedFeature.status !== 'merge_conflict') {
+        await this.updateFeatureStatusFn(projectPath, featureId, finalStatus);
+      }
       logger.info(`Pipeline resume completed for feature ${featureId}`);
       this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
@@ -417,7 +423,10 @@ export class PipelineOrchestrator {
           message: testResult.error || 'Failed to start tests',
         };
 
-      const completionResult = await this.waitForTestCompletion(testResult.result.sessionId);
+      const completionResult = await this.waitForTestCompletion(
+        testResult.result.sessionId,
+        abortController.signal
+      );
       if (completionResult.status === 'passed') return { success: true, testsPassed: true };
 
       const sessionOutput = this.testRunnerService.getSessionOutput(testResult.result.sessionId);
@@ -453,10 +462,19 @@ export class PipelineOrchestrator {
 
   /** Wait for test completion */
   private async waitForTestCompletion(
-    sessionId: string
+    sessionId: string,
+    signal: AbortSignal
   ): Promise<{ status: TestRunStatus; exitCode: number | null; duration: number }> {
     return new Promise((resolve) => {
       const checkInterval = setInterval(() => {
+        // Check for abort
+        if (signal.aborted) {
+          clearInterval(checkInterval);
+          clearTimeout(timeoutId);
+          resolve({ status: 'failed', exitCode: null, duration: 0 });
+          return;
+        }
+
         const session = this.testRunnerService.getSession(sessionId);
         if (session && session.status !== 'running' && session.status !== 'pending') {
           clearInterval(checkInterval);
@@ -471,6 +489,12 @@ export class PipelineOrchestrator {
         }
       }, 1000);
       const timeoutId = setTimeout(() => {
+        // Check for abort before timeout resolution
+        if (signal.aborted) {
+          clearInterval(checkInterval);
+          resolve({ status: 'failed', exitCode: null, duration: 0 });
+          return;
+        }
         clearInterval(checkInterval);
         resolve({ status: 'failed', exitCode: null, duration: 600000 });
       }, 600000);
@@ -484,12 +508,15 @@ export class PipelineOrchestrator {
 
     logger.info(`Attempting auto-merge for feature ${featureId} (branch: ${branchName})`);
     try {
+      // Get the primary branch dynamically instead of hardcoding 'main'
+      const targetBranch = await this.worktreeResolver.getCurrentBranch(projectPath);
+
       // Call merge service directly instead of HTTP fetch
       const result = await performMerge(
         projectPath,
         branchName,
         worktreePath || projectPath,
-        'main',
+        targetBranch,
         {
           deleteWorktreeAndBranch: false,
         }
@@ -524,12 +551,16 @@ export class PipelineOrchestrator {
     }
   }
 
-  /** Build a concise test failure summary for the agent */
-  buildTestFailureSummary(scrollback: string): string {
+  /** Shared helper to parse test output lines and extract failure information */
+  private parseTestLines(scrollback: string): {
+    failedTests: string[];
+    passCount: number;
+    failCount: number;
+  } {
     const lines = scrollback.split('\n');
     const failedTests: string[] = [];
-    let passCount = 0,
-      failCount = 0;
+    let passCount = 0;
+    let failCount = 0;
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -537,30 +568,34 @@ export class PipelineOrchestrator {
         const match = trimmed.match(/(?:FAIL|FAILED)\s+(.+)/);
         if (match) failedTests.push(match[1].trim());
         failCount++;
-      } else if (trimmed.includes('PASS') || trimmed.includes('PASSED')) passCount++;
-      if (trimmed.match(/^>\s+.*\.(test|spec)\./)) failedTests.push(trimmed.replace(/^>\s+/, ''));
+      } else if (trimmed.includes('PASS') || trimmed.includes('PASSED')) {
+        passCount++;
+      }
+      if (trimmed.match(/^>\s+.*\.(test|spec)\./)) {
+        failedTests.push(trimmed.replace(/^>\s+/, ''));
+      }
       if (
         trimmed.includes('AssertionError') ||
         trimmed.includes('toBe') ||
         trimmed.includes('toEqual')
-      )
+      ) {
         failedTests.push(trimmed);
+      }
     }
 
+    return { failedTests, passCount, failCount };
+  }
+
+  /** Build a concise test failure summary for the agent */
+  buildTestFailureSummary(scrollback: string): string {
+    const { failedTests, passCount, failCount } = this.parseTestLines(scrollback);
     const unique = [...new Set(failedTests)].slice(0, 10);
     return `Test Results: ${passCount} passed, ${failCount} failed.\n\nFailed tests:\n${unique.map((t) => `- ${t}`).join('\n')}\n\nOutput (last 2000 chars):\n${scrollback.slice(-2000)}`;
   }
 
   /** Extract failed test names from scrollback */
   private extractFailedTestNames(scrollback: string): string[] {
-    const failedTests: string[] = [];
-    for (const line of scrollback.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed.includes('FAIL') || trimmed.includes('FAILED')) {
-        const match = trimmed.match(/(?:FAIL|FAILED)\s+(.+)/);
-        if (match) failedTests.push(match[1].trim());
-      }
-    }
+    const { failedTests } = this.parseTestLines(scrollback);
     return [...new Set(failedTests)].slice(0, 20);
   }
 }

@@ -333,7 +333,7 @@ export class AgentExecutor {
         userFeedback
       );
       const taskStream = provider.executeQuery(
-        this.buildExecOpts(options, taskPrompt, Math.min(sdkOptions?.maxTurns || 100, 50))
+        this.buildExecOpts(options, taskPrompt, Math.min(sdkOptions?.maxTurns ?? 50, 50))
       );
       let taskOutput = '',
         taskStartDetected = false,

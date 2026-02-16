@@ -211,6 +211,8 @@ export class FeatureStateManager {
    */
   async resetStuckFeatures(projectPath: string): Promise<void> {
     const featuresDir = getFeaturesDir(projectPath);
+    let featuresScanned = 0;
+    let featuresReset = 0;
 
     try {
       const entries = await secureFs.readdir(featuresDir, { withFileTypes: true });
@@ -218,6 +220,7 @@ export class FeatureStateManager {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
 
+        featuresScanned++;
         const featurePath = path.join(featuresDir, entry.name, 'feature.json');
         const result = await readJsonWithRecovery<Feature | null>(featurePath, null, {
           maxBackups: DEFAULT_BACKUP_COUNT,
@@ -271,8 +274,13 @@ export class FeatureStateManager {
         if (needsUpdate) {
           feature.updatedAt = new Date().toISOString();
           await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
+          featuresReset++;
         }
       }
+
+      logger.info(
+        `[resetStuckFeatures] Scanned ${featuresScanned} features, reset ${featuresReset} features for ${projectPath}`
+      );
     } catch (error) {
       // If features directory doesn't exist, that's fine
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -334,6 +342,13 @@ export class FeatureStateManager {
 
       // PERSIST BEFORE EMIT
       await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
+
+      // Emit event for UI update
+      this.emitAutoModeEvent('plan_spec_updated', {
+        featureId,
+        projectPath,
+        planSpec: feature.planSpec,
+      });
     } catch (error) {
       logger.error(`Failed to update planSpec for ${featureId}:`, error);
     }

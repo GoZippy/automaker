@@ -90,25 +90,10 @@ export class PlanApprovalService {
         this.pendingApprovals.delete(key);
       }
 
-      // Set up timeout to prevent indefinite waiting and memory leaks
-      // timeoutId stored in closure, NOT in PendingApproval object
-      const timeoutId = setTimeout(() => {
-        const pending = this.pendingApprovals.get(key);
-        if (pending) {
-          logger.warn(
-            `Plan approval for feature ${featureId} timed out after ${timeoutMinutes} minutes`
-          );
-          this.pendingApprovals.delete(key);
-          reject(
-            new Error(
-              `Plan approval timed out after ${timeoutMinutes} minutes - feature execution cancelled`
-            )
-          );
-        }
-      }, timeoutMs);
-
       // Wrap resolve/reject to clear timeout when approval is resolved
       // This ensures timeout is ALWAYS cleared on any resolution path
+      // Define wrappers BEFORE setTimeout so they can be used in timeout callback
+      let timeoutId: NodeJS.Timeout;
       const wrappedResolve = (result: PlanApprovalResult) => {
         clearTimeout(timeoutId);
         resolve(result);
@@ -118,6 +103,23 @@ export class PlanApprovalService {
         clearTimeout(timeoutId);
         reject(error);
       };
+
+      // Set up timeout to prevent indefinite waiting and memory leaks
+      // Now timeoutId assignment happens after wrappers are defined
+      timeoutId = setTimeout(() => {
+        const pending = this.pendingApprovals.get(key);
+        if (pending) {
+          logger.warn(
+            `Plan approval for feature ${featureId} timed out after ${timeoutMinutes} minutes`
+          );
+          this.pendingApprovals.delete(key);
+          wrappedReject(
+            new Error(
+              `Plan approval timed out after ${timeoutMinutes} minutes - feature execution cancelled`
+            )
+          );
+        }
+      }, timeoutMs);
 
       this.pendingApprovals.set(key, {
         resolve: wrappedResolve,
