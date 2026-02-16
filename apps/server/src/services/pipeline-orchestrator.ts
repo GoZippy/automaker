@@ -362,7 +362,7 @@ export class PipelineOrchestrator {
       await this.executePipeline(context);
 
       // Re-fetch feature to check if executePipeline set a terminal status (e.g., merge_conflict)
-      const reloadedFeature = await this.featureLoader.getById(projectPath, featureId);
+      const reloadedFeature = await this.featureStateManager.loadFeature(projectPath, featureId);
       const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
 
       // Only update status if not already in a terminal state
@@ -516,7 +516,7 @@ export class PipelineOrchestrator {
         projectPath,
         branchName,
         worktreePath || projectPath,
-        targetBranch,
+        targetBranch || 'main',
         {
           deleteWorktreeAndBranch: false,
         }
@@ -562,22 +562,33 @@ export class PipelineOrchestrator {
     let passCount = 0;
     let failCount = 0;
 
+    let inFailureContext = false;
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed.includes('FAIL') || trimmed.includes('FAILED')) {
         const match = trimmed.match(/(?:FAIL|FAILED)\s+(.+)/);
         if (match) failedTests.push(match[1].trim());
         failCount++;
+        inFailureContext = true;
       } else if (trimmed.includes('PASS') || trimmed.includes('PASSED')) {
         passCount++;
+        inFailureContext = false;
       }
       if (trimmed.match(/^>\s+.*\.(test|spec)\./)) {
         failedTests.push(trimmed.replace(/^>\s+/, ''));
       }
-      if (
-        trimmed.includes('AssertionError') ||
-        trimmed.includes('toBe') ||
-        trimmed.includes('toEqual')
+      // Only capture assertion details when they appear in failure context
+      // or match explicit assertion error / expect patterns
+      if (trimmed.includes('AssertionError') || trimmed.includes('AssertionError')) {
+        failedTests.push(trimmed);
+      } else if (
+        inFailureContext &&
+        /expect\(.+\)\.(toBe|toEqual|toMatch|toThrow|toContain)\s*\(/.test(trimmed)
+      ) {
+        failedTests.push(trimmed);
+      } else if (
+        inFailureContext &&
+        (trimmed.startsWith('Expected') || trimmed.startsWith('Received'))
       ) {
         failedTests.push(trimmed);
       }

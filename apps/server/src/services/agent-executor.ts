@@ -126,9 +126,7 @@ export class AgentExecutor {
     const appendRawEvent = (event: unknown): void => {
       if (!enableRawOutput) return;
       try {
-        rawOutputLines.push(
-          JSON.stringify({ timestamp: new Date().toISOString(), event }, null, 4)
-        );
+        rawOutputLines.push(JSON.stringify({ timestamp: new Date().toISOString(), event }));
         if (rawWriteTimeout) clearTimeout(rawWriteTimeout);
         rawWriteTimeout = setTimeout(async () => {
           try {
@@ -552,7 +550,7 @@ export class AgentExecutor {
           });
           let revText = '';
           for await (const msg of provider.executeQuery(
-            this.buildExecOpts(options, revPrompt, sdkOptions?.maxTurns || 100)
+            this.buildExecOpts(options, revPrompt, sdkOptions?.maxTurns ?? 100)
           )) {
             if (msg.type === 'assistant' && msg.message?.content)
               for (const b of msg.message.content)

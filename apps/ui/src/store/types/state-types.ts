@@ -2,8 +2,6 @@ import type { Project, TrashedProject } from '@/lib/electron';
 import type {
   ModelAlias,
   PlanningMode,
-  ThinkingLevel,
-  ReasoningEffort,
   ModelProvider,
   CursorModelId,
   CodexModelId,
@@ -33,7 +31,7 @@ import type {
   BackgroundSettings,
 } from './ui-types';
 import type { ApiKeys } from './settings-types';
-import type { ChatMessage, ChatSession, FeatureImage } from './chat-types';
+import type { ChatMessage, ChatSession } from './chat-types';
 import type { TerminalState, TerminalPanelContent, PersistedTerminalState } from './terminal-types';
 import type { Feature, ProjectAnalysis } from './project-types';
 import type { ClaudeUsage, CodexUsage } from './usage-types';

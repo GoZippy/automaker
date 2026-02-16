@@ -123,23 +123,28 @@ export class FeatureStateManager {
       });
 
       // Create notifications for important status changes
-      const notificationService = getNotificationService();
-      if (status === 'waiting_approval') {
-        await notificationService.createNotification({
-          type: 'feature_waiting_approval',
-          title: 'Feature Ready for Review',
-          message: `"${feature.name || featureId}" is ready for your review and approval.`,
-          featureId,
-          projectPath,
-        });
-      } else if (status === 'verified') {
-        await notificationService.createNotification({
-          type: 'feature_verified',
-          title: 'Feature Verified',
-          message: `"${feature.name || featureId}" has been verified and is complete.`,
-          featureId,
-          projectPath,
-        });
+      // Wrapped in try-catch so failures don't block syncFeatureToAppSpec below
+      try {
+        const notificationService = getNotificationService();
+        if (status === 'waiting_approval') {
+          await notificationService.createNotification({
+            type: 'feature_waiting_approval',
+            title: 'Feature Ready for Review',
+            message: `"${feature.name || featureId}" is ready for your review and approval.`,
+            featureId,
+            projectPath,
+          });
+        } else if (status === 'verified') {
+          await notificationService.createNotification({
+            type: 'feature_verified',
+            title: 'Feature Verified',
+            message: `"${feature.name || featureId}" has been verified and is complete.`,
+            featureId,
+            projectPath,
+          });
+        }
+      } catch (notificationError) {
+        logger.warn(`Failed to create notification for feature ${featureId}:`, notificationError);
       }
 
       // Sync completed/verified features to app_spec.txt
@@ -334,7 +339,7 @@ export class FeatureStateManager {
       Object.assign(feature.planSpec, updates);
 
       // If content is being updated and it's different from old content, increment version
-      if (updates.content && updates.content !== oldContent) {
+      if (updates.content !== undefined && updates.content !== oldContent) {
         feature.planSpec.version = (feature.planSpec.version || 0) + 1;
       }
 
@@ -446,6 +451,11 @@ export class FeatureStateManager {
           status,
           tasks: feature.planSpec.tasks,
         });
+      } else {
+        const availableIds = feature.planSpec.tasks.map((t) => t.id).join(', ');
+        logger.warn(
+          `[updateTaskStatus] Task ${taskId} not found in feature ${featureId} (${projectPath}). Available task IDs: [${availableIds}]`
+        );
       }
     } catch (error) {
       logger.error(`Failed to update task ${taskId} status for ${featureId}:`, error);

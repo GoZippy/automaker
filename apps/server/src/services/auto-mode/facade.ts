@@ -143,9 +143,20 @@ export class AutoModeServiceFacade {
       return prompt;
     };
 
-    // Create placeholder callbacks - will be bound to facade methods after creation
-    // These use closures to capture the facade instance once created
+    // Create placeholder callbacks - will be bound to facade methods after creation.
+    // These use closures to capture the facade instance once created.
+    // INVARIANT: All callbacks passed to PipelineOrchestrator, AutoLoopCoordinator,
+    // and ExecutionService are invoked asynchronously (never during construction),
+    // so facadeInstance is guaranteed to be assigned before any callback runs.
     let facadeInstance: AutoModeServiceFacade | null = null;
+    const getFacade = (): AutoModeServiceFacade => {
+      if (!facadeInstance) {
+        throw new Error(
+          'AutoModeServiceFacade not yet initialized — callback invoked during construction'
+        );
+      }
+      return facadeInstance;
+    };
 
     // PipelineOrchestrator - runAgentFn is a stub; routes use AutoModeService directly
     const pipelineOrchestrator = new PipelineOrchestrator(
@@ -162,7 +173,7 @@ export class AutoModeServiceFacade {
       loadContextFiles,
       buildFeaturePrompt,
       (pPath, featureId, useWorktrees, _isAutoMode, _model, opts) =>
-        facadeInstance!.executeFeature(featureId, useWorktrees, false, undefined, opts),
+        getFacade().executeFeature(featureId, useWorktrees, false, undefined, opts),
       // runAgentFn - delegates to AgentExecutor
       async (
         workDir: string,
@@ -227,7 +238,7 @@ export class AutoModeServiceFacade {
                 .replace(/\{\{taskName\}\}/g, task.description)
                 .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
                 .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
-                .replace(/\{\{taskDescription\}\}/g, task.description || task.name);
+                .replace(/\{\{taskDescription\}\}/g, task.description || `Task ${task.id}`);
               if (feedback) {
                 taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
               }
@@ -248,7 +259,7 @@ export class AutoModeServiceFacade {
       settingsService,
       // Callbacks
       (pPath, featureId, useWorktrees, isAutoMode) =>
-        facadeInstance!.executeFeature(featureId, useWorktrees, isAutoMode),
+        getFacade().executeFeature(featureId, useWorktrees, isAutoMode),
       async (pPath, branchName) => {
         const features = await featureLoader.getAll(pPath);
         // For main worktree (branchName === null), resolve the actual primary branch name
@@ -266,8 +277,8 @@ export class AutoModeServiceFacade {
         );
       },
       (pPath, branchName, maxConcurrency) =>
-        facadeInstance!.saveExecutionStateForProject(branchName, maxConcurrency),
-      (pPath, branchName) => facadeInstance!.clearExecutionState(branchName),
+        getFacade().saveExecutionStateForProject(branchName, maxConcurrency),
+      (pPath, branchName) => getFacade().clearExecutionState(branchName),
       (pPath) => featureStateManager.resetStuckFeatures(pPath),
       (feature) =>
         feature.status === 'completed' ||
@@ -375,16 +386,16 @@ export class AutoModeServiceFacade {
       async () => {
         /* recordLearnings - stub */
       },
-      (pPath, featureId) => facadeInstance!.contextExists(featureId),
+      (pPath, featureId) => getFacade().contextExists(featureId),
       (pPath, featureId, useWorktrees, _calledInternally) =>
-        facadeInstance!.resumeFeature(featureId, useWorktrees, _calledInternally),
+        getFacade().resumeFeature(featureId, useWorktrees, _calledInternally),
       (errorInfo) =>
         autoLoopCoordinator.trackFailureAndCheckPauseForProject(projectPath, null, errorInfo),
       (errorInfo) => autoLoopCoordinator.signalShouldPauseForProject(projectPath, null, errorInfo),
       () => {
         /* recordSuccess - no-op */
       },
-      (_pPath) => facadeInstance!.saveExecutionState(),
+      (_pPath) => getFacade().saveExecutionState(),
       loadContextFiles
     );
 
@@ -395,13 +406,7 @@ export class AutoModeServiceFacade {
       settingsService,
       // Callbacks
       (pPath, featureId, useWorktrees, isAutoMode, providedWorktreePath, opts) =>
-        facadeInstance!.executeFeature(
-          featureId,
-          useWorktrees,
-          isAutoMode,
-          providedWorktreePath,
-          opts
-        ),
+        getFacade().executeFeature(featureId, useWorktrees, isAutoMode, providedWorktreePath, opts),
       (pPath, featureId) => featureStateManager.loadFeature(pPath, featureId),
       (pPath, featureId, status) =>
         pipelineOrchestrator.detectPipelineStatus(pPath, featureId, status),
@@ -547,7 +552,9 @@ export class AutoModeServiceFacade {
     imagePaths?: string[],
     useWorktrees = true
   ): Promise<void> {
-    // This method contains substantial logic - delegates most work to AgentExecutor
+    // Stub: acquire concurrency slot then immediately throw.
+    // Heavy I/O (loadFeature, worktree resolution, context reading, prompt building)
+    // is deferred to the real AutoModeService.followUpFeature implementation.
     validateWorkingDirectory(this.projectPath);
 
     const runningEntry = this.concurrencyManager.acquire({
@@ -555,56 +562,6 @@ export class AutoModeServiceFacade {
       projectPath: this.projectPath,
       isAutoMode: false,
     });
-    const abortController = runningEntry.abortController;
-
-    const feature = await this.featureStateManager.loadFeature(this.projectPath, featureId);
-    let workDir = path.resolve(this.projectPath);
-    let worktreePath: string | null = null;
-    const branchName = feature?.branchName || `feature/${featureId}`;
-
-    if (useWorktrees && branchName) {
-      worktreePath = await this.worktreeResolver.findWorktreeForBranch(
-        this.projectPath,
-        branchName
-      );
-      if (worktreePath) {
-        workDir = worktreePath;
-      }
-    }
-
-    // Load previous context
-    const featureDir = getFeatureDir(this.projectPath, featureId);
-    const contextPath = path.join(featureDir, 'agent-output.md');
-    let previousContext = '';
-    try {
-      previousContext = (await secureFs.readFile(contextPath, 'utf-8')) as string;
-    } catch {
-      // No previous context
-    }
-
-    const prompts = await getPromptCustomization(this.settingsService, '[Facade]');
-
-    // Build follow-up prompt inline (no template in TaskExecutionPrompts)
-    let fullPrompt = `## Follow-up on Feature Implementation
-
-${feature ? `**Feature ID:** ${feature.id}\n**Title:** ${feature.title || 'Untitled'}\n**Description:** ${feature.description}` : `**Feature ID:** ${featureId}`}
-`;
-
-    if (previousContext) {
-      fullPrompt += `
-## Previous Agent Work
-The following is the output from the previous implementation attempt:
-
-${previousContext}
-`;
-    }
-
-    fullPrompt += `
-## Follow-up Instructions
-${prompt}
-
-## Task
-Address the follow-up instructions above. Review the previous work and make the requested changes or fixes.`;
 
     try {
       // NOTE: Facade does not have runAgent - this method requires AutoModeService
@@ -617,8 +574,8 @@ Address the follow-up instructions above. Review the previous work and make the 
       if (!errorInfo.isAbort) {
         this.eventBus.emitAutoModeEvent('auto_mode_error', {
           featureId,
-          featureName: feature?.title,
-          branchName: feature?.branchName ?? null,
+          featureName: undefined,
+          branchName: null,
           error: errorInfo.message,
           errorType: errorInfo.type,
           projectPath: this.projectPath,
@@ -854,7 +811,9 @@ Address the follow-up instructions above. Review the previous work and make the 
   async checkWorktreeCapacity(featureId: string): Promise<WorktreeCapacityInfo> {
     const feature = await this.featureStateManager.loadFeature(this.projectPath, featureId);
     const rawBranchName = feature?.branchName ?? null;
-    const branchName = rawBranchName === 'main' ? null : rawBranchName;
+    // Normalize primary branch to null (works for main, master, or any default branch)
+    const primaryBranch = await this.worktreeResolver.getCurrentBranch(this.projectPath);
+    const branchName = rawBranchName === primaryBranch ? null : rawBranchName;
 
     const maxAgents = await this.autoLoopCoordinator.resolveMaxConcurrency(
       this.projectPath,
