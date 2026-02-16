@@ -165,6 +165,7 @@ describe('PipelineOrchestrator', () => {
 
     mockWorktreeResolver = {
       findWorktreeForBranch: vi.fn().mockResolvedValue('/test/worktree'),
+      getCurrentBranch: vi.fn().mockResolvedValue('main'),
     } as unknown as WorktreeResolver;
 
     mockConcurrencyManager = {
