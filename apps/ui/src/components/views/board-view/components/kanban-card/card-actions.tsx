@@ -293,56 +293,59 @@ export const CardActions = memo(function CardActions({
           ) : null}
         </>
       )}
-      {!isCurrentAutoTask && feature.status === 'backlog' && (
-        <>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex-1 h-7 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit();
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            data-testid={`edit-backlog-${feature.id}`}
-          >
-            <Edit className="w-3 h-3 mr-1" />
-            Edit
-          </Button>
-          {feature.planSpec?.content && onViewPlan && (
+      {!isCurrentAutoTask &&
+        (feature.status === 'backlog' ||
+          feature.status === 'interrupted' ||
+          feature.status === 'ready') && (
+          <>
             <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs px-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                onViewPlan();
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`view-plan-${feature.id}`}
-              title="View Plan"
-            >
-              <Eye className="w-3 h-3" />
-            </Button>
-          )}
-          {onImplement && (
-            <Button
-              variant="default"
+              variant="secondary"
               size="sm"
               className="flex-1 h-7 text-xs"
               onClick={(e) => {
                 e.stopPropagation();
-                onImplement();
+                onEdit();
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              data-testid={`make-${feature.id}`}
+              data-testid={`edit-backlog-${feature.id}`}
             >
-              <PlayCircle className="w-3 h-3 mr-1" />
-              Make
+              <Edit className="w-3 h-3 mr-1" />
+              Edit
             </Button>
-          )}
-        </>
-      )}
+            {feature.planSpec?.content && onViewPlan && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs px-2"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewPlan();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                data-testid={`view-plan-${feature.id}`}
+                title="View Plan"
+              >
+                <Eye className="w-3 h-3" />
+              </Button>
+            )}
+            {onImplement && (
+              <Button
+                variant="default"
+                size="sm"
+                className="flex-1 h-7 text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onImplement();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                data-testid={`make-${feature.id}`}
+              >
+                <PlayCircle className="w-3 h-3 mr-1" />
+                Make
+              </Button>
+            )}
+          </>
+        )}
     </div>
   );
 });

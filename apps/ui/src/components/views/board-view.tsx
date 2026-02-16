@@ -593,7 +593,7 @@ export function BoardView() {
   } = useBoardActions({
     currentProject,
     features: hookFeatures,
-    runningAutoTasks,
+    runningAutoTasks: runningAutoTasksAllWorktrees,
     loadFeatures,
     persistFeatureCreate,
     persistFeatureUpdate,
@@ -882,7 +882,15 @@ export function BoardView() {
 
       // Capture existing feature IDs before adding
       const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
-      await handleAddFeature(featureData);
+      try {
+        await handleAddFeature(featureData);
+      } catch (error) {
+        logger.error('Failed to create PR comments feature:', error);
+        toast.error('Failed to create feature', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        return;
+      }
 
       // Find the newly created feature by looking for an ID that wasn't in the original set
       const latestFeatures = useAppStore.getState().features;
@@ -913,7 +921,7 @@ export function BoardView() {
 
       // Create the feature
       const featureData = {
-        title: `Resolve Merge Conflicts`,
+        title: `Resolve Merge Conflicts: ${remoteBranch} → ${worktree.branch}`,
         category: 'Maintenance',
         description,
         images: [],
@@ -930,7 +938,15 @@ export function BoardView() {
 
       // Capture existing feature IDs before adding
       const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
-      await handleAddFeature(featureData);
+      try {
+        await handleAddFeature(featureData);
+      } catch (error) {
+        logger.error('Failed to create resolve conflicts feature:', error);
+        toast.error('Failed to create feature', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        return;
+      }
 
       // Find the newly created feature by looking for an ID that wasn't in the original set
       const latestFeatures = useAppStore.getState().features;
@@ -972,7 +988,15 @@ export function BoardView() {
 
       // Capture existing feature IDs before adding
       const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
-      await handleAddFeature(featureData);
+      try {
+        await handleAddFeature(featureData);
+      } catch (error) {
+        logger.error('Failed to create merge conflict resolution feature:', error);
+        toast.error('Failed to create feature', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        return;
+      }
 
       // Find the newly created feature by looking for an ID that wasn't in the original set
       const latestFeatures = useAppStore.getState().features;
@@ -995,7 +1019,15 @@ export function BoardView() {
     async (featureData: Parameters<typeof handleAddFeature>[0]) => {
       // Capture existing feature IDs before adding
       const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
-      await handleAddFeature(featureData);
+      try {
+        await handleAddFeature(featureData);
+      } catch (error) {
+        logger.error('Failed to create feature:', error);
+        toast.error('Failed to create feature', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        return;
+      }
 
       // Find the newly created feature by looking for an ID that wasn't in the original set
       const latestFeatures = useAppStore.getState().features;
@@ -1092,7 +1124,7 @@ export function BoardView() {
   } = useBoardDragDrop({
     features: hookFeatures,
     currentProject,
-    runningAutoTasks,
+    runningAutoTasks: runningAutoTasksAllWorktrees,
     persistFeatureUpdate,
     handleStartImplementation,
   });
@@ -1362,10 +1394,16 @@ export function BoardView() {
           if (enabled) {
             autoMode.start().catch((error) => {
               logger.error('[AutoMode] Failed to start:', error);
+              toast.error('Failed to start auto mode', {
+                description: error instanceof Error ? error.message : 'Unknown error',
+              });
             });
           } else {
             autoMode.stop().catch((error) => {
               logger.error('[AutoMode] Failed to stop:', error);
+              toast.error('Failed to stop auto mode', {
+                description: error instanceof Error ? error.message : 'Unknown error',
+              });
             });
           }
         }}
@@ -1466,7 +1504,7 @@ export function BoardView() {
                   setShowAddDialog(true);
                 },
               }}
-              runningAutoTasks={runningAutoTasks}
+              runningAutoTasks={runningAutoTasksAllWorktrees}
               pipelineConfig={pipelineConfig}
               onAddFeature={() => setShowAddDialog(true)}
               isSelectionMode={isSelectionMode}
@@ -1505,7 +1543,7 @@ export function BoardView() {
                 setShowAddDialog(true);
               }}
               featuresWithContext={featuresWithContext}
-              runningAutoTasks={runningAutoTasks}
+              runningAutoTasks={runningAutoTasksAllWorktrees}
               onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}
               onAddFeature={() => setShowAddDialog(true)}
               onShowCompletedModal={() => setShowCompletedModal(true)}
