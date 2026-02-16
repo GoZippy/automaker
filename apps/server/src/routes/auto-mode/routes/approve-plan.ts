@@ -17,7 +17,7 @@ export function createApprovePlanHandler(autoModeService: AutoModeServiceCompat)
         approved: boolean;
         editedPlan?: string;
         feedback?: string;
-        projectPath?: string;
+        projectPath: string;
       };
 
       if (!featureId) {
@@ -36,6 +36,14 @@ export function createApprovePlanHandler(autoModeService: AutoModeServiceCompat)
         return;
       }
 
+      if (!projectPath) {
+        res.status(400).json({
+          success: false,
+          error: 'projectPath is required',
+        });
+        return;
+      }
+
       // Note: We no longer check hasPendingApproval here because resolvePlanApproval
       // can handle recovery when pending approval is not in Map but feature has planSpec.status='generated'
       // This supports cases where the server restarted while waiting for approval
@@ -48,7 +56,7 @@ export function createApprovePlanHandler(autoModeService: AutoModeServiceCompat)
 
       // Resolve the pending approval (with recovery support)
       const result = await autoModeService.resolvePlanApproval(
-        projectPath || '',
+        projectPath,
         featureId,
         approved,
         editedPlan,

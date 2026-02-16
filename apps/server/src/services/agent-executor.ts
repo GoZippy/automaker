@@ -560,6 +560,7 @@ export class AgentExecutor {
                   revText += b.text || '';
                   this.eventBus.emitAutoModeEvent('auto_mode_progress', {
                     featureId,
+                    branchName,
                     content: b.text,
                   });
                 }
@@ -638,6 +639,7 @@ export class AgentExecutor {
       cwd: o.workDir,
       allowedTools: o.sdkOptions?.allowedTools as string[] | undefined,
       abortController: o.abortController,
+      thinkingLevel: o.thinkingLevel,
       mcpServers:
         o.mcpServers && Object.keys(o.mcpServers).length > 0
           ? (o.mcpServers as Record<string, { command: string }>)

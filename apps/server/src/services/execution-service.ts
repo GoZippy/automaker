@@ -190,9 +190,9 @@ ${feature.spec}
         }
       }
 
-      let worktreePath: string | null = null;
+      let worktreePath: string | null = providedWorktreePath ?? null;
       const branchName = feature.branchName;
-      if (useWorktrees && branchName) {
+      if (!worktreePath && useWorktrees && branchName) {
         worktreePath = await this.worktreeResolver.findWorktreeForBranch(projectPath, branchName);
         if (worktreePath) logger.info(`Using worktree for branch "${branchName}": ${worktreePath}`);
       }
@@ -289,6 +289,11 @@ ${feature.spec}
           testAttempts: 0,
           maxTestAttempts: 5,
         });
+        // Check if pipeline set a terminal status (e.g., merge_conflict) — don't overwrite it
+        const refreshed = await this.loadFeatureFn(projectPath, featureId);
+        if (refreshed?.status === 'merge_conflict') {
+          return;
+        }
       }
 
       const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';

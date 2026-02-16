@@ -17,7 +17,7 @@ import { promisify } from 'util';
 import type { Feature, PlanningMode, ThinkingLevel } from '@automaker/types';
 import { DEFAULT_MAX_CONCURRENCY, stripProviderPrefix } from '@automaker/types';
 import { createLogger, loadContextFiles, classifyError } from '@automaker/utils';
-import { getFeatureDir } from '@automaker/platform';
+import { getFeatureDir, spawnProcess } from '@automaker/platform';
 import * as secureFs from '../../lib/secure-fs.js';
 import { validateWorkingDirectory } from '../../lib/sdk-options.js';
 import { getPromptCustomization, getProviderByModelId } from '../../lib/settings-helpers.js';
@@ -47,6 +47,24 @@ import type {
 
 const execAsync = promisify(exec);
 const logger = createLogger('AutoModeServiceFacade');
+
+/**
+ * Execute git command with array arguments to prevent command injection.
+ */
+async function execGitCommand(args: string[], cwd: string): Promise<string> {
+  const result = await spawnProcess({
+    command: 'git',
+    args,
+    cwd,
+  });
+
+  if (result.exitCode === 0) {
+    return result.stdout;
+  } else {
+    const errorMessage = result.stderr || `Git command failed with code ${result.exitCode}`;
+    throw new Error(errorMessage);
+  }
+}
 
 /**
  * AutoModeServiceFacade provides a clean interface for auto-mode functionality.
@@ -589,19 +607,8 @@ ${prompt}
 Address the follow-up instructions above. Review the previous work and make the requested changes or fixes.`;
 
     try {
-      this.eventBus.emitAutoModeEvent('auto_mode_feature_start', {
-        featureId,
-        projectPath: this.projectPath,
-        branchName: feature?.branchName ?? null,
-        feature: {
-          id: featureId,
-          title: feature?.title || 'Follow-up',
-          description: feature?.description || 'Following up on feature',
-        },
-      });
-
       // NOTE: Facade does not have runAgent - this method requires AutoModeService
-      // For now, throw to indicate routes should use AutoModeService.followUpFeature
+      // Do NOT emit start events before throwing to prevent false start events
       throw new Error(
         'followUpFeature not fully implemented in facade - use AutoModeService.followUpFeature instead'
       );
@@ -691,18 +698,22 @@ Address the follow-up instructions above. Review the previous work and make the 
         // Use project path
       }
     } else {
-      const sanitizedFeatureId = featureId.replace(/[^a-zA-Z0-9_-]/g, '-');
-      const legacyWorktreePath = path.join(this.projectPath, '.worktrees', sanitizedFeatureId);
-      try {
-        await secureFs.access(legacyWorktreePath);
-        workDir = legacyWorktreePath;
-      } catch {
-        // Use project path
+      // Use worktreeResolver instead of manual .worktrees lookup
+      const feature = await this.featureStateManager.loadFeature(this.projectPath, featureId);
+      const branchName = feature?.branchName;
+      if (branchName) {
+        const resolved = await this.worktreeResolver.findWorktreeForBranch(
+          this.projectPath,
+          branchName
+        );
+        if (resolved) {
+          workDir = resolved;
+        }
       }
     }
 
     try {
-      const { stdout: status } = await execAsync('git status --porcelain', { cwd: workDir });
+      const status = await execGitCommand(['status', '--porcelain'], workDir);
       if (!status.trim()) {
         return null;
       }
@@ -712,9 +723,9 @@ Address the follow-up instructions above. Review the previous work and make the 
         feature?.description?.split('\n')[0]?.substring(0, 60) || `Feature ${featureId}`;
       const commitMessage = `feat: ${title}\n\nImplemented by Automaker auto-mode`;
 
-      await execAsync('git add -A', { cwd: workDir });
-      await execAsync(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`, { cwd: workDir });
-      const { stdout: hash } = await execAsync('git rev-parse HEAD', { cwd: workDir });
+      await execGitCommand(['add', '-A'], workDir);
+      await execGitCommand(['commit', '-m', commitMessage], workDir);
+      const hash = await execGitCommand(['rev-parse', 'HEAD'], workDir);
 
       this.eventBus.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
@@ -975,10 +986,10 @@ Address the follow-up instructions above. Review the previous work and make the 
         return orphanedFeatures;
       }
 
-      // Get existing branches
-      const { stdout } = await execAsync(
-        'git for-each-ref --format="%(refname:short)" refs/heads/',
-        { cwd: this.projectPath }
+      // Get existing branches (using safe array-based command)
+      const stdout = await execGitCommand(
+        ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'],
+        this.projectPath
       );
       const existingBranches = new Set(
         stdout

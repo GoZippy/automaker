@@ -4,12 +4,8 @@
  * Extracted from worktree merge route to allow internal service calls.
  */
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { createLogger } from '@automaker/utils';
 import { spawnProcess } from '@automaker/platform';
-
-const execAsync = promisify(exec);
 const logger = createLogger('MergeService');
 
 export interface MergeOptions {
@@ -80,9 +76,23 @@ export async function performMerge(
 
   const mergeTo = targetBranch || 'main';
 
-  // Validate source branch exists
+  // Validate branch names early to reject invalid input before any git operations
+  if (!isValidBranchName(branchName)) {
+    return {
+      success: false,
+      error: `Invalid source branch name: "${branchName}"`,
+    };
+  }
+  if (!isValidBranchName(mergeTo)) {
+    return {
+      success: false,
+      error: `Invalid target branch name: "${mergeTo}"`,
+    };
+  }
+
+  // Validate source branch exists (using safe array-based command)
   try {
-    await execAsync(`git rev-parse --verify ${branchName}`, { cwd: projectPath });
+    await execGitCommand(['rev-parse', '--verify', branchName], projectPath);
   } catch {
     return {
       success: false,
@@ -90,9 +100,9 @@ export async function performMerge(
     };
   }
 
-  // Validate target branch exists
+  // Validate target branch exists (using safe array-based command)
   try {
-    await execAsync(`git rev-parse --verify ${mergeTo}`, { cwd: projectPath });
+    await execGitCommand(['rev-parse', '--verify', mergeTo], projectPath);
   } catch {
     return {
       success: false,
@@ -100,13 +110,14 @@ export async function performMerge(
     };
   }
 
-  // Merge the feature branch into the target branch
-  const mergeCmd = options?.squash
-    ? `git merge --squash ${branchName}`
-    : `git merge ${branchName} -m "${options?.message || `Merge ${branchName} into ${mergeTo}`}"`;
+  // Merge the feature branch into the target branch (using safe array-based commands)
+  const mergeMessage = options?.message || `Merge ${branchName} into ${mergeTo}`;
+  const mergeArgs = options?.squash
+    ? ['merge', '--squash', branchName]
+    : ['merge', branchName, '-m', mergeMessage];
 
   try {
-    await execAsync(mergeCmd, { cwd: projectPath });
+    await execGitCommand(mergeArgs, projectPath);
   } catch (mergeError: unknown) {
     // Check if this is a merge conflict
     const err = mergeError as { stdout?: string; stderr?: string; message?: string };
@@ -125,11 +136,10 @@ export async function performMerge(
     throw mergeError;
   }
 
-  // If squash merge, need to commit
+  // If squash merge, need to commit (using safe array-based command)
   if (options?.squash) {
-    await execAsync(`git commit -m "${options?.message || `Merge ${branchName} (squash)`}"`, {
-      cwd: projectPath,
-    });
+    const squashMessage = options?.message || `Merge ${branchName} (squash)`;
+    await execGitCommand(['commit', '-m', squashMessage], projectPath);
   }
 
   // Optionally delete the worktree and branch after merging

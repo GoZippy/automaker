@@ -115,6 +115,13 @@ export class FeatureStateManager {
       // PERSIST BEFORE EMIT (Pitfall 2)
       await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
 
+      // Emit status change event so UI can react without polling
+      this.emitAutoModeEvent('feature_status_changed', {
+        featureId,
+        projectPath,
+        status,
+      });
+
       // Create notifications for important status changes
       const notificationService = getNotificationService();
       if (status === 'waiting_approval') {

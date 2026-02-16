@@ -313,14 +313,18 @@ export function GraphViewPage() {
   // Handle add and start feature
   const handleAddAndStartFeature = useCallback(
     async (featureData: Parameters<typeof handleAddFeature>[0]) => {
-      const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
-      await handleAddFeature(featureData);
+      try {
+        const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
+        await handleAddFeature(featureData);
 
-      const latestFeatures = useAppStore.getState().features;
-      const newFeature = latestFeatures.find((f) => !featuresBeforeIds.has(f.id));
+        const latestFeatures = useAppStore.getState().features;
+        const newFeature = latestFeatures.find((f) => !featuresBeforeIds.has(f.id));
 
-      if (newFeature) {
-        await handleStartImplementation(newFeature);
+        if (newFeature) {
+          await handleStartImplementation(newFeature);
+        }
+      } catch (error) {
+        logger.error('Failed to add and start feature:', error);
       }
     },
     [handleAddFeature, handleStartImplementation]

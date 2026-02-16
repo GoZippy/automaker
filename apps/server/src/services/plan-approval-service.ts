@@ -83,6 +83,13 @@ export class PlanApprovalService {
     );
 
     return new Promise((resolve, reject) => {
+      // Prevent duplicate registrations for the same key — reject and clean up existing entry
+      const existing = this.pendingApprovals.get(key);
+      if (existing) {
+        existing.reject(new Error('Superseded by a new waitForApproval call'));
+        this.pendingApprovals.delete(key);
+      }
+
       // Set up timeout to prevent indefinite waiting and memory leaks
       // timeoutId stored in closure, NOT in PendingApproval object
       const timeoutId = setTimeout(() => {
@@ -226,11 +233,11 @@ export class PlanApprovalService {
       status: approved ? 'approved' : 'rejected',
       approvedAt: approved ? new Date().toISOString() : undefined,
       reviewedByUser: true,
-      content: editedPlan, // Update content if user provided an edited version
+      ...(editedPlan !== undefined && { content: editedPlan }), // Only update content if user provided an edited version
     });
 
-    // If rejected with feedback, emit event so client knows the rejection reason
-    if (!approved && feedback) {
+    // If rejected, emit event so client knows the rejection reason (even without feedback)
+    if (!approved) {
       this.eventBus.emitAutoModeEvent('plan_rejected', {
         featureId,
         projectPath,

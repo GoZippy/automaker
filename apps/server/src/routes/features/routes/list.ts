@@ -33,18 +33,23 @@ export function createListHandler(
       // We don't await this to keep the list response fast
       // Note: detectOrphanedFeatures handles errors internally and always resolves
       if (autoModeService) {
-        autoModeService.detectOrphanedFeatures(projectPath).then((orphanedFeatures) => {
-          if (orphanedFeatures.length > 0) {
-            logger.info(
-              `[ProjectLoad] Detected ${orphanedFeatures.length} orphaned feature(s) in ${projectPath}`
-            );
-            for (const { feature, missingBranch } of orphanedFeatures) {
+        autoModeService
+          .detectOrphanedFeatures(projectPath)
+          .then((orphanedFeatures) => {
+            if (orphanedFeatures.length > 0) {
               logger.info(
-                `[ProjectLoad] Orphaned: ${feature.title || feature.id} - branch "${missingBranch}" no longer exists`
+                `[ProjectLoad] Detected ${orphanedFeatures.length} orphaned feature(s) in ${projectPath}`
               );
+              for (const { feature, missingBranch } of orphanedFeatures) {
+                logger.info(
+                  `[ProjectLoad] Orphaned: ${feature.title || feature.id} - branch "${missingBranch}" no longer exists`
+                );
+              }
             }
-          }
-        });
+          })
+          .catch((error) => {
+            logger.warn(`[ProjectLoad] Orphan detection failed for ${projectPath}:`, error);
+          });
       }
 
       res.json({ success: true, features });

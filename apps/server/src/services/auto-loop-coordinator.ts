@@ -31,8 +31,16 @@ export interface ProjectAutoLoopState {
   branchName: string | null;
 }
 
+/**
+ * Generate a unique key for a worktree auto-loop instance.
+ *
+ * When branchName is null, this represents the main worktree (uses '__main__' sentinel).
+ * Named branches always use their exact name — the caller is responsible for passing
+ * null for the primary branch (main/master/etc.) so key matching stays consistent
+ * with ConcurrencyManager's dynamic primary branch resolution.
+ */
 export function getWorktreeAutoLoopKey(projectPath: string, branchName: string | null): string {
-  return `${projectPath}::${(branchName === 'main' ? null : branchName) ?? '__main__'}`;
+  return `${projectPath}::${branchName ?? '__main__'}`;
 }
 
 export type ExecuteFeatureFn = (
@@ -404,11 +412,15 @@ export class AutoLoopCoordinator {
         reject(new Error('Aborted'));
         return;
       }
-      const timeout = setTimeout(resolve, ms);
-      signal?.addEventListener('abort', () => {
+      const onAbort = () => {
         clearTimeout(timeout);
         reject(new Error('Aborted'));
-      });
+      };
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort);
     });
   }
 }

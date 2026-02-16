@@ -460,6 +460,7 @@ export class PipelineOrchestrator {
         const session = this.testRunnerService.getSession(sessionId);
         if (session && session.status !== 'running' && session.status !== 'pending') {
           clearInterval(checkInterval);
+          clearTimeout(timeoutId);
           resolve({
             status: session.status,
             exitCode: session.exitCode,
@@ -469,7 +470,7 @@ export class PipelineOrchestrator {
           });
         }
       }, 1000);
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         clearInterval(checkInterval);
         resolve({ status: 'failed', exitCode: null, duration: 600000 });
       }, 600000);
