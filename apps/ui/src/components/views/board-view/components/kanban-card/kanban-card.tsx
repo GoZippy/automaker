@@ -108,6 +108,9 @@ export const KanbanCard = memo(function KanbanCard({
       currentProject: state.currentProject,
     }))
   );
+  // A card in waiting_approval should not display as "actively running" even if
+  // it's still in the runningAutoTasks list. The waiting_approval UI takes precedence.
+  const isActivelyRunning = !!isCurrentAutoTask && feature.status !== 'waiting_approval';
   const [isLifted, setIsLifted] = useState(false);
 
   useLayoutEffect(() => {
@@ -186,10 +189,10 @@ export const KanbanCard = memo(function KanbanCard({
     // Disable hover translate for in-progress cards to prevent gap showing gradient
     isInteractive &&
       !reduceEffects &&
-      !isCurrentAutoTask &&
+      !isActivelyRunning &&
       'hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/10 bg-transparent',
     !glassmorphism && 'backdrop-blur-[0px]!',
-    !isCurrentAutoTask &&
+    !isActivelyRunning &&
       cardBorderEnabled &&
       (cardBorderOpacity === 100 ? 'border-border/50' : 'border'),
     hasError && 'border-[var(--status-error)] border-2 shadow-[var(--status-error-bg)] shadow-lg',
@@ -206,7 +209,7 @@ export const KanbanCard = memo(function KanbanCard({
 
   const renderCardContent = () => (
     <Card
-      style={isCurrentAutoTask ? undefined : cardStyle}
+      style={isActivelyRunning ? undefined : cardStyle}
       className={innerCardClasses}
       onDoubleClick={isSelectionMode ? undefined : onEdit}
       onClick={handleCardClick}
@@ -245,7 +248,7 @@ export const KanbanCard = memo(function KanbanCard({
       <CardHeaderSection
         feature={feature}
         isDraggable={isDraggable}
-        isCurrentAutoTask={!!isCurrentAutoTask}
+        isCurrentAutoTask={isActivelyRunning}
         isSelectionMode={isSelectionMode}
         onEdit={onEdit}
         onDelete={onDelete}
@@ -269,7 +272,7 @@ export const KanbanCard = memo(function KanbanCard({
         {/* Actions */}
         <CardActions
           feature={feature}
-          isCurrentAutoTask={!!isCurrentAutoTask}
+          isCurrentAutoTask={isActivelyRunning}
           hasContext={hasContext}
           shortcutKey={shortcutKey}
           isSelectionMode={isSelectionMode}
@@ -298,7 +301,7 @@ export const KanbanCard = memo(function KanbanCard({
       className={wrapperClasses}
       data-testid={`kanban-card-${feature.id}`}
     >
-      {isCurrentAutoTask ? (
+      {isActivelyRunning ? (
         <div className="animated-border-wrapper">{renderCardContent()}</div>
       ) : (
         renderCardContent()
