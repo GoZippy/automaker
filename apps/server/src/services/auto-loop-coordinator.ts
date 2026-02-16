@@ -35,12 +35,12 @@ export interface ProjectAutoLoopState {
  * Generate a unique key for a worktree auto-loop instance.
  *
  * When branchName is null, this represents the main worktree (uses '__main__' sentinel).
- * Named branches always use their exact name — the caller is responsible for passing
- * null for the primary branch (main/master/etc.) so key matching stays consistent
- * with ConcurrencyManager's dynamic primary branch resolution.
+ * The string 'main' is also normalized to '__main__' for consistency.
+ * Named branches always use their exact name.
  */
 export function getWorktreeAutoLoopKey(projectPath: string, branchName: string | null): string {
-  return `${projectPath}::${branchName ?? '__main__'}`;
+  const normalizedBranch = branchName === 'main' ? null : branchName;
+  return `${projectPath}::${normalizedBranch ?? '__main__'}`;
 }
 
 export type ExecuteFeatureFn = (
