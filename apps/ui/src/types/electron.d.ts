@@ -3,7 +3,7 @@
  */
 
 import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
-import type { ParsedTask } from '@automaker/types';
+import type { ParsedTask, FeatureStatusWithPipeline } from '@automaker/types';
 
 export interface ImageAttachment {
   id?: string; // Optional - may not be present in messages loaded from server
@@ -364,8 +364,8 @@ export type AutoModeEvent =
       type: 'feature_status_changed';
       featureId: string;
       projectPath?: string;
-      status: string;
-      previousStatus: string;
+      status: FeatureStatusWithPipeline;
+      previousStatus: FeatureStatusWithPipeline;
       reason?: string;
     }
   | {

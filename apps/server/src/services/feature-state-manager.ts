@@ -25,6 +25,7 @@ import {
 import { getFeatureDir, getFeaturesDir } from '@automaker/platform';
 import * as secureFs from '../lib/secure-fs.js';
 import type { EventEmitter } from '../lib/events.js';
+import type { AutoModeEventType } from './typed-event-bus.js';
 import { getNotificationService } from './notification-service.js';
 import { FeatureLoader } from './feature-loader.js';
 
@@ -268,6 +269,127 @@ export class FeatureStateManager {
   }
 
   /**
+   * Shared helper that scans features in a project directory and resets any stuck
+   * in transient states (in_progress, interrupted, pipeline_*) back to resting states.
+   *
+   * Also resets:
+   * - generating planSpec status back to pending
+   * - in_progress tasks back to pending
+   *
+   * @param projectPath - The project path to scan
+   * @param callerLabel - Label for log messages (e.g., 'resetStuckFeatures', 'reconcileAllFeatureStates')
+   * @returns Object with reconciledFeatures (id + status info), reconciledCount, and scanned count
+   */
+  private async scanAndResetFeatures(
+    projectPath: string,
+    callerLabel: string
+  ): Promise<{
+    reconciledFeatures: Array<{
+      id: string;
+      previousStatus: string | undefined;
+      newStatus: string | undefined;
+    }>;
+    reconciledFeatureIds: string[];
+    reconciledCount: number;
+    scanned: number;
+  }> {
+    const featuresDir = getFeaturesDir(projectPath);
+    let scanned = 0;
+    let reconciledCount = 0;
+    const reconciledFeatureIds: string[] = [];
+    const reconciledFeatures: Array<{
+      id: string;
+      previousStatus: string | undefined;
+      newStatus: string | undefined;
+    }> = [];
+
+    try {
+      const entries = await secureFs.readdir(featuresDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        scanned++;
+        const featurePath = path.join(featuresDir, entry.name, 'feature.json');
+        const result = await readJsonWithRecovery<Feature | null>(featurePath, null, {
+          maxBackups: DEFAULT_BACKUP_COUNT,
+          autoRestore: true,
+        });
+
+        const feature = result.data;
+        if (!feature) continue;
+
+        let needsUpdate = false;
+        const originalStatus = feature.status;
+
+        // Reset features in active execution states back to a resting state
+        // After a server restart, no processes are actually running
+        const isActiveState =
+          originalStatus === 'in_progress' ||
+          originalStatus === 'interrupted' ||
+          (originalStatus != null && originalStatus.startsWith('pipeline_'));
+
+        if (isActiveState) {
+          const hasApprovedPlan = feature.planSpec?.status === 'approved';
+          feature.status = hasApprovedPlan ? 'ready' : 'backlog';
+          needsUpdate = true;
+          logger.info(
+            `[${callerLabel}] Reset feature ${feature.id} from ${originalStatus} to ${feature.status}`
+          );
+        }
+
+        // Reset generating planSpec status back to pending (spec generation was interrupted)
+        if (feature.planSpec?.status === 'generating') {
+          feature.planSpec.status = 'pending';
+          needsUpdate = true;
+          logger.info(
+            `[${callerLabel}] Reset feature ${feature.id} planSpec status from generating to pending`
+          );
+        }
+
+        // Reset any in_progress tasks back to pending (task execution was interrupted)
+        if (feature.planSpec?.tasks) {
+          for (const task of feature.planSpec.tasks) {
+            if (task.status === 'in_progress') {
+              task.status = 'pending';
+              needsUpdate = true;
+              logger.info(
+                `[${callerLabel}] Reset task ${task.id} for feature ${feature.id} from in_progress to pending`
+              );
+              // Clear currentTaskId if it points to this reverted task
+              if (feature.planSpec?.currentTaskId === task.id) {
+                feature.planSpec.currentTaskId = undefined;
+                logger.info(
+                  `[${callerLabel}] Cleared planSpec.currentTaskId for feature ${feature.id} (was pointing to reverted task ${task.id})`
+                );
+              }
+            }
+          }
+        }
+
+        if (needsUpdate) {
+          feature.updatedAt = new Date().toISOString();
+          await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
+          reconciledCount++;
+          reconciledFeatureIds.push(feature.id);
+          reconciledFeatures.push({
+            id: feature.id,
+            previousStatus: originalStatus,
+            newStatus: feature.status,
+          });
+        }
+      }
+    } catch (error) {
+      // If features directory doesn't exist, that's fine
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.error(`[${callerLabel}] Error resetting features for ${projectPath}:`, error);
+      }
+    }
+
+    return { reconciledFeatures, reconciledFeatureIds, reconciledCount, scanned };
+  }
+
+  /**
    * Reset features that were stuck in transient states due to server crash.
    * Called when auto mode is enabled to clean up from previous session.
    *
@@ -281,108 +403,14 @@ export class FeatureStateManager {
    * @param projectPath - The project path to reset features for
    */
   async resetStuckFeatures(projectPath: string): Promise<void> {
-    const featuresDir = getFeaturesDir(projectPath);
-    let featuresScanned = 0;
-    let featuresReset = 0;
+    const { reconciledCount, scanned } = await this.scanAndResetFeatures(
+      projectPath,
+      'resetStuckFeatures'
+    );
 
-    try {
-      const entries = await secureFs.readdir(featuresDir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-
-        featuresScanned++;
-        const featurePath = path.join(featuresDir, entry.name, 'feature.json');
-        const result = await readJsonWithRecovery<Feature | null>(featurePath, null, {
-          maxBackups: DEFAULT_BACKUP_COUNT,
-          autoRestore: true,
-        });
-
-        const feature = result.data;
-        if (!feature) continue;
-
-        let needsUpdate = false;
-        const originalStatus = feature.status;
-
-        // Reset in_progress features back to ready/backlog
-        if (feature.status === 'in_progress') {
-          const hasApprovedPlan = feature.planSpec?.status === 'approved';
-          feature.status = hasApprovedPlan ? 'ready' : 'backlog';
-          needsUpdate = true;
-          logger.info(
-            `[resetStuckFeatures] Reset feature ${feature.id} from in_progress to ${feature.status}`
-          );
-        }
-
-        // Reset interrupted features back to ready/backlog
-        // These were marked interrupted during graceful shutdown but need to be reset
-        // so they appear in the correct column and can be re-executed
-        if (feature.status === 'interrupted') {
-          const hasApprovedPlan = feature.planSpec?.status === 'approved';
-          feature.status = hasApprovedPlan ? 'ready' : 'backlog';
-          needsUpdate = true;
-          logger.info(
-            `[resetStuckFeatures] Reset feature ${feature.id} from interrupted to ${feature.status}`
-          );
-        }
-
-        // Reset pipeline_* features back to ready/backlog
-        // After a server restart, pipeline execution cannot resume from the exact step,
-        // so these need to be reset to a clean state for re-execution
-        if (feature.status && feature.status.startsWith('pipeline_')) {
-          const hasApprovedPlan = feature.planSpec?.status === 'approved';
-          feature.status = hasApprovedPlan ? 'ready' : 'backlog';
-          needsUpdate = true;
-          logger.info(
-            `[resetStuckFeatures] Reset feature ${feature.id} from ${originalStatus} to ${feature.status}`
-          );
-        }
-
-        // Reset generating planSpec status back to pending (spec generation was interrupted)
-        if (feature.planSpec?.status === 'generating') {
-          feature.planSpec.status = 'pending';
-          needsUpdate = true;
-          logger.info(
-            `[resetStuckFeatures] Reset feature ${feature.id} planSpec status from generating to pending`
-          );
-        }
-
-        // Reset any in_progress tasks back to pending (task execution was interrupted)
-        if (feature.planSpec?.tasks) {
-          for (const task of feature.planSpec.tasks) {
-            if (task.status === 'in_progress') {
-              task.status = 'pending';
-              needsUpdate = true;
-              logger.info(
-                `[resetStuckFeatures] Reset task ${task.id} for feature ${feature.id} from in_progress to pending`
-              );
-              // Clear currentTaskId if it points to this reverted task
-              if (feature.planSpec?.currentTaskId === task.id) {
-                feature.planSpec.currentTaskId = undefined;
-                logger.info(
-                  `[resetStuckFeatures] Cleared planSpec.currentTaskId for feature ${feature.id} (was pointing to reverted task ${task.id})`
-                );
-              }
-            }
-          }
-        }
-
-        if (needsUpdate) {
-          feature.updatedAt = new Date().toISOString();
-          await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
-          featuresReset++;
-        }
-      }
-
-      logger.info(
-        `[resetStuckFeatures] Scanned ${featuresScanned} features, reset ${featuresReset} features for ${projectPath}`
-      );
-    } catch (error) {
-      // If features directory doesn't exist, that's fine
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.error(`[resetStuckFeatures] Error resetting features for ${projectPath}:`, error);
-      }
-    }
+    logger.info(
+      `[resetStuckFeatures] Scanned ${scanned} features, reset ${reconciledCount} features for ${projectPath}`
+    );
   }
 
   /**
@@ -401,112 +429,35 @@ export class FeatureStateManager {
   async reconcileAllFeatureStates(projectPath: string): Promise<number> {
     logger.info(`[reconcileAllFeatureStates] Starting reconciliation for ${projectPath}`);
 
-    const featuresDir = getFeaturesDir(projectPath);
-    let featuresScanned = 0;
-    let featuresReconciled = 0;
-    const reconciledFeatureIds: string[] = [];
+    const { reconciledFeatures, reconciledFeatureIds, reconciledCount, scanned } =
+      await this.scanAndResetFeatures(projectPath, 'reconcileAllFeatureStates');
 
-    try {
-      const entries = await secureFs.readdir(featuresDir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-
-        featuresScanned++;
-        const featurePath = path.join(featuresDir, entry.name, 'feature.json');
-        const result = await readJsonWithRecovery<Feature | null>(featurePath, null, {
-          maxBackups: DEFAULT_BACKUP_COUNT,
-          autoRestore: true,
-        });
-
-        const feature = result.data;
-        if (!feature) continue;
-
-        let needsUpdate = false;
-        const originalStatus = feature.status;
-
-        // Reset features in active execution states back to a resting state
-        // After a server restart, no processes are actually running
-        const isActiveState =
-          feature.status === 'in_progress' ||
-          feature.status === 'interrupted' ||
-          (feature.status && feature.status.startsWith('pipeline_'));
-
-        if (isActiveState) {
-          const hasApprovedPlan = feature.planSpec?.status === 'approved';
-          feature.status = hasApprovedPlan ? 'ready' : 'backlog';
-          needsUpdate = true;
-          logger.info(
-            `[reconcileAllFeatureStates] Reset feature ${feature.id} from ${originalStatus} to ${feature.status}`
-          );
-        }
-
-        // Reset generating planSpec status back to pending
-        if (feature.planSpec?.status === 'generating') {
-          feature.planSpec.status = 'pending';
-          needsUpdate = true;
-          logger.info(
-            `[reconcileAllFeatureStates] Reset feature ${feature.id} planSpec from generating to pending`
-          );
-        }
-
-        // Reset any in_progress tasks back to pending
-        if (feature.planSpec?.tasks) {
-          for (const task of feature.planSpec.tasks) {
-            if (task.status === 'in_progress') {
-              task.status = 'pending';
-              needsUpdate = true;
-              logger.info(
-                `[reconcileAllFeatureStates] Reset task ${task.id} for feature ${feature.id} from in_progress to pending`
-              );
-              if (feature.planSpec?.currentTaskId === task.id) {
-                feature.planSpec.currentTaskId = undefined;
-              }
-            }
-          }
-        }
-
-        if (needsUpdate) {
-          feature.updatedAt = new Date().toISOString();
-          await atomicWriteJson(featurePath, feature, { backupCount: DEFAULT_BACKUP_COUNT });
-          featuresReconciled++;
-          reconciledFeatureIds.push(feature.id);
-
-          // Emit per-feature status change event so UI invalidates its cache
-          this.emitAutoModeEvent('feature_status_changed', {
-            featureId: feature.id,
-            projectPath,
-            status: feature.status,
-            previousStatus: originalStatus,
-            reason: 'server_restart_reconciliation',
-          });
-        }
-      }
-
-      // Emit a bulk reconciliation event for the UI
-      if (featuresReconciled > 0) {
-        this.emitAutoModeEvent('features_reconciled', {
-          projectPath,
-          reconciledCount: featuresReconciled,
-          reconciledFeatureIds,
-          message: `Reconciled ${featuresReconciled} feature(s) after server restart`,
-        });
-      }
-
-      logger.info(
-        `[reconcileAllFeatureStates] Scanned ${featuresScanned} features, reconciled ${featuresReconciled} for ${projectPath}`
-      );
-
-      return featuresReconciled;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.error(
-          `[reconcileAllFeatureStates] Error reconciling features for ${projectPath}:`,
-          error
-        );
-      }
-      return 0;
+    // Emit per-feature status change events so UI invalidates its cache
+    for (const { id, previousStatus, newStatus } of reconciledFeatures) {
+      this.emitAutoModeEvent('feature_status_changed', {
+        featureId: id,
+        projectPath,
+        status: newStatus,
+        previousStatus,
+        reason: 'server_restart_reconciliation',
+      });
     }
+
+    // Emit a bulk reconciliation event for the UI
+    if (reconciledCount > 0) {
+      this.emitAutoModeEvent('features_reconciled', {
+        projectPath,
+        reconciledCount,
+        reconciledFeatureIds,
+        message: `Reconciled ${reconciledCount} feature(s) after server restart`,
+      });
+    }
+
+    logger.info(
+      `[reconcileAllFeatureStates] Scanned ${scanned} features, reconciled ${reconciledCount} for ${projectPath}`
+    );
+
+    return reconciledCount;
   }
 
   /**
@@ -683,7 +634,7 @@ export class FeatureStateManager {
    * @param eventType - The event type (e.g., 'auto_mode_summary')
    * @param data - The event payload
    */
-  private emitAutoModeEvent(eventType: string, data: Record<string, unknown>): void {
+  private emitAutoModeEvent(eventType: AutoModeEventType, data: Record<string, unknown>): void {
     // Wrap the event in auto-mode:event format expected by the client
     this.events.emit('auto-mode:event', {
       type: eventType,
