@@ -170,7 +170,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
         // - completed tasks stay completed
         // This matches server-side behavior in feature-state-manager.ts
         if (isFeatureFinished) {
-          const finalStatus = task.status === 'in_progress' ? 'completed' : task.status;
+          const finalStatus = task.status === 'in_progress' || task.status === 'failed' ? 'completed' : task.status;
           return {
             content: task.description,
             status: (finalStatus || 'completed') as 'pending' | 'in_progress' | 'completed',
