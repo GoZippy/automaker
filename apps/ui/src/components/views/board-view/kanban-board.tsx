@@ -46,7 +46,8 @@ interface KanbanBoardProps {
   onViewPlan: (feature: Feature) => void;
   onApprovePlan: (feature: Feature) => void;
   onSpawnTask?: (feature: Feature) => void;
-  onDuplicate?: (feature: Feature, asChild: boolean) => void;
+  onDuplicate?: (feature: Feature) => void;
+  onDuplicateAsChild?: (feature: Feature) => void;
   featuresWithContext: Set<string>;
   runningAutoTasks: string[];
   onArchiveAllVerified: () => void;
@@ -284,6 +285,7 @@ export function KanbanBoard({
   onApprovePlan,
   onSpawnTask,
   onDuplicate,
+  onDuplicateAsChild,
   featuresWithContext,
   runningAutoTasks,
   onArchiveAllVerified,
@@ -571,8 +573,8 @@ export function KanbanBoard({
                                       onViewPlan={() => onViewPlan(feature)}
                                       onApprovePlan={() => onApprovePlan(feature)}
                                       onSpawnTask={() => onSpawnTask?.(feature)}
-                                      onDuplicate={() => onDuplicate?.(feature, false)}
-                                      onDuplicateAsChild={() => onDuplicate?.(feature, true)}
+                                      onDuplicate={() => onDuplicate?.(feature)}
+                                      onDuplicateAsChild={() => onDuplicateAsChild?.(feature)}
                                       hasContext={featuresWithContext.has(feature.id)}
                                       isCurrentAutoTask={runningAutoTasks.includes(feature.id)}
                                       shortcutKey={shortcutKey}
@@ -615,8 +617,8 @@ export function KanbanBoard({
                                 onViewPlan={() => onViewPlan(feature)}
                                 onApprovePlan={() => onApprovePlan(feature)}
                                 onSpawnTask={() => onSpawnTask?.(feature)}
-                                onDuplicate={() => onDuplicate?.(feature, false)}
-                                onDuplicateAsChild={() => onDuplicate?.(feature, true)}
+                                onDuplicate={() => onDuplicate?.(feature)}
+                                onDuplicateAsChild={() => onDuplicateAsChild?.(feature)}
                                 hasContext={featuresWithContext.has(feature.id)}
                                 isCurrentAutoTask={runningAutoTasks.includes(feature.id)}
                                 shortcutKey={shortcutKey}

@@ -1062,7 +1062,6 @@ if (typeof window !== 'undefined') {
 }
 
 // Mock API for development/fallback when no backend is available
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _getMockElectronAPI = (): ElectronAPI => {
   return {
     ping: async () => 'pong (mock)',

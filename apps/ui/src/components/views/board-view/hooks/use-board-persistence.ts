@@ -85,6 +85,11 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         throw new Error('Features API not available');
       }
 
+      // Capture previous cache snapshot for synchronous rollback on error
+      const previousFeatures = queryClient.getQueryData<Feature[]>(
+        queryKeys.features.all(currentProject.path)
+      );
+
       // Optimistically add to React Query cache for immediate board refresh
       queryClient.setQueryData<Feature[]>(
         queryKeys.features.all(currentProject.path),
@@ -95,6 +100,16 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         const result = await api.features.create(currentProject.path, feature as ApiFeature);
         if (result.success && result.feature) {
           updateFeature(result.feature.id, result.feature as Partial<Feature>);
+          // Update cache with server-confirmed feature before invalidating
+          queryClient.setQueryData<Feature[]>(
+            queryKeys.features.all(currentProject.path),
+            (features) => {
+              if (!features) return features;
+              return features.map((f) =>
+                f.id === result.feature!.id ? { ...f, ...(result.feature as Feature) } : f
+              );
+            }
+          );
         } else if (!result.success) {
           throw new Error(result.error || 'Failed to create feature on server');
         }
@@ -104,7 +119,10 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         });
       } catch (error) {
         logger.error('Failed to persist feature creation:', error);
-        // Rollback optimistic update on error
+        // Rollback optimistic update synchronously on error
+        if (previousFeatures) {
+          queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+        }
         queryClient.invalidateQueries({
           queryKey: queryKeys.features.all(currentProject.path),
         });
@@ -131,7 +149,6 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
       try {
         const api = getElectronAPI();
         if (!api.features) {
-          logger.error('Features API not available');
           // Rollback optimistic deletion since we can't persist
           if (previousFeatures) {
             queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
@@ -139,7 +156,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           queryClient.invalidateQueries({
             queryKey: queryKeys.features.all(currentProject.path),
           });
-          return;
+          throw new Error('Features API not available');
         }
 
         await api.features.delete(currentProject.path, featureId);

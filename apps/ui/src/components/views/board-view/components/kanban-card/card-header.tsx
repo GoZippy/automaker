@@ -31,6 +31,49 @@ import { formatModelName, DEFAULT_MODEL } from '@/lib/agent-context-parser';
 import { DeleteConfirmDialog } from '@/components/ui/delete-confirm-dialog';
 import { getProviderIconForModel } from '@/components/ui/provider-icon';
 
+function DuplicateMenuItems({
+  onDuplicate,
+  onDuplicateAsChild,
+}: {
+  onDuplicate?: () => void;
+  onDuplicateAsChild?: () => void;
+}) {
+  if (!onDuplicate) return null;
+  return (
+    <DropdownMenuSub>
+      <div className="flex items-center">
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onDuplicate();
+          }}
+          className="text-xs flex-1 pr-0 rounded-r-none"
+        >
+          <Copy className="w-3 h-3 mr-2" />
+          Duplicate
+        </DropdownMenuItem>
+        {onDuplicateAsChild && (
+          <DropdownMenuSubTrigger className="text-xs px-1 rounded-l-none border-l border-border/30 h-8" />
+        )}
+      </div>
+      {onDuplicateAsChild && (
+        <DropdownMenuSubContent>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicateAsChild();
+            }}
+            className="text-xs"
+          >
+            <GitFork className="w-3 h-3 mr-2" />
+            Duplicate as Child
+          </DropdownMenuItem>
+        </DropdownMenuSubContent>
+      )}
+    </DropdownMenuSub>
+  );
+}
+
 interface CardHeaderProps {
   feature: Feature;
   isDraggable: boolean;
@@ -122,39 +165,10 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                 <GitFork className="w-3 h-3 mr-2" />
                 Spawn Sub-Task
               </DropdownMenuItem>
-              {onDuplicate && (
-                <DropdownMenuSub>
-                  <div className="flex items-center">
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDuplicate();
-                      }}
-                      className="text-xs flex-1 pr-0 rounded-r-none"
-                    >
-                      <Copy className="w-3 h-3 mr-2" />
-                      Duplicate
-                    </DropdownMenuItem>
-                    {onDuplicateAsChild && (
-                      <DropdownMenuSubTrigger className="text-xs px-1 rounded-l-none border-l border-border/30 h-8" />
-                    )}
-                  </div>
-                  {onDuplicateAsChild && (
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDuplicateAsChild();
-                        }}
-                        className="text-xs"
-                      >
-                        <GitFork className="w-3 h-3 mr-2" />
-                        Duplicate as Child
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  )}
-                </DropdownMenuSub>
-              )}
+              <DuplicateMenuItems
+                onDuplicate={onDuplicate}
+                onDuplicateAsChild={onDuplicateAsChild}
+              />
               {/* Model info in dropdown */}
               {(() => {
                 const ProviderIcon = getProviderIconForModel(feature.model);
@@ -217,39 +231,10 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
-                {onDuplicate && (
-                  <DropdownMenuSub>
-                    <div className="flex items-center">
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDuplicate();
-                        }}
-                        className="text-xs flex-1 pr-0 rounded-r-none"
-                      >
-                        <Copy className="w-3 h-3 mr-2" />
-                        Duplicate
-                      </DropdownMenuItem>
-                      {onDuplicateAsChild && (
-                        <DropdownMenuSubTrigger className="text-xs px-1 rounded-l-none border-l border-border/30 h-8" />
-                      )}
-                    </div>
-                    {onDuplicateAsChild && (
-                      <DropdownMenuSubContent>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicateAsChild();
-                          }}
-                          className="text-xs"
-                        >
-                          <GitFork className="w-3 h-3 mr-2" />
-                          Duplicate as Child
-                        </DropdownMenuItem>
-                      </DropdownMenuSubContent>
-                    )}
-                  </DropdownMenuSub>
-                )}
+                <DuplicateMenuItems
+                  onDuplicate={onDuplicate}
+                  onDuplicateAsChild={onDuplicateAsChild}
+                />
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -337,39 +322,10 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                     <GitFork className="w-3 h-3 mr-2" />
                     Spawn Sub-Task
                   </DropdownMenuItem>
-                  {onDuplicate && (
-                    <DropdownMenuSub>
-                      <div className="flex items-center">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicate();
-                          }}
-                          className="text-xs flex-1 pr-0 rounded-r-none"
-                        >
-                          <Copy className="w-3 h-3 mr-2" />
-                          Duplicate
-                        </DropdownMenuItem>
-                        {onDuplicateAsChild && (
-                          <DropdownMenuSubTrigger className="text-xs px-1 rounded-l-none border-l border-border/30 h-8" />
-                        )}
-                      </div>
-                      {onDuplicateAsChild && (
-                        <DropdownMenuSubContent>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDuplicateAsChild();
-                            }}
-                            className="text-xs"
-                          >
-                            <GitFork className="w-3 h-3 mr-2" />
-                            Duplicate as Child
-                          </DropdownMenuItem>
-                        </DropdownMenuSubContent>
-                      )}
-                    </DropdownMenuSub>
-                  )}
+                  <DuplicateMenuItems
+                    onDuplicate={onDuplicate}
+                    onDuplicateAsChild={onDuplicateAsChild}
+                  />
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -440,39 +396,10 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                   <GitFork className="w-3 h-3 mr-2" />
                   Spawn Sub-Task
                 </DropdownMenuItem>
-                {onDuplicate && (
-                  <DropdownMenuSub>
-                    <div className="flex items-center">
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDuplicate();
-                        }}
-                        className="text-xs flex-1 pr-0 rounded-r-none"
-                      >
-                        <Copy className="w-3 h-3 mr-2" />
-                        Duplicate
-                      </DropdownMenuItem>
-                      {onDuplicateAsChild && (
-                        <DropdownMenuSubTrigger className="text-xs px-1 rounded-l-none border-l border-border/30 h-8" />
-                      )}
-                    </div>
-                    {onDuplicateAsChild && (
-                      <DropdownMenuSubContent>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicateAsChild();
-                          }}
-                          className="text-xs"
-                        >
-                          <GitFork className="w-3 h-3 mr-2" />
-                          Duplicate as Child
-                        </DropdownMenuItem>
-                      </DropdownMenuSubContent>
-                    )}
-                  </DropdownMenuSub>
-                )}
+                <DuplicateMenuItems
+                  onDuplicate={onDuplicate}
+                  onDuplicateAsChild={onDuplicateAsChild}
+                />
                 {/* Model info in dropdown */}
                 {(() => {
                   const ProviderIcon = getProviderIconForModel(feature.model);
