@@ -250,6 +250,14 @@ export class RecoveryService {
   async resumeInterruptedFeatures(projectPath: string): Promise<void> {
     const featuresDir = getFeaturesDir(projectPath);
     try {
+      // Load execution state to find features that were running before restart.
+      // This is critical because reconcileAllFeatureStates() runs at server startup
+      // and resets in_progress/interrupted/pipeline_* features to ready/backlog
+      // BEFORE the UI connects and calls this method. Without checking execution state,
+      // we would find no features to resume since their statuses have already been reset.
+      const executionState = await this.loadExecutionState(projectPath);
+      const previouslyRunningIds = new Set(executionState.runningFeatureIds ?? []);
+
       const entries = await secureFs.readdir(featuresDir, { withFileTypes: true });
       const featuresWithContext: Feature[] = [];
       const featuresWithoutContext: Feature[] = [];
@@ -263,18 +271,37 @@ export class RecoveryService {
           logRecoveryWarning(result, `Feature ${entry.name}`, logger);
           const feature = result.data;
           if (!feature) continue;
-          if (
+
+          // Check if the feature should be resumed:
+          // 1. Features still in active states (in_progress, pipeline_*) - not yet reconciled
+          // 2. Features in interrupted state - explicitly marked for resume
+          // 3. Features that were previously running (from execution state) and are now
+          //    in ready/backlog due to reconciliation resetting their status
+          const isActiveState =
             feature.status === 'in_progress' ||
-            (feature.status && feature.status.startsWith('pipeline_'))
-          ) {
-            (await this.contextExists(projectPath, feature.id))
-              ? featuresWithContext.push(feature)
-              : featuresWithoutContext.push(feature);
+            feature.status === 'interrupted' ||
+            (feature.status && feature.status.startsWith('pipeline_'));
+          const wasReconciledFromRunning =
+            previouslyRunningIds.has(feature.id) &&
+            (feature.status === 'ready' || feature.status === 'backlog');
+
+          if (isActiveState || wasReconciledFromRunning) {
+            if (await this.contextExists(projectPath, feature.id)) {
+              featuresWithContext.push(feature);
+            } else {
+              featuresWithoutContext.push(feature);
+            }
           }
         }
       }
       const allInterruptedFeatures = [...featuresWithContext, ...featuresWithoutContext];
       if (allInterruptedFeatures.length === 0) return;
+
+      logger.info(
+        `[resumeInterruptedFeatures] Found ${allInterruptedFeatures.length} feature(s) to resume ` +
+          `(${previouslyRunningIds.size} from execution state, statuses: ${allInterruptedFeatures.map((f) => `${f.id}=${f.status}`).join(', ')})`
+      );
+
       this.eventBus.emitAutoModeEvent('auto_mode_resuming_features', {
         message: `Resuming ${allInterruptedFeatures.length} interrupted feature(s)`,
         projectPath,
@@ -295,6 +322,10 @@ export class RecoveryService {
           /* continue */
         }
       }
+
+      // Clear execution state after successful resume to prevent
+      // re-resuming the same features on subsequent calls
+      await this.clearExecutionState(projectPath);
     } catch {
       /* ignore */
     }

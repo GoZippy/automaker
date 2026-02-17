@@ -205,7 +205,6 @@ export class FeatureExportService {
     importData: FeatureImport
   ): Promise<FeatureImportResult> {
     const warnings: string[] = [];
-    const errors: string[] = [];
 
     try {
       // Extract feature from data (handle both raw Feature and wrapped FeatureExport)

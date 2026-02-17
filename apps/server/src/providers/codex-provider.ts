@@ -30,7 +30,6 @@ import type {
   ModelDefinition,
 } from './types.js';
 import {
-  CODEX_MODEL_MAP,
   supportsReasoningEffort,
   validateBareModelId,
   calculateReasoningTimeout,
@@ -56,15 +55,9 @@ const CODEX_EXEC_SUBCOMMAND = 'exec';
 const CODEX_JSON_FLAG = '--json';
 const CODEX_MODEL_FLAG = '--model';
 const CODEX_VERSION_FLAG = '--version';
-const CODEX_SANDBOX_FLAG = '--sandbox';
-const CODEX_APPROVAL_FLAG = '--ask-for-approval';
-const CODEX_SEARCH_FLAG = '--search';
-const CODEX_OUTPUT_SCHEMA_FLAG = '--output-schema';
 const CODEX_CONFIG_FLAG = '--config';
-const CODEX_IMAGE_FLAG = '--image';
 const CODEX_ADD_DIR_FLAG = '--add-dir';
 const CODEX_SKIP_GIT_REPO_CHECK_FLAG = '--skip-git-repo-check';
-const CODEX_RESUME_FLAG = 'resume';
 const CODEX_REASONING_EFFORT_KEY = 'reasoning_effort';
 const CODEX_YOLO_FLAG = '--dangerously-bypass-approvals-and-sandbox';
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY';
@@ -106,9 +99,6 @@ const TEXT_ENCODING = 'utf-8';
  */
 const CODEX_CLI_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
 const CODEX_FEATURE_GENERATION_BASE_TIMEOUT_MS = 300000; // 5 minutes for feature generation
-const CONTEXT_WINDOW_256K = 256000;
-const MAX_OUTPUT_32K = 32000;
-const MAX_OUTPUT_16K = 16000;
 const SYSTEM_PROMPT_SEPARATOR = '\n\n';
 const CODEX_INSTRUCTIONS_DIR = '.codex';
 const CODEX_INSTRUCTIONS_SECTION = 'Codex Project Instructions';
@@ -758,17 +748,14 @@ export class CodexProvider extends BaseProvider {
         options.cwd,
         codexSettings.sandboxMode !== 'danger-full-access'
       );
-      const resolvedSandboxMode = sandboxCheck.enabled
-        ? codexSettings.sandboxMode
-        : 'danger-full-access';
       if (!sandboxCheck.enabled && sandboxCheck.message) {
         console.warn(`[CodexProvider] ${sandboxCheck.message}`);
       }
       const searchEnabled =
         codexSettings.enableWebSearch || resolveSearchEnabled(resolvedAllowedTools, restrictTools);
-      const outputSchemaPath = await writeOutputSchemaFile(options.cwd, options.outputFormat);
+      await writeOutputSchemaFile(options.cwd, options.outputFormat);
       const imageBlocks = codexSettings.enableImages ? extractImageBlocks(options.prompt) : [];
-      const imagePaths = await writeImageFiles(options.cwd, imageBlocks);
+      await writeImageFiles(options.cwd, imageBlocks);
       const approvalPolicy =
         hasMcpServers && options.mcpAutoApproveTools !== undefined
           ? options.mcpAutoApproveTools
@@ -801,7 +788,7 @@ export class CodexProvider extends BaseProvider {
         overrides.push({ key: 'features.web_search_request', value: true });
       }
 
-      const configOverrides = buildConfigOverrides(overrides);
+      buildConfigOverrides(overrides);
       const preExecArgs: string[] = [];
 
       // Add additional directories with write access
@@ -1033,7 +1020,7 @@ export class CodexProvider extends BaseProvider {
   async detectInstallation(): Promise<InstallationStatus> {
     const cliPath = await findCodexCliPath();
     const hasApiKey = Boolean(await resolveOpenAiApiKey());
-    const authIndicators = await getCodexAuthIndicators();
+    await getCodexAuthIndicators();
     const installed = !!cliPath;
 
     let version = '';
@@ -1045,7 +1032,7 @@ export class CodexProvider extends BaseProvider {
           cwd: process.cwd(),
         });
         version = result.stdout.trim();
-      } catch (error) {
+      } catch {
         version = '';
       }
     }

@@ -491,6 +491,32 @@ describe('recovery-service.ts', () => {
       );
     });
 
+    it('finds features with interrupted status', async () => {
+      vi.mocked(secureFs.readdir).mockResolvedValueOnce([
+        { name: 'feature-1', isDirectory: () => true } as any,
+      ]);
+      vi.mocked(utils.readJsonWithRecovery).mockResolvedValueOnce({
+        data: { id: 'feature-1', title: 'Feature 1', status: 'interrupted' },
+        wasRecovered: false,
+      });
+
+      mockLoadFeature.mockResolvedValue({
+        id: 'feature-1',
+        title: 'Feature 1',
+        status: 'interrupted',
+        description: 'Test',
+      });
+
+      await service.resumeInterruptedFeatures('/test/project');
+
+      expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
+        'auto_mode_resuming_features',
+        expect.objectContaining({
+          featureIds: ['feature-1'],
+        })
+      );
+    });
+
     it('finds features with pipeline_* status', async () => {
       vi.mocked(secureFs.readdir).mockResolvedValueOnce([
         { name: 'feature-1', isDirectory: () => true } as any,
@@ -517,6 +543,100 @@ describe('recovery-service.ts', () => {
           ]),
         })
       );
+    });
+
+    it('finds reconciled features using execution state (ready/backlog from previously running)', async () => {
+      // Simulate execution state with previously running feature IDs
+      const executionState = {
+        version: 1,
+        autoLoopWasRunning: true,
+        maxConcurrency: 2,
+        projectPath: '/test/project',
+        branchName: null,
+        runningFeatureIds: ['feature-1', 'feature-2'],
+        savedAt: '2026-01-27T12:00:00Z',
+      };
+      vi.mocked(secureFs.readFile).mockResolvedValueOnce(JSON.stringify(executionState));
+
+      vi.mocked(secureFs.readdir).mockResolvedValueOnce([
+        { name: 'feature-1', isDirectory: () => true } as any,
+        { name: 'feature-2', isDirectory: () => true } as any,
+        { name: 'feature-3', isDirectory: () => true } as any,
+      ]);
+      // feature-1 was reconciled from in_progress to ready
+      // feature-2 was reconciled from in_progress to backlog
+      // feature-3 is in backlog but was NOT previously running
+      vi.mocked(utils.readJsonWithRecovery)
+        .mockResolvedValueOnce({
+          data: { id: 'feature-1', title: 'Feature 1', status: 'ready' },
+          wasRecovered: false,
+        })
+        .mockResolvedValueOnce({
+          data: { id: 'feature-2', title: 'Feature 2', status: 'backlog' },
+          wasRecovered: false,
+        })
+        .mockResolvedValueOnce({
+          data: { id: 'feature-3', title: 'Feature 3', status: 'backlog' },
+          wasRecovered: false,
+        });
+
+      mockLoadFeature
+        .mockResolvedValueOnce({
+          id: 'feature-1',
+          title: 'Feature 1',
+          status: 'ready',
+          description: 'Test',
+        })
+        .mockResolvedValueOnce({
+          id: 'feature-2',
+          title: 'Feature 2',
+          status: 'backlog',
+          description: 'Test',
+        });
+
+      await service.resumeInterruptedFeatures('/test/project');
+
+      // Should resume feature-1 and feature-2 (from execution state) but NOT feature-3
+      expect(mockEventBus.emitAutoModeEvent).toHaveBeenCalledWith(
+        'auto_mode_resuming_features',
+        expect.objectContaining({
+          featureIds: ['feature-1', 'feature-2'],
+        })
+      );
+    });
+
+    it('clears execution state after successful resume', async () => {
+      // Simulate execution state
+      const executionState = {
+        version: 1,
+        autoLoopWasRunning: true,
+        maxConcurrency: 1,
+        projectPath: '/test/project',
+        branchName: null,
+        runningFeatureIds: ['feature-1'],
+        savedAt: '2026-01-27T12:00:00Z',
+      };
+      vi.mocked(secureFs.readFile).mockResolvedValueOnce(JSON.stringify(executionState));
+
+      vi.mocked(secureFs.readdir).mockResolvedValueOnce([
+        { name: 'feature-1', isDirectory: () => true } as any,
+      ]);
+      vi.mocked(utils.readJsonWithRecovery).mockResolvedValueOnce({
+        data: { id: 'feature-1', title: 'Feature 1', status: 'ready' },
+        wasRecovered: false,
+      });
+
+      mockLoadFeature.mockResolvedValue({
+        id: 'feature-1',
+        title: 'Feature 1',
+        status: 'ready',
+        description: 'Test',
+      });
+
+      await service.resumeInterruptedFeatures('/test/project');
+
+      // Should clear execution state after resuming
+      expect(secureFs.unlink).toHaveBeenCalledWith('/test/project/.automaker/execution-state.json');
     });
 
     it('distinguishes features with/without context', async () => {

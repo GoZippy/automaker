@@ -13,7 +13,7 @@ import { createLogger } from '@automaker/utils';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const logger = createLogger('GeminiUsage');
 
@@ -25,6 +25,12 @@ const CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:loadCode
 
 // Google OAuth endpoints for token refresh
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+/** Default timeout for fetch requests in milliseconds */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** TTL for cached credentials in milliseconds (5 minutes) */
+const CREDENTIALS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface GeminiQuotaBucket {
   /** Model ID this quota applies to */
@@ -114,8 +120,11 @@ interface QuotaResponse {
  */
 export class GeminiUsageService {
   private cachedCredentials: OAuthCredentials | null = null;
+  private cachedCredentialsAt: number | null = null;
   private cachedClientCredentials: OAuthClientCredentials | null = null;
   private credentialsPath: string;
+  /** The actual path from which credentials were loaded (for write-back) */
+  private loadedCredentialsPath: string | null = null;
 
   constructor() {
     // Default credentials path for Gemini CLI
@@ -176,6 +185,7 @@ export class GeminiUsageService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({}),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
 
         if (codeAssistResponse.ok) {
@@ -199,6 +209,7 @@ export class GeminiUsageService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(projectId ? { project: projectId } : {}),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -338,19 +349,46 @@ export class GeminiUsageService {
   }
 
   /**
-   * Load OAuth credentials from file
+   * Load OAuth credentials from file.
+   * Implements TTL-based cache invalidation and file mtime checks.
    */
   private async loadCredentials(): Promise<OAuthCredentials | null> {
-    if (this.cachedCredentials) {
-      return this.cachedCredentials;
+    // Check if cached credentials are still valid
+    if (this.cachedCredentials && this.cachedCredentialsAt) {
+      const now = Date.now();
+      const cacheAge = now - this.cachedCredentialsAt;
+
+      if (cacheAge < CREDENTIALS_CACHE_TTL_MS) {
+        // Cache is within TTL - also check file mtime
+        const sourcePath = this.loadedCredentialsPath || this.credentialsPath;
+        try {
+          const stat = fs.statSync(sourcePath);
+          if (stat.mtimeMs <= this.cachedCredentialsAt) {
+            // File hasn't been modified since we cached - use cache
+            return this.cachedCredentials;
+          }
+          // File has been modified, fall through to re-read
+          logger.debug('[loadCredentials] File modified since cache, re-reading');
+        } catch {
+          // File doesn't exist or can't stat - use cache
+          return this.cachedCredentials;
+        }
+      } else {
+        // Cache TTL expired, discard
+        logger.debug('[loadCredentials] Cache TTL expired, re-reading');
+      }
+
+      // Invalidate cached credentials
+      this.cachedCredentials = null;
+      this.cachedCredentialsAt = null;
     }
 
-    // Check multiple possible paths
-    const possiblePaths = [
+    // Build unique possible paths (deduplicate)
+    const rawPaths = [
       this.credentialsPath,
-      path.join(os.homedir(), '.gemini', 'oauth_creds.json'),
       path.join(os.homedir(), '.config', 'gemini', 'oauth_creds.json'),
     ];
+    const possiblePaths = [...new Set(rawPaths)];
 
     for (const credPath of possiblePaths) {
       try {
@@ -361,6 +399,8 @@ export class GeminiUsageService {
           // Handle different credential formats
           if (creds.access_token || creds.refresh_token) {
             this.cachedCredentials = creds;
+            this.cachedCredentialsAt = Date.now();
+            this.loadedCredentialsPath = credPath;
             logger.info('[loadCredentials] Loaded from:', credPath);
             return creds;
           }
@@ -372,6 +412,8 @@ export class GeminiUsageService {
               client_id: clientCreds.client_id,
               client_secret: clientCreds.client_secret,
             };
+            this.cachedCredentialsAt = Date.now();
+            this.loadedCredentialsPath = credPath;
             return this.cachedCredentials;
           }
         }
@@ -387,14 +429,21 @@ export class GeminiUsageService {
    * Find the Gemini CLI binary path
    */
   private findGeminiBinaryPath(): string | null {
+    // Try 'which' on Unix-like systems, 'where' on Windows
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
     try {
-      // Try 'which' on Unix-like systems
-      const whichResult = execSync('which gemini 2>/dev/null', { encoding: 'utf8' }).trim();
-      if (whichResult && fs.existsSync(whichResult)) {
-        return whichResult;
+      const whichResult = execFileSync(whichCmd, ['gemini'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      // 'where' on Windows may return multiple lines; take the first
+      const firstLine = whichResult.split('\n')[0]?.trim();
+      if (firstLine && fs.existsSync(firstLine)) {
+        return firstLine;
       }
     } catch {
-      // Ignore errors from 'which'
+      // Ignore errors from 'which'/'where'
     }
 
     // Check common installation paths
@@ -554,27 +603,33 @@ export class GeminiUsageService {
       }
     }
 
-    // Try finding oauth2.js by searching in node_modules
-    try {
-      const searchResult = execSync(
-        `find ${baseDir}/.. -name "oauth2.js" -path "*gemini*" -path "*code_assist*" 2>/dev/null | head -1`,
-        { encoding: 'utf8', timeout: 5000 }
-      ).trim();
+    // Try finding oauth2.js by searching in node_modules (POSIX only)
+    if (process.platform !== 'win32') {
+      try {
+        const searchBase = path.resolve(baseDir, '..');
+        const searchResult = execFileSync(
+          'find',
+          [searchBase, '-name', 'oauth2.js', '-path', '*gemini*', '-path', '*code_assist*'],
+          { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }
+        )
+          .trim()
+          .split('\n')[0]; // Take first result
 
-      if (searchResult && fs.existsSync(searchResult)) {
-        logger.debug('[extractOAuthClientCredentials] Found via search:', searchResult);
-        const content = fs.readFileSync(searchResult, 'utf8');
-        const creds = this.parseOAuthCredentialsFromSource(content);
-        if (creds) {
-          this.cachedClientCredentials = creds;
-          logger.info(
-            '[extractOAuthClientCredentials] Extracted credentials from CLI (via search)'
-          );
-          return creds;
+        if (searchResult && fs.existsSync(searchResult)) {
+          logger.debug('[extractOAuthClientCredentials] Found via search:', searchResult);
+          const content = fs.readFileSync(searchResult, 'utf8');
+          const creds = this.parseOAuthCredentialsFromSource(content);
+          if (creds) {
+            this.cachedClientCredentials = creds;
+            logger.info(
+              '[extractOAuthClientCredentials] Extracted credentials from CLI (via search)'
+            );
+            return creds;
+          }
         }
+      } catch {
+        // Ignore search errors
       }
-    } catch {
-      // Ignore search errors
     }
 
     logger.warn('[extractOAuthClientCredentials] Could not extract credentials from CLI');
@@ -669,6 +724,7 @@ export class GeminiUsageService {
             refresh_token: creds.refresh_token,
             grant_type: 'refresh_token',
           }),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
 
         if (response.ok) {
@@ -685,13 +741,12 @@ export class GeminiUsageService {
               access_token: newAccessToken,
               expiry_date: Date.now() + expiresIn * 1000,
             };
+            this.cachedCredentialsAt = Date.now();
 
-            // Save back to file
+            // Save back to the file the credentials were loaded from
+            const writePath = this.loadedCredentialsPath || this.credentialsPath;
             try {
-              fs.writeFileSync(
-                this.credentialsPath,
-                JSON.stringify(this.cachedCredentials, null, 2)
-              );
+              fs.writeFileSync(writePath, JSON.stringify(this.cachedCredentials, null, 2));
             } catch (e) {
               logger.debug('[getValidAccessToken] Could not save refreshed token:', e);
             }
@@ -743,6 +798,7 @@ export class GeminiUsageService {
    */
   clearCache(): void {
     this.cachedCredentials = null;
+    this.cachedCredentialsAt = null;
     this.cachedClientCredentials = null;
   }
 }

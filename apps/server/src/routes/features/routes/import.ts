@@ -33,7 +33,7 @@ interface ConflictInfo {
   hasConflict: boolean;
 }
 
-export function createImportHandler(featureLoader: FeatureLoader) {
+export function createImportHandler(_featureLoader: FeatureLoader) {
   const exportService = getFeatureExportService();
 
   return async (req: Request, res: Response): Promise<void> => {

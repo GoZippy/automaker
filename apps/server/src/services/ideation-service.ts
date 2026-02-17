@@ -27,7 +27,6 @@ import type {
 } from '@automaker/types';
 import { DEFAULT_IDEATION_CONTEXT_SOURCES } from '@automaker/types';
 import {
-  getIdeationDir,
   getIdeasDir,
   getIdeaDir,
   getIdeaPath,
@@ -407,7 +406,9 @@ export class IdeationService {
         return [];
       }
 
-      const entries = (await secureFs.readdir(ideasDir, { withFileTypes: true })) as any[];
+      const entries = (await secureFs.readdir(ideasDir, {
+        withFileTypes: true,
+      })) as import('fs').Dirent[];
       const ideaDirs = entries.filter((entry) => entry.isDirectory());
 
       const ideas: Idea[] = [];
@@ -855,15 +856,26 @@ ${contextSection}${existingWorkSection}`;
       }
 
       return parsed
-        .map((item: any, index: number) => ({
-          id: this.generateId('sug'),
-          category,
-          title: item.title || `Suggestion ${index + 1}`,
-          description: item.description || '',
-          rationale: item.rationale || '',
-          priority: item.priority || 'medium',
-          relatedFiles: item.relatedFiles || [],
-        }))
+        .map(
+          (
+            item: {
+              title?: string;
+              description?: string;
+              rationale?: string;
+              priority?: 'low' | 'medium' | 'high';
+              relatedFiles?: string[];
+            },
+            index: number
+          ) => ({
+            id: this.generateId('sug'),
+            category,
+            title: item.title || `Suggestion ${index + 1}`,
+            description: item.description || '',
+            rationale: item.rationale || '',
+            priority: item.priority || ('medium' as const),
+            relatedFiles: item.relatedFiles || [],
+          })
+        )
         .slice(0, count);
     } catch (error) {
       logger.warn('Failed to parse JSON response:', error);
@@ -1705,7 +1717,9 @@ ${contextSection}${existingWorkSection}`;
     const results: AnalysisFileInfo[] = [];
 
     try {
-      const entries = (await secureFs.readdir(dirPath, { withFileTypes: true })) as any[];
+      const entries = (await secureFs.readdir(dirPath, {
+        withFileTypes: true,
+      })) as import('fs').Dirent[];
 
       for (const entry of entries) {
         if (entry.isDirectory()) {

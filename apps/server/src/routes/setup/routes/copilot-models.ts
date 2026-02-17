@@ -10,9 +10,6 @@ import type { Request, Response } from 'express';
 import { CopilotProvider } from '../../../providers/copilot-provider.js';
 import { getErrorMessage, logError } from '../common.js';
 import type { ModelDefinition } from '@automaker/types';
-import { createLogger } from '@automaker/utils';
-
-const logger = createLogger('CopilotModelsRoute');
 
 // Singleton provider instance for caching
 let providerInstance: CopilotProvider | null = null;

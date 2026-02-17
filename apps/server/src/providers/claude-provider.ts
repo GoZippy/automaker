@@ -5,7 +5,7 @@
  * with the provider architecture.
  */
 
-import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BaseProvider } from './base-provider.js';
 import { classifyError, getUserFriendlyErrorMessage, createLogger } from '@automaker/utils';
 
@@ -31,31 +31,6 @@ import type {
   InstallationStatus,
   ModelDefinition,
 } from './types.js';
-
-// Explicit allowlist of environment variables to pass to the SDK.
-// Only these vars are passed - nothing else from process.env leaks through.
-const ALLOWED_ENV_VARS = [
-  // Authentication
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  // Endpoint configuration
-  'ANTHROPIC_BASE_URL',
-  'API_TIMEOUT_MS',
-  // Model mappings
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  // Traffic control
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-  // System vars (always from process.env)
-  'PATH',
-  'HOME',
-  'SHELL',
-  'TERM',
-  'USER',
-  'LANG',
-  'LC_ALL',
-];
 
 // System vars are always passed from process.env regardless of profile
 const SYSTEM_ENV_VARS = ['PATH', 'HOME', 'SHELL', 'TERM', 'USER', 'LANG', 'LC_ALL'];
@@ -258,7 +233,7 @@ export class ClaudeProvider extends BaseProvider {
     };
 
     // Build prompt payload
-    let promptPayload: string | AsyncIterable<any>;
+    let promptPayload: string | AsyncIterable<SDKUserMessage>;
 
     if (Array.isArray(prompt)) {
       // Multi-part prompt (with images)
@@ -317,12 +292,16 @@ export class ClaudeProvider extends BaseProvider {
         ? `${userMessage}\n\nTip: If you're running multiple features in auto-mode, consider reducing concurrency (maxConcurrency setting) to avoid hitting rate limits.`
         : userMessage;
 
-      const enhancedError = new Error(message);
-      (enhancedError as any).originalError = error;
-      (enhancedError as any).type = errorInfo.type;
+      const enhancedError = new Error(message) as Error & {
+        originalError: unknown;
+        type: string;
+        retryAfter?: number;
+      };
+      enhancedError.originalError = error;
+      enhancedError.type = errorInfo.type;
 
       if (errorInfo.isRateLimit) {
-        (enhancedError as any).retryAfter = errorInfo.retryAfter;
+        enhancedError.retryAfter = errorInfo.retryAfter;
       }
 
       throw enhancedError;

@@ -64,31 +64,8 @@ export function createZaiRoutes(
   router.post('/configure', async (req: Request, res: Response) => {
     try {
       const { apiToken, apiHost } = req.body;
-
-      if (apiToken !== undefined) {
-        // Set in-memory token
-        usageService.setApiToken(apiToken || '');
-
-        // Persist to credentials (deep merge happens in updateCredentials)
-        try {
-          await settingsService.updateCredentials({
-            apiKeys: { zai: apiToken || '' },
-          } as Parameters<typeof settingsService.updateCredentials>[0]);
-          logger.info('[configure] Saved z.ai API key to credentials');
-        } catch (persistError) {
-          logger.error('[configure] Failed to persist z.ai API key:', persistError);
-        }
-      }
-
-      if (apiHost) {
-        usageService.setApiHost(apiHost);
-      }
-
-      res.json({
-        success: true,
-        message: 'z.ai configuration updated',
-        isAvailable: usageService.isAvailable(),
-      });
+      const result = await usageService.configure({ apiToken, apiHost }, settingsService);
+      res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       logger.error('Error configuring z.ai:', error);
@@ -100,50 +77,8 @@ export function createZaiRoutes(
   router.post('/verify', async (req: Request, res: Response) => {
     try {
       const { apiKey } = req.body;
-
-      if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
-        res.json({
-          success: false,
-          authenticated: false,
-          error: 'Please provide an API key to test.',
-        });
-        return;
-      }
-
-      // Test the key by making a request to z.ai API
-      const quotaUrl =
-        process.env.Z_AI_QUOTA_URL ||
-        `${process.env.Z_AI_API_HOST ? `https://${process.env.Z_AI_API_HOST}` : 'https://api.z.ai'}/api/monitor/usage/quota/limit`;
-
-      logger.info(`[verify] Testing API key against: ${quotaUrl}`);
-
-      const response = await fetch(quotaUrl, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
-          Accept: 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        res.json({
-          success: true,
-          authenticated: true,
-          message: 'Connection successful! z.ai API responded.',
-        });
-      } else if (response.status === 401 || response.status === 403) {
-        res.json({
-          success: false,
-          authenticated: false,
-          error: 'Invalid API key. Please check your key and try again.',
-        });
-      } else {
-        res.json({
-          success: false,
-          authenticated: false,
-          error: `API request failed: ${response.status} ${response.statusText}`,
-        });
-      }
+      const result = await usageService.verifyApiKey(apiKey);
+      res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       logger.error('Error verifying z.ai API key:', error);

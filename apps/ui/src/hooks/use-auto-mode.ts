@@ -172,7 +172,10 @@ export function useAutoMode(worktree?: WorktreeInfo) {
           (backendIsRunning &&
             Array.isArray(backendRunningFeatures) &&
             backendRunningFeatures.length > 0 &&
-            !arraysEqual(backendRunningFeatures, runningAutoTasks));
+            !arraysEqual(backendRunningFeatures, runningAutoTasks)) ||
+          // Also sync when UI has stale running tasks but backend has none
+          // (handles server restart where features were reconciled to backlog/ready)
+          (!backendIsRunning && runningAutoTasks.length > 0 && backendRunningFeatures.length === 0);
 
         if (needsSync) {
           const worktreeDesc = branchName ? `worktree ${branchName}` : 'main worktree';

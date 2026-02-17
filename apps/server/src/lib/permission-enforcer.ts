@@ -12,11 +12,18 @@ export interface PermissionCheckResult {
   reason?: string;
 }
 
+/** Minimal shape of a Cursor tool call used for permission checking */
+interface CursorToolCall {
+  shellToolCall?: { args?: { command: string } };
+  readToolCall?: { args?: { path: string } };
+  writeToolCall?: { args?: { path: string } };
+}
+
 /**
  * Check if a tool call is allowed based on permissions
  */
 export function checkToolCallPermission(
-  toolCall: any,
+  toolCall: CursorToolCall,
   permissions: CursorCliConfigFile | null
 ): PermissionCheckResult {
   if (!permissions || !permissions.permissions) {
@@ -152,7 +159,11 @@ function matchesRule(toolName: string, rule: string): boolean {
 /**
  * Log permission violations
  */
-export function logPermissionViolation(toolCall: any, reason: string, sessionId?: string): void {
+export function logPermissionViolation(
+  toolCall: CursorToolCall,
+  reason: string,
+  sessionId?: string
+): void {
   const sessionIdStr = sessionId ? ` [${sessionId}]` : '';
 
   if (toolCall.shellToolCall?.args?.command) {

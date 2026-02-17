@@ -295,7 +295,6 @@ export class ClaudeUsageService {
           }
           // Don't fail if we have data - return it instead
           // Check cleaned output since raw output has ANSI codes between words
-          // eslint-disable-next-line no-control-regex
           const cleanedForCheck = output
             .replace(/\x1B\[(\d+)C/g, (_m: string, n: string) => ' '.repeat(parseInt(n, 10)))
             .replace(/\x1B\[[0-9;?]*[A-Za-z@]/g, '');
@@ -332,7 +331,6 @@ export class ClaudeUsageService {
         // Convert cursor forward (ESC[nC) to spaces first to preserve word boundaries,
         // then strip remaining ANSI sequences. Without this, the Claude CLI TUI output
         // like "Current week (all models)" becomes "Currentweek(allmodels)".
-        // eslint-disable-next-line no-control-regex
         const cleanOutput = output
           .replace(/\x1B\[(\d+)C/g, (_match: string, n: string) => ' '.repeat(parseInt(n, 10)))
           .replace(/\x1B\[[0-9;?]*[A-Za-z@]/g, '');
@@ -492,7 +490,6 @@ export class ClaudeUsageService {
     // First, convert cursor movement sequences to whitespace to preserve word boundaries.
     // The Claude CLI TUI uses ESC[nC (cursor forward) instead of actual spaces between words.
     // Without this, "Current week (all models)" becomes "Currentweek(allmodels)" after stripping.
-    // eslint-disable-next-line no-control-regex
     let clean = text
       // Cursor forward (CSI n C): replace with n spaces to preserve word separation
       .replace(/\x1B\[(\d+)C/g, (_match, n) => ' '.repeat(parseInt(n, 10)))

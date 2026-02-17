@@ -158,10 +158,7 @@ export class AutoLoopCoordinator {
     const projectState = this.autoLoopsByProject.get(worktreeKey);
     if (!projectState) return;
     const { projectPath, branchName } = projectState.config;
-    let iterationCount = 0;
-
     while (projectState.isRunning && !projectState.abortController.signal.aborted) {
-      iterationCount++;
       try {
         const runningCount = await this.getRunningCountForWorktree(projectPath, branchName);
         if (runningCount >= projectState.config.maxConcurrency) {

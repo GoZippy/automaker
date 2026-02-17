@@ -303,7 +303,7 @@ app.use(
           callback(null, origin);
           return;
         }
-      } catch (err) {
+      } catch {
         // Ignore URL parsing errors
       }
 
@@ -376,7 +376,7 @@ eventHookService.initialize(events, settingsService, eventHistoryService, featur
   let globalSettings: Awaited<ReturnType<typeof settingsService.getGlobalSettings>> | null = null;
   try {
     globalSettings = await settingsService.getGlobalSettings();
-  } catch (err) {
+  } catch {
     logger.warn('Failed to load global settings, using defaults');
   }
 
@@ -394,7 +394,7 @@ eventHookService.initialize(events, settingsService, eventHistoryService, featur
       const enableRequestLog = globalSettings.enableRequestLogging ?? true;
       setRequestLoggingEnabled(enableRequestLog);
       logger.info(`HTTP request logging: ${enableRequestLog ? 'enabled' : 'disabled'}`);
-    } catch (err) {
+    } catch {
       logger.warn('Failed to apply logging settings, using defaults');
     }
   }
@@ -420,6 +420,22 @@ eventHookService.initialize(events, settingsService, eventHistoryService, featur
           );
         } else {
           logger.info('[STARTUP] Feature state reconciliation complete - no stale states found');
+        }
+
+        // Resume interrupted features in the background after reconciliation.
+        // This uses the saved execution state to identify features that were running
+        // before the restart (their statuses have been reset to ready/backlog by
+        // reconciliation above). Running in background so it doesn't block startup.
+        if (totalReconciled > 0) {
+          for (const project of globalSettings.projects) {
+            autoModeService.resumeInterruptedFeatures(project.path).catch((err) => {
+              logger.warn(
+                `[STARTUP] Failed to resume interrupted features for ${project.path}:`,
+                err
+              );
+            });
+          }
+          logger.info('[STARTUP] Initiated background resume of interrupted features');
         }
       }
     } catch (err) {
@@ -581,7 +597,7 @@ wss.on('connection', (ws: WebSocket) => {
       logger.info('Sending event to client:', {
         type,
         messageLength: message.length,
-        sessionId: (payload as any)?.sessionId,
+        sessionId: (payload as Record<string, unknown>)?.sessionId,
       });
       ws.send(message);
     } else {

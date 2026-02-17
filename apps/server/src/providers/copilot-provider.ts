@@ -85,10 +85,6 @@ interface SdkToolExecutionEndEvent extends SdkEvent {
   };
 }
 
-interface SdkSessionIdleEvent extends SdkEvent {
-  type: 'session.idle';
-}
-
 interface SdkSessionErrorEvent extends SdkEvent {
   type: 'session.error';
   data: {

@@ -37,9 +37,12 @@ export function createGeminiRoutes(): Router {
       const provider = new GeminiProvider();
       const status = await provider.detectInstallation();
 
-      const authMethod =
-        (status as any).authMethod ||
-        (status.authenticated ? (status.hasApiKey ? 'api_key' : 'cli_login') : 'none');
+      // Derive authMethod from typed InstallationStatus fields
+      const authMethod = status.authenticated
+        ? status.hasApiKey
+          ? 'api_key'
+          : 'cli_login'
+        : 'none';
 
       res.json({
         success: true,
@@ -48,7 +51,7 @@ export function createGeminiRoutes(): Router {
         path: status.path || null,
         authenticated: status.authenticated || false,
         authMethod,
-        hasCredentialsFile: (status as any).hasCredentialsFile || false,
+        hasCredentialsFile: false,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

@@ -321,6 +321,8 @@ const initialState: AppState = {
   codexUsageLastUpdated: null,
   zaiUsage: null,
   zaiUsageLastUpdated: null,
+  geminiUsage: null,
+  geminiUsageLastUpdated: null,
   codexModels: [],
   codexModelsLoading: false,
   codexModelsError: null,
@@ -2409,6 +2411,13 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
 
   // z.ai Usage Tracking actions
   setZaiUsage: (usage) => set({ zaiUsage: usage, zaiUsageLastUpdated: usage ? Date.now() : null }),
+
+  // Gemini Usage Tracking actions
+  setGeminiUsage: (usage, lastUpdated) =>
+    set({
+      geminiUsage: usage,
+      geminiUsageLastUpdated: lastUpdated ?? (usage ? Date.now() : null),
+    }),
 
   // Codex Models actions
   fetchCodexModels: async (forceRefresh = false) => {

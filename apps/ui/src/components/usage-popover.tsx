@@ -340,7 +340,7 @@ export function UsagePopover() {
   // Calculate max percentage for header button
   const claudeSessionPercentage = claudeUsage?.sessionPercentage || 0;
 
-  const codexMaxPercentage = codexUsage?.rateLimits
+  const _codexMaxPercentage = codexUsage?.rateLimits
     ? Math.max(
         codexUsage.rateLimits.primary?.usedPercent || 0,
         codexUsage.rateLimits.secondary?.usedPercent || 0
@@ -369,7 +369,7 @@ export function UsagePopover() {
     codexSecondaryWindowMinutes && codexPrimaryWindowMinutes
       ? Math.min(codexPrimaryWindowMinutes, codexSecondaryWindowMinutes)
       : (codexSecondaryWindowMinutes ?? codexPrimaryWindowMinutes);
-  const codexWindowLabel = codexWindowMinutes
+  const _codexWindowLabel = codexWindowMinutes
     ? getCodexWindowLabel(codexWindowMinutes).title
     : 'Window';
   const codexWindowUsage =
@@ -408,16 +408,16 @@ export function UsagePopover() {
               }
             : null;
 
-  const statusColor = getStatusInfo(indicatorInfo.percentage).color;
-  const ProviderIcon = indicatorInfo.icon;
+  const statusColor = indicatorInfo ? getStatusInfo(indicatorInfo.percentage).color : '';
+  const ProviderIcon = indicatorInfo?.icon;
 
   const trigger = (
     <Button variant="ghost" size="sm" className="h-9 gap-2 bg-secondary border border-border px-3">
-      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && (
+      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && ProviderIcon && (
         <ProviderIcon className={cn('w-4 h-4', statusColor)} />
       )}
       <span className="text-sm font-medium">Usage</span>
-      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && (
+      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && indicatorInfo && (
         <div
           title={indicatorInfo.title}
           className={cn(

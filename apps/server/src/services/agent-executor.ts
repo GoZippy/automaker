@@ -444,17 +444,11 @@ export class AgentExecutor {
     callbacks: AgentExecutorCallbacks
   ): Promise<{ responseText: string; tasksCompleted: number }> {
     const {
-      workDir,
       featureId,
       projectPath,
-      abortController,
       branchName = null,
       planningMode = 'skip',
       provider,
-      effectiveBareModel,
-      credentials,
-      claudeCompatibleProvider,
-      mcpServers,
       sdkOptions,
     } = options;
     let responseText = initialResponseText,

@@ -5,7 +5,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
 import { useAppStore } from '@/store/app-store';
 import { AnthropicIcon, OpenAIIcon, ZaiIcon, GeminiIcon } from '@/components/ui/provider-icon';
-import type { GeminiUsage } from '@/store/app-store';
 import { getExpectedWeeklyPacePercentage, getPaceStatusLabel } from '@/store/utils/usage-utils';
 
 interface MobileUsageBarProps {
@@ -41,6 +40,11 @@ function formatResetTime(unixTimestamp: number, isMilliseconds = false): string 
   const date = new Date(isMilliseconds ? unixTimestamp : unixTimestamp * 1000);
   const now = new Date();
   const diff = date.getTime() - now.getTime();
+
+  // Handle past timestamps (negative diff)
+  if (diff <= 0) {
+    return 'Resetting soon';
+  }
 
   if (diff < 3600000) {
     const mins = Math.ceil(diff / 60000);
@@ -184,12 +188,11 @@ export function MobileUsageBar({
   const { claudeUsage, claudeUsageLastUpdated, setClaudeUsage } = useAppStore();
   const { codexUsage, codexUsageLastUpdated, setCodexUsage } = useAppStore();
   const { zaiUsage, zaiUsageLastUpdated, setZaiUsage } = useAppStore();
+  const { geminiUsage, geminiUsageLastUpdated, setGeminiUsage } = useAppStore();
   const [isClaudeLoading, setIsClaudeLoading] = useState(false);
   const [isCodexLoading, setIsCodexLoading] = useState(false);
   const [isZaiLoading, setIsZaiLoading] = useState(false);
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
-  const [geminiUsage, setGeminiUsage] = useState<GeminiUsage | null>(null);
-  const [geminiUsageLastUpdated, setGeminiUsageLastUpdated] = useState<number | null>(null);
 
   // Check if data is stale (older than 2 minutes)
   const isClaudeStale =
@@ -254,15 +257,14 @@ export function MobileUsageBar({
       if (!api.gemini) return;
       const data = await api.gemini.getUsage();
       if (!('error' in data)) {
-        setGeminiUsage(data);
-        setGeminiUsageLastUpdated(Date.now());
+        setGeminiUsage(data, Date.now());
       }
     } catch {
       // Silently fail - usage display is optional
     } finally {
       setIsGeminiLoading(false);
     }
-  }, []);
+  }, [setGeminiUsage]);
 
   const getCodexWindowLabel = (durationMins: number) => {
     if (durationMins < 60) return `${durationMins}m Window`;

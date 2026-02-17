@@ -195,9 +195,10 @@ export class FeatureLoader {
       }
 
       // Read all feature directories
+      // secureFs.readdir returns Dirent[] but typed as generic; cast to access isDirectory()
       const entries = (await secureFs.readdir(featuresDir, {
         withFileTypes: true,
-      })) as any[];
+      })) as import('fs').Dirent[];
       const featureDirs = entries.filter((entry) => entry.isDirectory());
 
       // Load all features concurrently with automatic recovery from backups

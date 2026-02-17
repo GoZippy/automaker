@@ -10,7 +10,6 @@
  */
 
 import path from 'path';
-import type { Feature } from '@automaker/types';
 import { createLogger } from '@automaker/utils';
 import type { EventEmitter } from '../../lib/events.js';
 import { TypedEventBus } from '../typed-event-bus.js';

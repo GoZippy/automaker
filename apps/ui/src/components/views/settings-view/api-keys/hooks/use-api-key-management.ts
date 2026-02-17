@@ -1,4 +1,4 @@
-// @ts-nocheck - API key management state with validation and persistence
+// API key management state with validation and persistence
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createLogger } from '@automaker/utils/logger';
@@ -23,20 +23,44 @@ interface ApiKeyStatus {
   hasZaiKey: boolean;
 }
 
+/** Shape of the configure API response */
+interface ConfigureResponse {
+  success?: boolean;
+  isAvailable?: boolean;
+  error?: string;
+}
+
+/** Shape of a verify API response */
+interface VerifyResponse {
+  success?: boolean;
+  authenticated?: boolean;
+  message?: string;
+  error?: string;
+}
+
+/** Shape of an API key status response from the env check */
+interface ApiKeyStatusResponse {
+  success: boolean;
+  hasAnthropicKey: boolean;
+  hasGoogleKey: boolean;
+  hasOpenaiKey: boolean;
+  hasZaiKey?: boolean;
+}
+
 /**
  * Custom hook for managing API key state and operations
  * Handles input values, visibility toggles, connection testing, and saving
  */
 export function useApiKeyManagement() {
   const { apiKeys, setApiKeys } = useAppStore();
-  const { setZaiAuthStatus } = useSetupStore();
+  const { setZaiAuthStatus, zaiAuthStatus } = useSetupStore();
   const queryClient = useQueryClient();
 
   // API key values
-  const [anthropicKey, setAnthropicKey] = useState(apiKeys.anthropic);
-  const [googleKey, setGoogleKey] = useState(apiKeys.google);
-  const [openaiKey, setOpenaiKey] = useState(apiKeys.openai);
-  const [zaiKey, setZaiKey] = useState(apiKeys.zai);
+  const [anthropicKey, setAnthropicKey] = useState<string>(apiKeys.anthropic);
+  const [googleKey, setGoogleKey] = useState<string>(apiKeys.google);
+  const [openaiKey, setOpenaiKey] = useState<string>(apiKeys.openai);
+  const [zaiKey, setZaiKey] = useState<string>(apiKeys.zai);
 
   // Visibility toggles
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
@@ -74,7 +98,7 @@ export function useApiKeyManagement() {
       const api = getElectronAPI();
       if (api?.setup?.getApiKeys) {
         try {
-          const status = await api.setup.getApiKeys();
+          const status: ApiKeyStatusResponse = await api.setup.getApiKeys();
           if (status.success) {
             setApiKeyStatus({
               hasAnthropicKey: status.hasAnthropicKey,
@@ -92,7 +116,7 @@ export function useApiKeyManagement() {
   }, []);
 
   // Test Anthropic/Claude connection
-  const handleTestAnthropicConnection = async () => {
+  const handleTestAnthropicConnection = async (): Promise<void> => {
     // Validate input first
     if (!anthropicKey || anthropicKey.trim().length === 0) {
       setTestResult({
@@ -106,7 +130,7 @@ export function useApiKeyManagement() {
     setTestResult(null);
 
     try {
-      const api = getElectronAPI();
+      const api = getHttpApiClient();
       // Pass the current input value to test unsaved keys
       const data = await api.setup.verifyClaudeAuth('api_key', anthropicKey);
 
@@ -133,7 +157,7 @@ export function useApiKeyManagement() {
 
   // Test Google/Gemini connection
   // TODO: Add backend endpoint for Gemini API key verification
-  const handleTestGeminiConnection = async () => {
+  const handleTestGeminiConnection = async (): Promise<void> => {
     setTestingGeminiConnection(true);
     setGeminiTestResult(null);
 
@@ -157,12 +181,12 @@ export function useApiKeyManagement() {
   };
 
   // Test OpenAI/Codex connection
-  const handleTestOpenaiConnection = async () => {
+  const handleTestOpenaiConnection = async (): Promise<void> => {
     setTestingOpenaiConnection(true);
     setOpenaiTestResult(null);
 
     try {
-      const api = getElectronAPI();
+      const api = getHttpApiClient();
       const data = await api.setup.verifyCodexAuth('api_key', openaiKey);
 
       if (data.success && data.authenticated) {
@@ -187,7 +211,7 @@ export function useApiKeyManagement() {
   };
 
   // Test z.ai connection
-  const handleTestZaiConnection = async () => {
+  const handleTestZaiConnection = async (): Promise<void> => {
     setTestingZaiConnection(true);
     setZaiTestResult(null);
 
@@ -204,7 +228,7 @@ export function useApiKeyManagement() {
     try {
       const api = getElectronAPI();
       // Use the verify endpoint to test the key without storing it
-      const response = await api.zai?.verify(zaiKey);
+      const response: VerifyResponse | undefined = await api.zai?.verify(zaiKey);
 
       if (response?.success && response?.authenticated) {
         setZaiTestResult({
@@ -228,42 +252,70 @@ export function useApiKeyManagement() {
   };
 
   // Save API keys
-  const handleSave = async () => {
-    setApiKeys({
-      anthropic: anthropicKey,
-      google: googleKey,
-      openai: openaiKey,
-      zai: zaiKey,
-    });
-
+  const handleSave = async (): Promise<void> => {
     // Configure z.ai service on the server with the new key
     if (zaiKey && zaiKey.trim().length > 0) {
       try {
         const api = getHttpApiClient();
-        const result = await api.zai.configure(zaiKey.trim());
+        const result: ConfigureResponse = await api.zai.configure(zaiKey.trim());
 
-        if (result.success || result.isAvailable) {
+        if (result.success) {
+          // Only persist to local store after server confirms success
+          setApiKeys({
+            anthropic: anthropicKey,
+            google: googleKey,
+            openai: openaiKey,
+            zai: zaiKey,
+          });
+
+          // Preserve the existing hasEnvApiKey flag from current auth status
+          const currentHasEnvApiKey = zaiAuthStatus?.hasEnvApiKey ?? false;
+
           // Update z.ai auth status in the store
           setZaiAuthStatus({
             authenticated: true,
             method: 'api_key' as ZaiAuthMethod,
             hasApiKey: true,
-            hasEnvApiKey: false,
+            hasEnvApiKey: currentHasEnvApiKey,
           });
           // Invalidate the z.ai usage query so it refetches with the new key
           await queryClient.invalidateQueries({ queryKey: queryKeys.usage.zai() });
           logger.info('z.ai API key configured successfully');
+        } else {
+          // Server config failed - still save other keys but log the issue
+          logger.error('z.ai API key configuration failed on server');
+          setApiKeys({
+            anthropic: anthropicKey,
+            google: googleKey,
+            openai: openaiKey,
+            zai: zaiKey,
+          });
         }
       } catch (error) {
         logger.error('Failed to configure z.ai API key:', error);
+        // Still save other keys even if z.ai config fails
+        setApiKeys({
+          anthropic: anthropicKey,
+          google: googleKey,
+          openai: openaiKey,
+          zai: zaiKey,
+        });
       }
     } else {
+      // Save keys (z.ai key is empty/removed)
+      setApiKeys({
+        anthropic: anthropicKey,
+        google: googleKey,
+        openai: openaiKey,
+        zai: zaiKey,
+      });
+
       // Clear z.ai auth status if key is removed
       setZaiAuthStatus({
         authenticated: false,
         method: 'none' as ZaiAuthMethod,
         hasApiKey: false,
-        hasEnvApiKey: false,
+        hasEnvApiKey: zaiAuthStatus?.hasEnvApiKey ?? false,
       });
       // Invalidate the query to clear any cached data
       await queryClient.invalidateQueries({ queryKey: queryKeys.usage.zai() });

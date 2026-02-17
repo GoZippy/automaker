@@ -108,22 +108,41 @@ export function useProviderAuthInit() {
     try {
       const result = await api.zai.getStatus();
       if (result.success || result.available !== undefined) {
+        const available = !!result.available;
+        const hasApiKey = !!(result.hasApiKey ?? result.available);
+        const hasEnvApiKey = !!(result.hasEnvApiKey ?? false);
+
         let method: ZaiAuthMethod = 'none';
-        if (result.hasEnvApiKey) {
+        if (hasEnvApiKey) {
           method = 'api_key_env';
-        } else if (result.hasApiKey || result.available) {
+        } else if (hasApiKey || available) {
           method = 'api_key';
         }
 
         setZaiAuthStatus({
-          authenticated: result.available,
+          authenticated: available,
           method,
-          hasApiKey: result.hasApiKey ?? result.available,
-          hasEnvApiKey: result.hasEnvApiKey ?? false,
+          hasApiKey,
+          hasEnvApiKey,
+        });
+      } else {
+        // Non-success path - set default unauthenticated status
+        setZaiAuthStatus({
+          authenticated: false,
+          method: 'none',
+          hasApiKey: false,
+          hasEnvApiKey: false,
         });
       }
     } catch (error) {
       logger.error('Failed to init z.ai auth status:', error);
+      // Set default status on error to prevent stale state
+      setZaiAuthStatus({
+        authenticated: false,
+        method: 'none',
+        hasApiKey: false,
+        hasEnvApiKey: false,
+      });
     }
 
     // 4. Gemini Auth Status
@@ -134,7 +153,7 @@ export function useProviderAuthInit() {
         setGeminiCliStatus({
           installed: result.installed ?? false,
           version: result.version,
-          path: result.status,
+          path: result.path,
         });
 
         // Set Auth status - always set a status to mark initialization as complete

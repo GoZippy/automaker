@@ -20,7 +20,6 @@ import type {
   ProviderMessage,
   InstallationStatus,
   ModelDefinition,
-  ContentBlock,
 } from './types.js';
 import { validateBareModelId } from '@automaker/types';
 import { GEMINI_MODEL_MAP, type GeminiAuthStatus } from '@automaker/types';

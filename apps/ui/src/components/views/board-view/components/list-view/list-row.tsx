@@ -209,9 +209,15 @@ export const ListRow = memo(function ListRow({
   blockingDependencies = [],
   className,
 }: ListRowProps) {
-  // A card in waiting_approval should not display as "actively running" even if
-  // it's still in the runningAutoTasks list. The waiting_approval UI takes precedence.
-  const isActivelyRunning = isCurrentAutoTask && feature.status !== 'waiting_approval';
+  // A row should only display as "actively running" if it's both in the
+  // runningAutoTasks list AND in an execution-compatible status. Features in resting
+  // states (backlog, ready, waiting_approval, verified, completed) should never
+  // show running controls, even if they appear in runningAutoTasks due to stale
+  // state (e.g., after a server restart that reconciled features back to backlog).
+  const isInExecutionState =
+    feature.status === 'in_progress' ||
+    (typeof feature.status === 'string' && feature.status.startsWith('pipeline_'));
+  const isActivelyRunning = isCurrentAutoTask && isInExecutionState;
 
   const handleRowClick = useCallback(
     (e: React.MouseEvent) => {

@@ -69,6 +69,7 @@ interface CursorToolHandler<TArgs = unknown, TResult = unknown> {
  * Registry of Cursor tool handlers
  * Each handler knows how to normalize its specific tool call type
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- handler registry stores heterogeneous tool type parameters
 const CURSOR_TOOL_HANDLERS: Record<string, CursorToolHandler<any, any>> = {
   readToolCall: {
     name: 'Read',
@@ -878,7 +879,7 @@ export class CursorProvider extends CliProvider {
     logger.debug(`CursorProvider.executeQuery called with model: "${options.model}"`);
 
     // Get effective permissions for this project
-    const effectivePermissions = await getEffectivePermissions(options.cwd || process.cwd());
+    await getEffectivePermissions(options.cwd || process.cwd());
 
     // Debug: log raw events when AUTOMAKER_DEBUG_RAW_OUTPUT is enabled
     const debugRawEvents =

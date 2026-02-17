@@ -51,7 +51,7 @@ export function createDeleteHandler() {
       // Remove the worktree (using array arguments to prevent injection)
       try {
         await execGitCommand(['worktree', 'remove', worktreePath, '--force'], projectPath);
-      } catch (error) {
+      } catch {
         // Try with prune if remove fails
         await execGitCommand(['worktree', 'prune'], projectPath);
       }
