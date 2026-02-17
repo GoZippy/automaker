@@ -132,6 +132,13 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         const api = getElectronAPI();
         if (!api.features) {
           logger.error('Features API not available');
+          // Rollback optimistic deletion since we can't persist
+          if (previousFeatures) {
+            queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+          }
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.features.all(currentProject.path),
+          });
           return;
         }
 
