@@ -92,6 +92,9 @@ export function createListBranchesHandler() {
               // Skip HEAD pointers like "origin/HEAD"
               if (cleanName.includes('/HEAD')) return;
 
+              // Skip bare remote names without a branch (e.g. "origin" by itself)
+              if (!cleanName.includes('/')) return;
+
               // Only add remote branches if a branch with the exact same name isn't already
               // in the list. This avoids duplicates if a local branch is named like a remote one.
               // Note: We intentionally include remote branches even when a local branch with the

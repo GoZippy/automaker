@@ -87,10 +87,18 @@ export function useCommitWorktree() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ worktreePath, message }: { worktreePath: string; message: string }) => {
+    mutationFn: async ({
+      worktreePath,
+      message,
+      files,
+    }: {
+      worktreePath: string;
+      message: string;
+      files?: string[];
+    }) => {
       const api = getElectronAPI();
       if (!api.worktree) throw new Error('Worktree API not available');
-      const result = await api.worktree.commit(worktreePath, message);
+      const result = await api.worktree.commit(worktreePath, message, files);
       if (!result.success) {
         throw new Error(result.error || 'Failed to commit changes');
       }
@@ -276,11 +284,29 @@ export function useMergeWorktree(projectPath: string) {
 }
 
 /**
+ * Result from the switch branch API call
+ */
+interface SwitchBranchResult {
+  previousBranch: string;
+  currentBranch: string;
+  message: string;
+  hasConflicts?: boolean;
+  stashedChanges?: boolean;
+}
+
+/**
  * Switch to a different branch
  *
+ * Automatically stashes local changes before switching and reapplies them after.
+ * If the reapply causes merge conflicts, the onConflict callback is called so
+ * the UI can create a conflict resolution task.
+ *
+ * @param options.onConflict - Callback when merge conflicts occur after stash reapply
  * @returns Mutation for switching branches
  */
-export function useSwitchBranch() {
+export function useSwitchBranch(options?: {
+  onConflict?: (info: { worktreePath: string; branchName: string; previousBranch: string }) => void;
+}) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -290,18 +316,33 @@ export function useSwitchBranch() {
     }: {
       worktreePath: string;
       branchName: string;
-    }) => {
+    }): Promise<SwitchBranchResult> => {
       const api = getElectronAPI();
       if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.switchBranch(worktreePath, branchName);
       if (!result.success) {
         throw new Error(result.error || 'Failed to switch branch');
       }
-      return result.result;
+      return result.result as SwitchBranchResult;
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['worktrees'] });
-      toast.success('Switched branch');
+
+      if (data?.hasConflicts) {
+        toast.warning('Switched branch with conflicts', {
+          description: data.message,
+          duration: 8000,
+        });
+        // Trigger conflict resolution callback
+        options?.onConflict?.({
+          worktreePath: variables.worktreePath,
+          branchName: data.currentBranch,
+          previousBranch: data.previousBranch,
+        });
+      } else {
+        const desc = data?.stashedChanges ? 'Local changes were stashed and reapplied' : undefined;
+        toast.success('Switched branch', { description: desc });
+      }
     },
     onError: (error: Error) => {
       toast.error('Failed to switch branch', {

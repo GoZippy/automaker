@@ -864,7 +864,8 @@ export interface WorktreeAPI {
   // Commit changes in a worktree
   commit: (
     worktreePath: string,
-    message: string
+    message: string,
+    files?: string[]
   ) => Promise<{
     success: boolean;
     result?: {

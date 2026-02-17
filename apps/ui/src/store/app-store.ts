@@ -6,6 +6,7 @@ import { getHttpApiClient } from '@/lib/http-api-client';
 import { createLogger } from '@automaker/utils/logger';
 // Note: setItem/getItem moved to ./utils/theme-utils.ts
 import { UI_SANS_FONT_OPTIONS, UI_MONO_FONT_OPTIONS } from '@/config/ui-font-options';
+import { loadFont } from '@/styles/font-imports';
 import type {
   FeatureImagePath,
   FeatureTextFilePath,
@@ -663,12 +664,14 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
   },
   setPreviewTheme: (theme) => set({ previewTheme: theme }),
 
-  // Font actions
+  // Font actions - triggers lazy font loading for on-demand fonts
   setFontSans: (fontFamily) => {
+    if (fontFamily) loadFont(fontFamily);
     set({ fontFamilySans: fontFamily });
     saveFontSansToStorage(fontFamily);
   },
   setFontMono: (fontFamily) => {
+    if (fontFamily) loadFont(fontFamily);
     set({ fontFamilyMono: fontFamily });
     saveFontMonoToStorage(fontFamily);
   },

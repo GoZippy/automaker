@@ -14,7 +14,12 @@ import type {
   TestRunnerOutputEvent,
   TestRunnerCompletedEvent,
 } from '@/types/electron';
-import type { WorktreePanelProps, WorktreeInfo, TestSessionInfo } from './types';
+import type {
+  WorktreePanelProps,
+  WorktreeInfo,
+  TestSessionInfo,
+  BranchSwitchConflictInfo,
+} from './types';
 import {
   useWorktrees,
   useDevServers,
@@ -50,6 +55,7 @@ export function WorktreePanel({
   onAddressPRComments,
   onResolveConflicts,
   onCreateMergeConflictResolutionFeature,
+  onBranchSwitchConflict,
   onBranchDeletedDuringMerge,
   onRemovedWorktrees,
   runningFeatureIds = [],
@@ -101,7 +107,9 @@ export function WorktreePanel({
     handleOpenInIntegratedTerminal,
     handleOpenInEditor,
     handleOpenInExternalTerminal,
-  } = useWorktreeActions();
+  } = useWorktreeActions({
+    onBranchSwitchConflict: onBranchSwitchConflict,
+  });
 
   const { hasRunningFeatures } = useRunningFeatures({
     runningFeatureIds,

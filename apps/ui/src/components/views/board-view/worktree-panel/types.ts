@@ -80,6 +80,12 @@ export interface MergeConflictInfo {
   targetWorktreePath: string;
 }
 
+export interface BranchSwitchConflictInfo {
+  worktreePath: string;
+  branchName: string;
+  previousBranch: string;
+}
+
 export interface WorktreePanelProps {
   projectPath: string;
   onCreateWorktree: () => void;
@@ -90,6 +96,8 @@ export interface WorktreePanelProps {
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onResolveConflicts: (worktree: WorktreeInfo) => void;
   onCreateMergeConflictResolutionFeature?: (conflictInfo: MergeConflictInfo) => void;
+  /** Called when branch switch stash reapply results in merge conflicts */
+  onBranchSwitchConflict?: (conflictInfo: BranchSwitchConflictInfo) => void;
   /** Called when a branch is deleted during merge - features should be reassigned to main */
   onBranchDeletedDuringMerge?: (branchName: string) => void;
   onRemovedWorktrees?: (removedWorktrees: Array<{ path: string; branch: string }>) => void;

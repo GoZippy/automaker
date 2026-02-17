@@ -13,12 +13,23 @@ import type { WorktreeInfo } from '../types';
 
 const logger = createLogger('WorktreeActions');
 
-export function useWorktreeActions() {
+interface UseWorktreeActionsOptions {
+  /** Callback when merge conflicts occur after branch switch stash reapply */
+  onBranchSwitchConflict?: (info: {
+    worktreePath: string;
+    branchName: string;
+    previousBranch: string;
+  }) => void;
+}
+
+export function useWorktreeActions(options?: UseWorktreeActionsOptions) {
   const navigate = useNavigate();
   const [isActivating, setIsActivating] = useState(false);
 
   // Use React Query mutations
-  const switchBranchMutation = useSwitchBranch();
+  const switchBranchMutation = useSwitchBranch({
+    onConflict: options?.onBranchSwitchConflict,
+  });
   const pullMutation = usePullWorktree();
   const pushMutation = usePushWorktree();
   const openInEditorMutation = useOpenInEditor();

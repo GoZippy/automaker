@@ -51,6 +51,9 @@ import { DEFAULT_FONT_VALUE } from '@/config/ui-font-options';
 import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
 import { getApiKey, getSessionToken, getServerUrlSync } from '@/lib/http-api-client';
+import { useIsMobile } from '@/hooks/use-media-query';
+import { useVirtualKeyboardResize } from '@/hooks/use-virtual-keyboard-resize';
+import { MobileTerminalControls } from './mobile-terminal-controls';
 
 const logger = createLogger('Terminal');
 const NO_STORE_CACHE_MODE: RequestCache = 'no-store';
@@ -162,6 +165,12 @@ export function TerminalPanel({
   const MAX_RECONNECT_ATTEMPTS = 5;
   const INITIAL_RECONNECT_DELAY = 1000;
   const [processExitCode, setProcessExitCode] = useState<number | null>(null);
+
+  // Detect mobile viewport for quick controls
+  const isMobile = useIsMobile();
+
+  // Track virtual keyboard height on mobile to prevent overlap
+  const { keyboardHeight, isKeyboardOpen } = useVirtualKeyboardResize();
 
   // Get current project for image saving
   const currentProject = useAppStore((state) => state.currentProject);
@@ -342,6 +351,13 @@ export function TerminalPanel({
       if (i + PASTE_CHUNK_SIZE < text.length) {
         await new Promise((resolve) => setTimeout(resolve, PASTE_CHUNK_DELAY_MS));
       }
+    }
+  }, []);
+
+  // Send raw input to terminal via WebSocket (used by mobile quick controls)
+  const sendTerminalInput = useCallback((data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data }));
     }
   }, []);
 
@@ -1722,6 +1738,9 @@ export function TerminalPanel({
         // Visual feedback when hovering over as drop target
         isOver && isDropTarget && 'ring-2 ring-green-500 ring-inset'
       )}
+      style={
+        isMobile && isKeyboardOpen ? { height: `calc(100% - ${keyboardHeight}px)` } : undefined
+      }
       onClick={onFocus}
       onKeyDownCapture={handleContainerKeyDownCapture}
       tabIndex={0}
@@ -2136,6 +2155,14 @@ export function TerminalPanel({
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
+      )}
+
+      {/* Mobile quick controls - special keys and arrow keys for touch devices */}
+      {isMobile && (
+        <MobileTerminalControls
+          onSendInput={sendTerminalInput}
+          isConnected={connectionStatus === 'connected'}
+        />
       )}
 
       {/* Terminal container - uses terminal theme */}

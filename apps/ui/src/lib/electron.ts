@@ -2174,8 +2174,8 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    commit: async (worktreePath: string, message: string) => {
-      console.log('[Mock] Committing changes:', { worktreePath, message });
+    commit: async (worktreePath: string, message: string, files?: string[]) => {
+      console.log('[Mock] Committing changes:', { worktreePath, message, files });
       return {
         success: true,
         result: {

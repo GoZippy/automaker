@@ -93,6 +93,7 @@ export function useBoardActions({
     isPrimaryWorktreeBranch,
     getPrimaryWorktreeBranch,
     getAutoModeState,
+    getMaxConcurrencyForWorktree,
   } = useAppStore();
   const autoMode = useAutoMode();
 
@@ -566,7 +567,11 @@ export function useBoardActions({
       const featureWorktreeState = currentProject
         ? getAutoModeState(currentProject.id, featureBranchName)
         : null;
-      const featureMaxConcurrency = featureWorktreeState?.maxConcurrency ?? autoMode.maxConcurrency;
+      // Use getMaxConcurrencyForWorktree which correctly falls back to global maxConcurrency
+      // instead of autoMode.maxConcurrency which only falls back to DEFAULT_MAX_CONCURRENCY (1)
+      const featureMaxConcurrency = currentProject
+        ? getMaxConcurrencyForWorktree(currentProject.id, featureBranchName)
+        : autoMode.maxConcurrency;
       const featureRunningCount = featureWorktreeState?.runningTasks?.length ?? 0;
       const canStartInWorktree = featureRunningCount < featureMaxConcurrency;
 
@@ -647,6 +652,7 @@ export function useBoardActions({
       handleRunFeature,
       currentProject,
       getAutoModeState,
+      getMaxConcurrencyForWorktree,
       isPrimaryWorktreeBranch,
     ]
   );

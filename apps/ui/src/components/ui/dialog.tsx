@@ -98,7 +98,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           data-slot="dialog-content"
           className={cn(
             'fixed top-[50%] left-[50%] z-50 translate-x-[-50%] translate-y-[-50%]',
-            'flex flex-col w-full max-w-[calc(100%-2rem)] max-h-[calc(100vh-4rem)]',
+            'flex flex-col w-full max-w-[calc(100%-2rem)] max-h-[calc(100dvh-4rem)]',
             'bg-card border border-border rounded-xl shadow-2xl',
             // Premium shadow
             'shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)]',

@@ -4,17 +4,25 @@
  * Tracks the timestamp of the last WebSocket event received.
  * Used to conditionally disable polling when events are flowing
  * through WebSocket (indicating the connection is healthy).
+ *
+ * Mobile-aware: On mobile devices, the recency threshold is extended
+ * and polling intervals are multiplied to reduce battery drain and
+ * network usage while maintaining data freshness through WebSocket.
  */
 
 import { useCallback } from 'react';
 import { create } from 'zustand';
+import { isMobileDevice, getMobilePollingMultiplier } from '@/lib/mobile-detect';
 
 /**
  * Time threshold (ms) to consider events as "recent"
  * If an event was received within this time, WebSocket is considered healthy
  * and polling can be safely disabled.
+ *
+ * On mobile, the threshold is extended to 10 seconds since WebSocket
+ * connections on mobile may have higher latency and more jitter.
  */
-export const EVENT_RECENCY_THRESHOLD = 5000; // 5 seconds
+export const EVENT_RECENCY_THRESHOLD = isMobileDevice ? 10000 : 5000;
 
 /**
  * Store for tracking event timestamps per query key
@@ -136,6 +144,12 @@ export function useEventRecency(queryKey?: string) {
  * Utility function to create a refetchInterval that respects event recency.
  * Returns false (no polling) if events are recent, otherwise returns the interval.
  *
+ * On mobile, the interval is multiplied by getMobilePollingMultiplier() to reduce
+ * battery drain and network usage. This is safe because:
+ * - WebSocket invalidation handles real-time updates (features, agents, etc.)
+ * - The service worker caches API responses for instant display
+ * - Longer intervals mean fewer network round-trips on slow mobile connections
+ *
  * @param defaultInterval - The polling interval to use when events aren't recent
  * @returns A function suitable for React Query's refetchInterval option
  *
@@ -149,9 +163,10 @@ export function useEventRecency(queryKey?: string) {
  * ```
  */
 export function createSmartPollingInterval(defaultInterval: number) {
+  const mobileAwareInterval = defaultInterval * getMobilePollingMultiplier();
   return () => {
     const { areGlobalEventsRecent } = useEventRecencyStore.getState();
-    return areGlobalEventsRecent() ? false : defaultInterval;
+    return areGlobalEventsRecent() ? false : mobileAwareInterval;
   };
 }
 

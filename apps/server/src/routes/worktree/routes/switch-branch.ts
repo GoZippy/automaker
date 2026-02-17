@@ -1,9 +1,15 @@
 /**
  * POST /switch-branch endpoint - Switch to an existing branch
  *
- * Simple branch switching.
- * If there are uncommitted changes, the switch will fail and
- * the user should commit first.
+ * Handles branch switching with automatic stash/reapply of local changes.
+ * If there are uncommitted changes, they are stashed before switching and
+ * reapplied after. If the stash pop results in merge conflicts, returns
+ * a special response code so the UI can create a conflict resolution task.
+ *
+ * For remote branches (e.g., "origin/feature"), automatically creates a
+ * local tracking branch and checks it out.
+ *
+ * Also fetches the latest remote refs after switching.
  *
  * Note: Git repository validation (isGitRepo, hasCommits) is handled by
  * the requireValidWorktree middleware in index.ts
@@ -16,12 +22,12 @@ import { getErrorMessage, logError } from '../common.js';
 
 const execAsync = promisify(exec);
 
-function isUntrackedLine(line: string): boolean {
-  return line.startsWith('?? ');
-}
-
 function isExcludedWorktreeLine(line: string): boolean {
   return line.includes('.worktrees/') || line.endsWith('.worktrees');
+}
+
+function isUntrackedLine(line: string): boolean {
+  return line.startsWith('?? ');
 }
 
 function isBlockingChangeLine(line: string): boolean {
@@ -46,18 +52,130 @@ async function hasUncommittedChanges(cwd: string): Promise<boolean> {
 }
 
 /**
- * Get a summary of uncommitted changes for user feedback
- * Excludes .worktrees/ directory
+ * Check if there are any changes at all (including untracked) that should be stashed
  */
-async function getChangesSummary(cwd: string): Promise<string> {
+async function hasAnyChanges(cwd: string): Promise<boolean> {
   try {
-    const { stdout } = await execAsync('git status --short', { cwd });
-    const lines = stdout.trim().split('\n').filter(isBlockingChangeLine);
-    if (lines.length === 0) return '';
-    if (lines.length <= 5) return lines.join(', ');
-    return `${lines.slice(0, 5).join(', ')} and ${lines.length - 5} more files`;
+    const { stdout } = await execAsync('git status --porcelain', { cwd });
+    const lines = stdout
+      .trim()
+      .split('\n')
+      .filter((line) => {
+        if (!line.trim()) return false;
+        if (isExcludedWorktreeLine(line)) return false;
+        return true;
+      });
+    return lines.length > 0;
   } catch {
-    return 'unknown changes';
+    return false;
+  }
+}
+
+/**
+ * Stash all local changes (including untracked files)
+ * Returns true if a stash was created, false if there was nothing to stash
+ */
+async function stashChanges(cwd: string, message: string): Promise<boolean> {
+  try {
+    // Get stash count before
+    const { stdout: beforeCount } = await execAsync('git stash list', { cwd });
+    const countBefore = beforeCount
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim()).length;
+
+    // Stash including untracked files
+    await execAsync(`git stash push --include-untracked -m "${message}"`, { cwd });
+
+    // Get stash count after to verify something was stashed
+    const { stdout: afterCount } = await execAsync('git stash list', { cwd });
+    const countAfter = afterCount
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim()).length;
+
+    return countAfter > countBefore;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pop the most recent stash entry
+ * Returns an object indicating success and whether there were conflicts
+ */
+async function popStash(
+  cwd: string
+): Promise<{ success: boolean; hasConflicts: boolean; error?: string }> {
+  try {
+    const { stdout, stderr } = await execAsync('git stash pop', { cwd });
+    const output = `${stdout}\n${stderr}`;
+    // Check for conflict markers in the output
+    if (output.includes('CONFLICT') || output.includes('Merge conflict')) {
+      return { success: false, hasConflicts: true };
+    }
+    return { success: true, hasConflicts: false };
+  } catch (error) {
+    const errorMsg = getErrorMessage(error);
+    if (errorMsg.includes('CONFLICT') || errorMsg.includes('Merge conflict')) {
+      return { success: false, hasConflicts: true, error: errorMsg };
+    }
+    return { success: false, hasConflicts: false, error: errorMsg };
+  }
+}
+
+/**
+ * Fetch latest from all remotes (silently, with timeout)
+ */
+async function fetchRemotes(cwd: string): Promise<void> {
+  try {
+    await execAsync('git fetch --all --quiet', {
+      cwd,
+      timeout: 15000, // 15 second timeout
+    });
+  } catch {
+    // Ignore fetch errors - we may be offline
+  }
+}
+
+/**
+ * Parse a remote branch name like "origin/feature-branch" into its parts
+ */
+function parseRemoteBranch(branchName: string): { remote: string; branch: string } | null {
+  const slashIndex = branchName.indexOf('/');
+  if (slashIndex === -1) return null;
+  return {
+    remote: branchName.substring(0, slashIndex),
+    branch: branchName.substring(slashIndex + 1),
+  };
+}
+
+/**
+ * Check if a branch name refers to a remote branch
+ */
+async function isRemoteBranch(cwd: string, branchName: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync('git branch -r --format="%(refname:short)"', { cwd });
+    const remoteBranches = stdout
+      .trim()
+      .split('\n')
+      .map((b) => b.trim().replace(/^['"]|['"]$/g, ''))
+      .filter((b) => b);
+    return remoteBranches.includes(branchName);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a local branch already exists
+ */
+async function localBranchExists(cwd: string, branchName: string): Promise<boolean> {
+  try {
+    await execAsync(`git rev-parse --verify "refs/heads/${branchName}"`, { cwd });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -91,53 +209,133 @@ export function createSwitchBranchHandler() {
       });
       const previousBranch = currentBranchOutput.trim();
 
-      if (previousBranch === branchName) {
+      // Determine the actual target branch name for checkout
+      let targetBranch = branchName;
+      let isRemote = false;
+
+      // Check if this is a remote branch (e.g., "origin/feature-branch")
+      if (await isRemoteBranch(worktreePath, branchName)) {
+        isRemote = true;
+        const parsed = parseRemoteBranch(branchName);
+        if (parsed) {
+          // If a local branch with the same name already exists, just switch to it
+          if (await localBranchExists(worktreePath, parsed.branch)) {
+            targetBranch = parsed.branch;
+          } else {
+            // Will create a local tracking branch from the remote
+            targetBranch = parsed.branch;
+          }
+        }
+      }
+
+      if (previousBranch === targetBranch) {
         res.json({
           success: true,
           result: {
             previousBranch,
-            currentBranch: branchName,
-            message: `Already on branch '${branchName}'`,
+            currentBranch: targetBranch,
+            message: `Already on branch '${targetBranch}'`,
           },
         });
         return;
       }
 
-      // Check if branch exists
+      // Check if target branch exists (locally or as remote ref)
+      if (!isRemote) {
+        try {
+          await execAsync(`git rev-parse --verify "${branchName}"`, {
+            cwd: worktreePath,
+          });
+        } catch {
+          res.status(400).json({
+            success: false,
+            error: `Branch '${branchName}' does not exist`,
+          });
+          return;
+        }
+      }
+
+      // Stash local changes if any exist
+      const hadChanges = await hasAnyChanges(worktreePath);
+      let didStash = false;
+
+      if (hadChanges) {
+        const stashMessage = `automaker-branch-switch: ${previousBranch} → ${targetBranch}`;
+        didStash = await stashChanges(worktreePath, stashMessage);
+      }
+
       try {
-        await execAsync(`git rev-parse --verify ${branchName}`, {
-          cwd: worktreePath,
-        });
-      } catch {
-        res.status(400).json({
-          success: false,
-          error: `Branch '${branchName}' does not exist`,
-        });
-        return;
+        // Switch to the target branch
+        if (isRemote) {
+          const parsed = parseRemoteBranch(branchName);
+          if (parsed) {
+            if (await localBranchExists(worktreePath, parsed.branch)) {
+              // Local branch exists, just checkout
+              await execAsync(`git checkout "${parsed.branch}"`, { cwd: worktreePath });
+            } else {
+              // Create local tracking branch from remote
+              await execAsync(`git checkout -b "${parsed.branch}" "${branchName}"`, {
+                cwd: worktreePath,
+              });
+            }
+          }
+        } else {
+          await execAsync(`git checkout "${targetBranch}"`, { cwd: worktreePath });
+        }
+
+        // Fetch latest from remotes after switching
+        await fetchRemotes(worktreePath);
+
+        // Reapply stashed changes if we stashed earlier
+        let hasConflicts = false;
+        let conflictMessage = '';
+
+        if (didStash) {
+          const popResult = await popStash(worktreePath);
+          if (popResult.hasConflicts) {
+            hasConflicts = true;
+            conflictMessage = `Switched to branch '${targetBranch}' but merge conflicts occurred when reapplying your local changes. Please resolve the conflicts.`;
+          } else if (!popResult.success) {
+            // Stash pop failed for a non-conflict reason - the stash is still there
+            conflictMessage = `Switched to branch '${targetBranch}' but failed to reapply stashed changes: ${popResult.error}. Your changes are still in the stash.`;
+          }
+        }
+
+        if (hasConflicts) {
+          res.json({
+            success: true,
+            result: {
+              previousBranch,
+              currentBranch: targetBranch,
+              message: conflictMessage,
+              hasConflicts: true,
+              stashedChanges: true,
+            },
+          });
+        } else {
+          const stashNote = didStash ? ' (local changes stashed and reapplied)' : '';
+          res.json({
+            success: true,
+            result: {
+              previousBranch,
+              currentBranch: targetBranch,
+              message: `Switched to branch '${targetBranch}'${stashNote}`,
+              hasConflicts: false,
+              stashedChanges: didStash,
+            },
+          });
+        }
+      } catch (checkoutError) {
+        // If checkout failed and we stashed, try to restore the stash
+        if (didStash) {
+          try {
+            await popStash(worktreePath);
+          } catch {
+            // Ignore errors restoring stash - it's still in the stash list
+          }
+        }
+        throw checkoutError;
       }
-
-      // Check for uncommitted changes
-      if (await hasUncommittedChanges(worktreePath)) {
-        const summary = await getChangesSummary(worktreePath);
-        res.status(400).json({
-          success: false,
-          error: `Cannot switch branches: you have uncommitted changes (${summary}). Please commit your changes first.`,
-          code: 'UNCOMMITTED_CHANGES',
-        });
-        return;
-      }
-
-      // Switch to the target branch
-      await execAsync(`git checkout "${branchName}"`, { cwd: worktreePath });
-
-      res.json({
-        success: true,
-        result: {
-          previousBranch,
-          currentBranch: branchName,
-          message: `Switched to branch '${branchName}'`,
-        },
-      });
     } catch (error) {
       logError(error, 'Switch branch failed');
       res.status(500).json({ success: false, error: getErrorMessage(error) });

@@ -143,7 +143,12 @@ export function useAutoMode(worktree?: WorktreeInfo) {
 
   const isAutoModeRunning = worktreeAutoModeState.isRunning;
   const runningAutoTasks = worktreeAutoModeState.runningTasks;
-  const maxConcurrency = worktreeAutoModeState.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+  // Use getMaxConcurrencyForWorktree which properly falls back to the global
+  // maxConcurrency setting, instead of DEFAULT_MAX_CONCURRENCY (1) which would
+  // incorrectly block agents when the user has set a higher global limit
+  const maxConcurrency = projectId
+    ? getMaxConcurrencyForWorktree(projectId, branchName)
+    : DEFAULT_MAX_CONCURRENCY;
 
   // Check if we can start a new task based on concurrency limit
   const canStartNewTask = runningAutoTasks.length < maxConcurrency;

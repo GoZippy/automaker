@@ -387,8 +387,10 @@ export class AutoLoopCoordinator {
       const projectId = settings.projects?.find((p) => p.path === projectPath)?.id;
       const autoModeByWorktree = settings.autoModeByWorktree;
       if (projectId && autoModeByWorktree && typeof autoModeByWorktree === 'object') {
-        const normalizedBranch =
-          branchName === null || branchName === 'main' ? '__main__' : branchName;
+        // branchName is already normalized to null for the primary branch by callers
+        // (e.g., checkWorktreeCapacity, startAutoLoopForProject), so we only
+        // need to convert null to '__main__' for the worktree key lookup
+        const normalizedBranch = branchName === null ? '__main__' : branchName;
         const worktreeId = `${projectId}::${normalizedBranch}`;
         if (
           worktreeId in autoModeByWorktree &&

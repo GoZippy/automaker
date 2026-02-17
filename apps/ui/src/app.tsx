@@ -6,11 +6,13 @@ import { SplashScreen } from './components/splash-screen';
 import { useSettingsSync } from './hooks/use-settings-sync';
 import { useCursorStatusInit } from './hooks/use-cursor-status-init';
 import { useProviderAuthInit } from './hooks/use-provider-auth-init';
+import { useMobileVisibility, useMobileOnlineManager } from './hooks/use-mobile-visibility';
 import { useAppStore } from './store/app-store';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import './styles/global.css';
 import './styles/theme-imports';
 import './styles/font-imports';
+import { loadUserFonts, preloadAllFonts } from './styles/font-imports';
 
 const logger = createLogger('App');
 
@@ -37,6 +39,30 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(DISABLE_SPLASH_KEY, String(disableSplashScreen));
   }, [disableSplashScreen]);
+
+  // Load user-selected custom fonts on startup, then preload remaining fonts during idle time.
+  // Uses requestIdleCallback where available for better mobile performance - this ensures
+  // font loading doesn't compete with critical rendering and input handling.
+  useEffect(() => {
+    // Immediately load any fonts the user has configured
+    loadUserFonts();
+
+    // After the app is fully interactive, preload remaining fonts
+    // so font picker previews work instantly.
+    // Use requestIdleCallback on mobile for better scheduling - it yields to
+    // user interactions and critical rendering, unlike setTimeout which may fire
+    // during a busy frame and cause jank.
+    const schedulePreload =
+      typeof requestIdleCallback !== 'undefined'
+        ? () => requestIdleCallback(() => preloadAllFonts(), { timeout: 5000 })
+        : () => setTimeout(() => preloadAllFonts(), 3000);
+
+    const timer = setTimeout(() => {
+      schedulePreload();
+    }, 2000); // Wait 2s after mount, then use idle callback for the actual loading
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Clear accumulated PerformanceMeasure entries to prevent memory leak in dev mode
   // React's internal scheduler creates performance marks/measures that accumulate without cleanup
@@ -69,6 +95,12 @@ export default function App() {
 
   // Initialize Provider auth status at startup (for Claude/Codex usage display)
   useProviderAuthInit();
+
+  // Mobile-specific: Manage React Query focus/online state based on page visibility.
+  // Prevents the "blank screen + reload" cycle caused by aggressive refetching
+  // when the mobile PWA is switched away from and back to.
+  useMobileVisibility();
+  useMobileOnlineManager();
 
   const handleSplashComplete = useCallback(() => {
     sessionStorage.setItem('automaker-splash-shown', 'true');

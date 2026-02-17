@@ -778,7 +778,7 @@ function RootLayoutContent() {
   // Note: No sandbox dialog here - it only shows after login and setup complete
   if (isLoginRoute || isLoggedOutRoute) {
     return (
-      <main className="h-screen overflow-hidden" data-testid="app-container">
+      <main className="h-full overflow-hidden" data-testid="app-container">
         <Outlet />
       </main>
     );
@@ -787,7 +787,7 @@ function RootLayoutContent() {
   // Wait for auth check before rendering protected routes (ALL modes - unified flow)
   if (!authChecked) {
     return (
-      <main className="flex h-screen items-center justify-center" data-testid="app-container">
+      <main className="flex h-full items-center justify-center" data-testid="app-container">
         <LoadingState message="Loading..." />
       </main>
     );
@@ -797,7 +797,7 @@ function RootLayoutContent() {
   // Show loading state while navigation is in progress
   if (!isAuthenticated) {
     return (
-      <main className="flex h-screen items-center justify-center" data-testid="app-container">
+      <main className="flex h-full items-center justify-center" data-testid="app-container">
         <LoadingState message="Redirecting..." />
       </main>
     );
@@ -805,7 +805,7 @@ function RootLayoutContent() {
 
   if (shouldBlockForSettings) {
     return (
-      <main className="flex h-screen items-center justify-center" data-testid="app-container">
+      <main className="flex h-full items-center justify-center" data-testid="app-container">
         <LoadingState message="Loading settings..." />
       </main>
     );
@@ -813,7 +813,7 @@ function RootLayoutContent() {
 
   if (shouldAutoOpen) {
     return (
-      <main className="flex h-screen items-center justify-center" data-testid="app-container">
+      <main className="flex h-full items-center justify-center" data-testid="app-container">
         <LoadingState message="Opening project..." />
       </main>
     );
@@ -822,7 +822,7 @@ function RootLayoutContent() {
   // Show setup page (full screen, no sidebar) - authenticated only
   if (isSetupRoute) {
     return (
-      <main className="h-screen overflow-hidden" data-testid="app-container">
+      <main className="h-full overflow-hidden" data-testid="app-container">
         <Outlet />
       </main>
     );
@@ -832,7 +832,7 @@ function RootLayoutContent() {
   if (isDashboardRoute) {
     return (
       <>
-        <main className="h-screen overflow-hidden" data-testid="app-container">
+        <main className="h-full overflow-hidden" data-testid="app-container">
           <Outlet />
           <Toaster richColors position="bottom-right" />
         </main>
@@ -847,7 +847,7 @@ function RootLayoutContent() {
 
   return (
     <>
-      <main className="flex h-screen overflow-hidden" data-testid="app-container">
+      <main className="flex h-full overflow-hidden" data-testid="app-container">
         {/* Full-width titlebar drag region for Electron window dragging */}
         {isElectron() && (
           <div
