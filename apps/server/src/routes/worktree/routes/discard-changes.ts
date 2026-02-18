@@ -122,12 +122,18 @@ export function createDiscardChangesHandler() {
 
           if (indexStatus === '?' && workTreeStatus === '?') {
             untrackedFiles.push(file.path);
+          } else if (indexStatus === 'A') {
+            // Staged-new file: must be reset (unstaged) then cleaned (deleted).
+            // Never pass to trackedModified — the file has no HEAD version to
+            // check out, so `git checkout --` would fail or do nothing.
+            stagedFiles.push(file.path);
+            untrackedFiles.push(file.path);
           } else {
             // Check if the file has staged changes (index status X)
             if (indexStatus !== ' ' && indexStatus !== '?') {
               stagedFiles.push(file.path);
             }
-            // Check for working tree changes (worktree status Y): handles MM, AM, MD, etc.
+            // Check for working tree changes (worktree status Y): handles MM, MD, etc.
             if (workTreeStatus !== ' ' && workTreeStatus !== '?') {
               trackedModified.push(file.path);
             }
