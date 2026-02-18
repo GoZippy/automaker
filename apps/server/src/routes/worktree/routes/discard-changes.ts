@@ -128,7 +128,7 @@ export function createDiscardChangesHandler() {
               stagedFiles.push(file.path);
             }
             // Check for working tree changes (worktree status Y): handles MM, AM, MD, etc.
-            if (workTreeStatus === 'M' || workTreeStatus === 'D' || workTreeStatus === 'A') {
+            if (workTreeStatus !== ' ' && workTreeStatus !== '?') {
               trackedModified.push(file.path);
             }
           }
