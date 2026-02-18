@@ -20,6 +20,12 @@ interface UseWorktreeActionsOptions {
     branchName: string;
     previousBranch: string;
   }) => void;
+  /** Callback when checkout fails AND the stash-pop restoration produces merge conflicts */
+  onStashPopConflict?: (info: {
+    worktreePath: string;
+    branchName: string;
+    stashPopConflictMessage: string;
+  }) => void;
 }
 
 export function useWorktreeActions(options?: UseWorktreeActionsOptions) {
@@ -29,6 +35,7 @@ export function useWorktreeActions(options?: UseWorktreeActionsOptions) {
   // Use React Query mutations
   const switchBranchMutation = useSwitchBranch({
     onConflict: options?.onBranchSwitchConflict,
+    onStashPopConflict: options?.onStashPopConflict,
   });
   const pullMutation = usePullWorktree();
   const pushMutation = usePushWorktree();

@@ -280,6 +280,8 @@ export function useBoardActions({
             });
         }
       }
+
+      return createdFeature;
     },
     [
       addFeature,
@@ -1221,13 +1223,12 @@ export function useBoardActions({
           dependencies: [parentFeature.id],
         };
 
-        await handleAddFeature(duplicatedFeatureData);
+        const newFeature = await handleAddFeature(duplicatedFeatureData);
 
-        // Get the newly created feature (last added feature) to use as parent for next iteration
-        const currentFeatures = useAppStore.getState().features;
-        const newestFeature = currentFeatures[currentFeatures.length - 1];
-        if (newestFeature) {
-          parentFeature = newestFeature;
+        // Use the returned feature directly as the parent for the next iteration,
+        // avoiding a fragile assumption that the newest feature is the last item in the store
+        if (newFeature) {
+          parentFeature = newFeature;
         }
       }
 

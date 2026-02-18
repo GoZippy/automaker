@@ -112,6 +112,17 @@ export function isValidBranchName(name: string): boolean {
 }
 
 /**
+ * Validate git remote name to prevent command injection.
+ * Allowed characters: alphanumerics, hyphen, underscore, dot, and slash.
+ * Rejects empty strings and names that are too long.
+ */
+export function isValidRemoteName(name: string): boolean {
+  return (
+    name.length > 0 && name.length < MAX_BRANCH_NAME_LENGTH && /^[a-zA-Z0-9._\-/]+$/.test(name)
+  );
+}
+
+/**
  * Check if gh CLI is available on the system
  */
 export async function isGhCliAvailable(): Promise<boolean> {

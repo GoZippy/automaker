@@ -319,6 +319,7 @@ export function DiscardWorktreeChangesDialog({
           }
         } catch (err) {
           console.warn('Failed to load diffs for discard dialog:', err);
+          setError(err instanceof Error ? err.message : String(err));
         } finally {
           setIsLoadingDiffs(false);
         }
@@ -370,7 +371,7 @@ export function DiscardWorktreeChangesDialog({
 
       if (result.success && result.result) {
         if (result.result.discarded) {
-          const fileCount = filesToDiscard ? filesToDiscard.length : result.result.filesDiscarded;
+          const fileCount = filesToDiscard ? filesToDiscard.length : selectedFiles.size;
           toast.success('Changes discarded', {
             description: `Discarded ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in ${worktree.branch}`,
           });

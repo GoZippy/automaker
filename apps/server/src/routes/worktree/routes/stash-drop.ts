@@ -30,7 +30,7 @@ export function createStashDropHandler() {
         return;
       }
 
-      if (stashIndex === undefined || stashIndex === null) {
+      if (!Number.isInteger(stashIndex) || stashIndex < 0) {
         res.status(400).json({
           success: false,
           error: 'stashIndex required',

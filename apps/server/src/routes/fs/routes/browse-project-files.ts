@@ -89,8 +89,13 @@ export function createBrowseProjectFilesHandler() {
         currentRelativePath = normalized;
 
         // Double-check the resolved path is within the project
+        // Use a separator-terminated prefix to prevent matching sibling dirs
+        // that share the same prefix (e.g. /projects/foo vs /projects/foobar).
         const resolvedTarget = path.resolve(targetPath);
-        if (!resolvedTarget.startsWith(resolvedProjectPath)) {
+        const projectPrefix = resolvedProjectPath.endsWith(path.sep)
+          ? resolvedProjectPath
+          : resolvedProjectPath + path.sep;
+        if (!resolvedTarget.startsWith(projectPrefix) && resolvedTarget !== resolvedProjectPath) {
           res.status(400).json({
             success: false,
             error: 'Path traversal detected',
@@ -130,7 +135,7 @@ export function createBrowseProjectFilesHandler() {
           })
           .map((entry) => {
             const entryRelativePath = currentRelativePath
-              ? `${currentRelativePath}/${entry.name}`
+              ? path.posix.join(currentRelativePath.replace(/\\/g, '/'), entry.name)
               : entry.name;
 
             return {

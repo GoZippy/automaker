@@ -407,7 +407,7 @@ export function CommitWorktreeDialog({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (
       e.key === 'Enter' &&
-      e.metaKey &&
+      (e.metaKey || e.ctrlKey) &&
       !isLoading &&
       !isGenerating &&
       message.trim() &&
@@ -658,7 +658,8 @@ export function CommitWorktreeDialog({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Cmd+Enter</kbd> to commit
+            Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Cmd/Ctrl+Enter</kbd> to
+            commit
           </p>
         </div>
 

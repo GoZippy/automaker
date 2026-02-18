@@ -243,7 +243,7 @@ export function createWorktreeRoutes(
     '/cherry-pick',
     validatePathParams('worktreePath'),
     requireValidWorktree,
-    createCherryPickHandler()
+    createCherryPickHandler(events)
   );
 
   // Generate PR description route
@@ -259,7 +259,7 @@ export function createWorktreeRoutes(
     '/branch-commit-log',
     validatePathParams('worktreePath'),
     requireValidWorktree,
-    createBranchCommitLogHandler()
+    createBranchCommitLogHandler(events)
   );
 
   return router;

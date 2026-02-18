@@ -451,31 +451,28 @@ export function WorktreeActionsDropdown({
         )}
         {/* Stash operations - combined submenu */}
         {(onStashChanges || onViewStashes) && (
-          <TooltipWrapper
-            showTooltip={!gitRepoStatus.isGitRepo}
-            tooltipContent="Not a git repository"
-          >
+          <TooltipWrapper showTooltip={!canPerformGitOps} tooltipContent={gitOpsDisabledReason}>
             <DropdownMenuSub>
               <div className="flex items-center">
                 {/* Main clickable area - stash changes (primary action) */}
                 <DropdownMenuItem
                   onClick={() => {
-                    if (!gitRepoStatus.isGitRepo) return;
+                    if (!canPerformGitOps) return;
                     if (worktree.hasChanges && onStashChanges) {
                       onStashChanges(worktree);
                     } else if (onViewStashes) {
                       onViewStashes(worktree);
                     }
                   }}
-                  disabled={!gitRepoStatus.isGitRepo}
+                  disabled={!canPerformGitOps}
                   className={cn(
                     'text-xs flex-1 pr-0 rounded-r-none',
-                    !gitRepoStatus.isGitRepo && 'opacity-50 cursor-not-allowed'
+                    !canPerformGitOps && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   <Archive className="w-3.5 h-3.5 mr-2" />
                   {worktree.hasChanges && onStashChanges ? 'Stash Changes' : 'Stashes'}
-                  {!gitRepoStatus.isGitRepo && (
+                  {!canPerformGitOps && (
                     <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />
                   )}
                 </DropdownMenuItem>
@@ -483,9 +480,9 @@ export function WorktreeActionsDropdown({
                 <DropdownMenuSubTrigger
                   className={cn(
                     'text-xs px-1 rounded-l-none border-l border-border/30 h-8',
-                    !gitRepoStatus.isGitRepo && 'opacity-50 cursor-not-allowed'
+                    !canPerformGitOps && 'opacity-50 cursor-not-allowed'
                   )}
-                  disabled={!gitRepoStatus.isGitRepo}
+                  disabled={!canPerformGitOps}
                 />
               </div>
               <DropdownMenuSubContent>

@@ -98,6 +98,19 @@ export function createCheckoutBranchHandler() {
         // Branch doesn't exist, good to create
       }
 
+      // If baseBranch is provided, verify it exists before using it
+      if (baseBranch) {
+        try {
+          await execGitCommand(['rev-parse', '--verify', baseBranch], resolvedPath);
+        } catch {
+          res.status(400).json({
+            success: false,
+            error: `Base branch '${baseBranch}' does not exist`,
+          });
+          return;
+        }
+      }
+
       // Create and checkout the new branch (using argument array to avoid shell injection)
       // If baseBranch is provided, create the branch from that starting point
       const checkoutArgs = ['checkout', '-b', branchName];

@@ -886,5 +886,66 @@ describe('auto-loop-coordinator.ts', () => {
         expect.anything()
       );
     });
+
+    it('uses pending features as fallback when loadAllFeaturesFn is null and executes eligible feature with satisfied dependencies', async () => {
+      // Create a completed dependency feature (will be in pendingFeatures as the allFeatures fallback)
+      const completedDep: Feature = {
+        ...testFeature,
+        id: 'dep-feature',
+        status: 'completed',
+        title: 'Completed Dependency',
+      };
+      // Create a pending feature that depends on the completed dep
+      const pendingFeatureWithDep: Feature = {
+        ...testFeature,
+        id: 'feature-with-dep',
+        dependencies: ['dep-feature'],
+        status: 'ready',
+        title: 'Feature With Dependency',
+      };
+
+      // loadAllFeaturesFn is NOT provided (null) so allFeatures falls back to pendingFeatures
+      const coordWithoutLoadAll = new AutoLoopCoordinator(
+        mockEventBus,
+        mockConcurrencyManager,
+        mockSettingsService,
+        mockExecuteFeature,
+        mockLoadPendingFeatures,
+        mockSaveExecutionState,
+        mockClearExecutionState,
+        mockResetStuckFeatures,
+        mockIsFeatureFinished,
+        mockIsFeatureRunning
+        // loadAllFeaturesFn omitted (undefined/null)
+      );
+
+      // pendingFeatures includes both the completed dep and the pending feature;
+      // since loadAllFeaturesFn is absent, allFeatures = pendingFeatures,
+      // so areDependenciesSatisfied can find 'dep-feature' with status 'completed'
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([completedDep, pendingFeatureWithDep]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+      // The completed dep is finished, so it is filtered from eligible candidates;
+      // the pending feature with the satisfied dependency should be scheduled
+      vi.mocked(mockIsFeatureFinished).mockImplementation((f: Feature) => f.id === 'dep-feature');
+
+      await coordWithoutLoadAll.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordWithoutLoadAll.stopAutoLoopForProject('/test/project', null);
+
+      // The feature whose dependency is satisfied via the pending-features fallback must be executed
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-with-dep',
+        true,
+        true
+      );
+      // The completed dependency itself must NOT be executed (filtered by isFeatureFinishedFn)
+      expect(mockExecuteFeature).not.toHaveBeenCalledWith(
+        '/test/project',
+        'dep-feature',
+        true,
+        true
+      );
+    });
   });
 });

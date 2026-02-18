@@ -75,6 +75,12 @@ export function CreatePRDialog({
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [selectedRemote, setSelectedRemote] = useState<string>('');
   const [isLoadingRemotes, setIsLoadingRemotes] = useState(false);
+  // Keep a ref in sync with selectedRemote so fetchRemotes can read the latest value
+  // without needing it in its dependency array (which would cause re-fetch loops)
+  const selectedRemoteRef = useRef<string>(selectedRemote);
+  useEffect(() => {
+    selectedRemoteRef.current = selectedRemote;
+  }, [selectedRemote]);
 
   // Generate description state
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
@@ -110,10 +116,16 @@ export function CreatePRDialog({
         );
         setRemotes(remoteInfos);
 
-        // Auto-select 'origin' if available, otherwise first remote
+        // Preserve existing selection if it's still valid; otherwise fall back to 'origin' or first remote
         if (remoteInfos.length > 0) {
-          const defaultRemote = remoteInfos.find((r) => r.name === 'origin') || remoteInfos[0];
-          setSelectedRemote(defaultRemote.name);
+          const remoteNames = remoteInfos.map((r) => r.name);
+          const currentSelection = selectedRemoteRef.current;
+          const currentSelectionStillExists =
+            currentSelection !== '' && remoteNames.includes(currentSelection);
+          if (!currentSelectionStillExists) {
+            const defaultRemote = remoteInfos.find((r) => r.name === 'origin') || remoteInfos[0];
+            setSelectedRemote(defaultRemote.name);
+          }
         }
       }
     } catch {

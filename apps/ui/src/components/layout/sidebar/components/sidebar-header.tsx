@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ChevronsUpDown, Folder, Plus, FolderOpen } from 'lucide-react';
+import { ChevronsUpDown, Folder, Plus, FolderOpen, LogOut } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn, isMac } from '@/lib/utils';
@@ -24,6 +24,7 @@ interface SidebarHeaderProps {
   onNewProject: () => void;
   onOpenFolder: () => void;
   onProjectContextMenu: (project: Project, event: React.MouseEvent) => void;
+  setShowRemoveFromAutomakerDialog: (show: boolean) => void;
 }
 
 export function SidebarHeader({
@@ -32,6 +33,7 @@ export function SidebarHeader({
   onNewProject,
   onOpenFolder,
   onProjectContextMenu,
+  setShowRemoveFromAutomakerDialog,
 }: SidebarHeaderProps) {
   const navigate = useNavigate();
   const { projects, setCurrentProject } = useAppStore();
@@ -228,6 +230,22 @@ export function SidebarHeader({
                   <FolderOpen className="w-4 h-4 mr-2" />
                   <span>Open Project</span>
                 </DropdownMenuItem>
+                {currentProject && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        setShowRemoveFromAutomakerDialog(true);
+                      }}
+                      className="cursor-pointer text-muted-foreground focus:text-foreground"
+                      data-testid="collapsed-remove-from-automaker-dropdown-item"
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      <span>Remove from Automaker</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </>
@@ -371,6 +389,18 @@ export function SidebarHeader({
               >
                 <FolderOpen className="w-4 h-4 mr-2" />
                 <span>Open Project</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => {
+                  setDropdownOpen(false);
+                  setShowRemoveFromAutomakerDialog(true);
+                }}
+                className="cursor-pointer text-muted-foreground focus:text-foreground"
+                data-testid="remove-from-automaker-dropdown-item"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                <span>Remove from Automaker</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

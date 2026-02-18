@@ -47,7 +47,9 @@ interface ViewCommitsDialogProps {
 }
 
 function formatRelativeDate(dateStr: string): string {
+  if (!dateStr) return 'unknown date';
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return 'unknown date';
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSecs = Math.floor(diffMs / 1000);

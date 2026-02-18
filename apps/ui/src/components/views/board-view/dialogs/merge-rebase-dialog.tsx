@@ -167,10 +167,15 @@ export function MergeRebaseDialog({
     }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!worktree || !selectedBranch) return;
-    onConfirm(worktree, selectedBranch, selectedStrategy);
-    onOpenChange(false);
+    try {
+      await onConfirm(worktree, selectedBranch, selectedStrategy);
+      onOpenChange(false);
+    } catch (err) {
+      logger.error('Failed to confirm merge/rebase:', err);
+      throw err;
+    }
   };
 
   const selectedRemoteData = remotes.find((r) => r.name === selectedRemote);
@@ -347,7 +352,11 @@ export function MergeRebaseDialog({
             className="bg-purple-600 hover:bg-purple-700 text-white"
           >
             <GitMerge className="w-4 h-4 mr-2" />
-            Merge & Rebase
+            {selectedStrategy === 'merge'
+              ? 'Merge'
+              : selectedStrategy === 'rebase'
+                ? 'Rebase'
+                : 'Merge & Rebase'}
           </Button>
         </DialogFooter>
       </DialogContent>

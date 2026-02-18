@@ -148,43 +148,48 @@ export function useProviderAuthInit() {
     // 4. Gemini Auth Status
     try {
       const result = await api.setup.getGeminiStatus();
-      if (result.success) {
-        // Set CLI status
+
+      // Always set CLI status if any CLI info is available
+      if (
+        result.installed !== undefined ||
+        result.version !== undefined ||
+        result.path !== undefined
+      ) {
         setGeminiCliStatus({
           installed: result.installed ?? false,
           version: result.version,
           path: result.path,
         });
+      }
 
-        // Set Auth status - always set a status to mark initialization as complete
-        if (result.auth) {
-          const auth = result.auth;
-          const validMethods: GeminiAuthStatus['method'][] = [
-            'google_login',
-            'api_key',
-            'vertex_ai',
-            'none',
-          ];
+      // Always set auth status regardless of result.success
+      if (result.success && result.auth) {
+        const auth = result.auth;
+        const validMethods: GeminiAuthStatus['method'][] = [
+          'google_login',
+          'api_key',
+          'vertex_ai',
+          'none',
+        ];
 
-          const method = validMethods.includes(auth.method as GeminiAuthStatus['method'])
-            ? (auth.method as GeminiAuthStatus['method'])
-            : ((auth.authenticated ? 'google_login' : 'none') as GeminiAuthStatus['method']);
+        const method = validMethods.includes(auth.method as GeminiAuthStatus['method'])
+          ? (auth.method as GeminiAuthStatus['method'])
+          : ((auth.authenticated ? 'google_login' : 'none') as GeminiAuthStatus['method']);
 
-          setGeminiAuthStatus({
-            authenticated: auth.authenticated,
-            method,
-            hasApiKey: auth.hasApiKey ?? false,
-            hasEnvApiKey: auth.hasEnvApiKey ?? false,
-          });
-        } else {
-          // No auth info available, set default unauthenticated status
-          setGeminiAuthStatus({
-            authenticated: false,
-            method: 'none',
-            hasApiKey: false,
-            hasEnvApiKey: false,
-          });
-        }
+        setGeminiAuthStatus({
+          authenticated: auth.authenticated,
+          method,
+          hasApiKey: auth.hasApiKey ?? false,
+          hasEnvApiKey: auth.hasEnvApiKey ?? false,
+        });
+      } else {
+        // result.success is false or result.auth is missing — set default unauthenticated status
+        setGeminiAuthStatus({
+          authenticated: false,
+          method: 'none',
+          hasApiKey: false,
+          hasEnvApiKey: false,
+        });
       }
     } catch (error) {
       logger.error('Failed to init Gemini auth status:', error);

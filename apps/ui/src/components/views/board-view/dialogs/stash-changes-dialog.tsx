@@ -132,6 +132,9 @@ function parseDiff(diffText: string): ParsedFileDiff[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
+    // Skip trailing empty string produced by a final newline in diffText
+    if (line === '' && i === lines.length - 1) continue;
+
     if (line.startsWith('diff --git')) {
       if (currentFile) {
         if (currentHunk) currentFile.hunks.push(currentHunk);

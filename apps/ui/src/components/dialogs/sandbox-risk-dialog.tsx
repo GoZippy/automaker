@@ -42,9 +42,9 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
         onEscapeKeyDown={(e) => e.preventDefault()}
         showCloseButton={false}
       >
-        <DialogHeader className="flex-shrink-0">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2 text-destructive">
-            <ShieldAlert className="w-6 h-6 flex-shrink-0" />
+            <ShieldAlert className="w-6 h-6 shrink-0" />
             Sandbox Environment Not Detected
           </DialogTitle>
         </DialogHeader>
@@ -99,7 +99,7 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
           </DialogDescription>
         </div>
 
-        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4 flex-shrink-0 border-t border-border mt-4">
+        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4 shrink-0 border-t border-border mt-4">
           <div className="flex items-center space-x-2 self-start">
             <Checkbox
               id="skip-sandbox-warning"

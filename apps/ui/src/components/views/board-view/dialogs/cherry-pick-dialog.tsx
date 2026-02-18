@@ -174,6 +174,7 @@ export function CherryPickDialog({
       setCommitsError(null);
       setCommitLimit(30);
       setHasMoreCommits(false);
+      setLoadingBranches(false);
     }
   }, [open]);
 
@@ -321,9 +322,7 @@ export function CherryPickDialog({
       } else {
         // Check for conflicts
         const errorMessage = result.error || '';
-        const hasConflicts =
-          errorMessage.toLowerCase().includes('conflict') ||
-          (result as { hasConflicts?: boolean }).hasConflicts;
+        const hasConflicts = errorMessage.toLowerCase().includes('conflict') || result.hasConflicts;
 
         if (hasConflicts && onCreateConflictResolutionFeature) {
           setConflictInfo({
@@ -333,7 +332,7 @@ export function CherryPickDialog({
           });
           setStep('conflict');
           toast.error('Cherry-pick conflicts detected', {
-            description: 'The cherry-pick has conflicts that need to be resolved.',
+            description: 'The cherry-pick was aborted due to conflicts. No changes were applied.',
           });
         } else {
           toast.error('Cherry-pick failed', {
@@ -359,7 +358,7 @@ export function CherryPickDialog({
         });
         setStep('conflict');
         toast.error('Cherry-pick conflicts detected', {
-          description: 'The cherry-pick has conflicts that need to be resolved.',
+          description: 'The cherry-pick was aborted due to conflicts. No changes were applied.',
         });
       } else {
         toast.error('Cherry-pick failed', {
@@ -469,7 +468,7 @@ export function CherryPickDialog({
         <DialogContent className="w-full h-full max-w-full max-h-full sm:w-[90vw] sm:max-w-[640px] sm:max-h-[100dvh] sm:h-auto sm:rounded-xl rounded-none flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Cherry className="w-5 h-5 text-black dark:text-black" />
+              <Cherry className="w-5 h-5 text-foreground" />
               Cherry Pick Commits
             </DialogTitle>
             <DialogDescription>
@@ -673,7 +672,7 @@ export function CherryPickDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Cherry className="w-5 h-5 text-black dark:text-black" />
+            <Cherry className="w-5 h-5 text-foreground" />
             Cherry Pick
           </DialogTitle>
           <DialogDescription asChild>

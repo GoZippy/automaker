@@ -45,7 +45,7 @@ export function createCommitLogHandler() {
         files: string[];
       }> = [];
 
-      const commitBlocks = logOutput.split('---END---\n').filter((block) => block.trim());
+      const commitBlocks = logOutput.split('---END---').filter((block) => block.trim());
 
       for (const block of commitBlocks) {
         const lines = block.split('\n');

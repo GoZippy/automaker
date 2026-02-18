@@ -47,7 +47,7 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
   const setDefaultDeleteBranch = useAppStore((s) => s.setDefaultDeleteBranch);
   const getAutoDismissInitScriptIndicator = useAppStore((s) => s.getAutoDismissInitScriptIndicator);
   const setAutoDismissInitScriptIndicator = useAppStore((s) => s.setAutoDismissInitScriptIndicator);
-  const getWorktreeCopyFiles = useAppStore((s) => s.getWorktreeCopyFiles);
+  const copyFiles = useAppStore((s) => s.worktreeCopyFilesByProject[project.path] ?? []);
   const setWorktreeCopyFiles = useAppStore((s) => s.setWorktreeCopyFiles);
 
   // Get effective worktrees setting (project override or global fallback)
@@ -64,7 +64,6 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
   // Copy files state
   const [newCopyFilePath, setNewCopyFilePath] = useState('');
   const [fileSelectorOpen, setFileSelectorOpen] = useState(false);
-  const copyFiles = getWorktreeCopyFiles(project.path);
 
   // Get the current settings for this project
   const showIndicator = getShowInitScriptIndicator(project.path);
@@ -245,15 +244,15 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
     if (!normalized) return;
 
     // Check for duplicates
-    const currentFiles = getWorktreeCopyFiles(project.path);
-    if (currentFiles.includes(normalized)) {
+    if (copyFiles.includes(normalized)) {
       toast.error('File already in list', {
         description: `"${normalized}" is already configured for copying.`,
       });
       return;
     }
 
-    const updatedFiles = [...currentFiles, normalized];
+    const prevFiles = copyFiles;
+    const updatedFiles = [...copyFiles, normalized];
     setWorktreeCopyFiles(project.path, updatedFiles);
     setNewCopyFilePath('');
 
@@ -267,16 +266,19 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
         description: `"${normalized}" will be copied to new worktrees.`,
       });
     } catch (error) {
+      // Rollback optimistic update on failure
+      setWorktreeCopyFiles(project.path, prevFiles);
+      setNewCopyFilePath(normalized);
       console.error('Failed to persist worktreeCopyFiles:', error);
       toast.error('Failed to save copy files setting');
     }
-  }, [project.path, newCopyFilePath, getWorktreeCopyFiles, setWorktreeCopyFiles]);
+  }, [project.path, newCopyFilePath, copyFiles, setWorktreeCopyFiles]);
 
   // Remove a file path from copy list
   const handleRemoveCopyFile = useCallback(
     async (filePath: string) => {
-      const currentFiles = getWorktreeCopyFiles(project.path);
-      const updatedFiles = currentFiles.filter((f) => f !== filePath);
+      const prevFiles = copyFiles;
+      const updatedFiles = copyFiles.filter((f) => f !== filePath);
       setWorktreeCopyFiles(project.path, updatedFiles);
 
       // Persist to server
@@ -287,26 +289,27 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
         });
         toast.success('Copy file removed');
       } catch (error) {
+        // Rollback optimistic update on failure
+        setWorktreeCopyFiles(project.path, prevFiles);
         console.error('Failed to persist worktreeCopyFiles:', error);
         toast.error('Failed to save copy files setting');
       }
     },
-    [project.path, getWorktreeCopyFiles, setWorktreeCopyFiles]
+    [project.path, copyFiles, setWorktreeCopyFiles]
   );
 
   // Handle files selected from the file selector dialog
   const handleFileSelectorSelect = useCallback(
     async (paths: string[]) => {
-      const currentFiles = getWorktreeCopyFiles(project.path);
-
       // Filter out duplicates
-      const newPaths = paths.filter((p) => !currentFiles.includes(p));
+      const newPaths = paths.filter((p) => !copyFiles.includes(p));
       if (newPaths.length === 0) {
         toast.info('All selected files are already in the list');
         return;
       }
 
-      const updatedFiles = [...currentFiles, ...newPaths];
+      const prevFiles = copyFiles;
+      const updatedFiles = [...copyFiles, ...newPaths];
       setWorktreeCopyFiles(project.path, updatedFiles);
 
       // Persist to server
@@ -319,11 +322,13 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
           description: newPaths.map((p) => `"${p}"`).join(', '),
         });
       } catch (error) {
+        // Rollback optimistic update on failure
+        setWorktreeCopyFiles(project.path, prevFiles);
         console.error('Failed to persist worktreeCopyFiles:', error);
         toast.error('Failed to save copy files setting');
       }
     },
-    [project.path, getWorktreeCopyFiles, setWorktreeCopyFiles]
+    [project.path, copyFiles, setWorktreeCopyFiles]
   );
 
   return (

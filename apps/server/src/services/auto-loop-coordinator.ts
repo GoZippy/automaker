@@ -185,14 +185,17 @@ export class AutoLoopCoordinator {
         // Load all features for dependency checking (if callback provided)
         const allFeatures = this.loadAllFeaturesFn
           ? await this.loadAllFeaturesFn(projectPath)
-          : pendingFeatures;
+          : undefined;
 
-        // Filter to eligible features: not running, not finished, and dependencies satisfied
+        // Filter to eligible features: not running, not finished, and dependencies satisfied.
+        // When loadAllFeaturesFn is not provided, allFeatures is undefined and we bypass
+        // dependency checks (returning true) to avoid false negatives caused by completed
+        // features being absent from pendingFeatures.
         const eligibleFeatures = pendingFeatures.filter(
           (f) =>
             !this.isFeatureRunningFn(f.id) &&
             !this.isFeatureFinishedFn(f) &&
-            areDependenciesSatisfied(f, allFeatures)
+            (this.loadAllFeaturesFn ? areDependenciesSatisfied(f, allFeatures!) : true)
         );
 
         // Sort eligible features by priority (lower number = higher priority, default 2)
@@ -412,10 +415,12 @@ export class AutoLoopCoordinator {
       const projectId = settings.projects?.find((p) => p.path === projectPath)?.id;
       const autoModeByWorktree = settings.autoModeByWorktree;
       if (projectId && autoModeByWorktree && typeof autoModeByWorktree === 'object') {
-        // branchName is already normalized to null for the primary branch by callers
-        // (e.g., checkWorktreeCapacity, startAutoLoopForProject), so we only
-        // need to convert null to '__main__' for the worktree key lookup
-        const normalizedBranch = branchName === null ? '__main__' : branchName;
+        // Normalize both null and 'main' to '__main__' to match the same
+        // canonicalization used by getWorktreeAutoLoopKey, ensuring that
+        // lookups for the primary branch always use the '__main__' sentinel
+        // regardless of whether the caller passed null or the string 'main'.
+        const normalizedBranch =
+          branchName === null || branchName === 'main' ? '__main__' : branchName;
         const worktreeId = `${projectId}::${normalizedBranch}`;
         if (
           worktreeId in autoModeByWorktree &&

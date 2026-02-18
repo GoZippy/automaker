@@ -4,17 +4,20 @@
  * Applies commits from another branch onto the current branch.
  * Supports single or multiple commit cherry-picks.
  *
+ * Git business logic is delegated to cherry-pick-service.ts.
+ * Events are emitted at key lifecycle points for WebSocket subscribers.
+ *
  * Note: Git repository validation (isGitRepo, hasCommits) is handled by
  * the requireValidWorktree middleware in index.ts
  */
 
 import type { Request, Response } from 'express';
-import { execGitCommand, getErrorMessage, logError } from '../common.js';
-import { createLogger } from '@automaker/utils';
+import path from 'path';
+import { getErrorMessage, logError } from '../common.js';
+import type { EventEmitter } from '../../../lib/events.js';
+import { verifyCommits, runCherryPick } from '../../../services/cherry-pick-service.js';
 
-const logger = createLogger('Worktree');
-
-export function createCherryPickHandler() {
+export function createCherryPickHandler(events: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { worktreePath, commitHashes, options } = req.body as {
@@ -32,6 +35,9 @@ export function createCherryPickHandler() {
         });
         return;
       }
+
+      // Normalize the path to prevent path traversal and ensure consistent paths
+      const resolvedWorktreePath = path.resolve(worktreePath);
 
       if (!commitHashes || !Array.isArray(commitHashes) || commitHashes.length === 0) {
         res.status(400).json({
@@ -52,75 +58,64 @@ export function createCherryPickHandler() {
         }
       }
 
-      // Verify each commit exists
-      for (const hash of commitHashes) {
-        try {
-          await execGitCommand(['rev-parse', '--verify', hash], worktreePath);
-        } catch {
-          res.status(400).json({
-            success: false,
-            error: `Commit "${hash}" does not exist`,
-          });
-          return;
-        }
+      // Verify each commit exists via the service
+      const invalidHash = await verifyCommits(resolvedWorktreePath, commitHashes);
+      if (invalidHash !== null) {
+        res.status(400).json({
+          success: false,
+          error: `Commit "${invalidHash}" does not exist`,
+        });
+        return;
       }
 
-      // Build cherry-pick command args
-      const args = ['cherry-pick'];
-      if (options?.noCommit) {
-        args.push('--no-commit');
-      }
-      // Add commit hashes in order
-      args.push(...commitHashes);
+      // Emit started event
+      events.emit('cherry-pick:started', {
+        worktreePath: resolvedWorktreePath,
+        commitHashes,
+        options,
+      });
 
-      // Execute the cherry-pick
-      try {
-        await execGitCommand(args, worktreePath);
+      // Execute the cherry-pick via the service
+      const result = await runCherryPick(resolvedWorktreePath, commitHashes, options);
 
-        // Get current branch name
-        const branchOutput = await execGitCommand(
-          ['rev-parse', '--abbrev-ref', 'HEAD'],
-          worktreePath
-        );
+      if (result.success) {
+        // Emit success event
+        events.emit('cherry-pick:success', {
+          worktreePath: resolvedWorktreePath,
+          commitHashes,
+          branch: result.branch,
+        });
 
         res.json({
           success: true,
           result: {
-            cherryPicked: true,
-            commitHashes,
-            branch: branchOutput.trim(),
-            message: `Successfully cherry-picked ${commitHashes.length} commit(s)`,
+            cherryPicked: result.cherryPicked,
+            commitHashes: result.commitHashes,
+            branch: result.branch,
+            message: result.message,
           },
         });
-      } catch (cherryPickError: unknown) {
-        // Check if this is a cherry-pick conflict
-        const err = cherryPickError as { stdout?: string; stderr?: string; message?: string };
-        const output = `${err.stdout || ''} ${err.stderr || ''} ${err.message || ''}`;
-        const hasConflicts =
-          output.includes('CONFLICT') ||
-          output.includes('cherry-pick failed') ||
-          output.includes('could not apply');
+      } else if (result.hasConflicts) {
+        // Emit conflict event
+        events.emit('cherry-pick:conflict', {
+          worktreePath: resolvedWorktreePath,
+          commitHashes,
+          aborted: result.aborted,
+        });
 
-        if (hasConflicts) {
-          // Abort the cherry-pick to leave the repo in a clean state
-          try {
-            await execGitCommand(['cherry-pick', '--abort'], worktreePath);
-          } catch {
-            logger.warn('Failed to abort cherry-pick after conflict');
-          }
-
-          res.status(409).json({
-            success: false,
-            error: `Cherry-pick CONFLICT: Could not apply commit(s) cleanly. Conflicts need to be resolved manually.`,
-            hasConflicts: true,
-          });
-          return;
-        }
-
-        // Re-throw non-conflict errors
-        throw cherryPickError;
+        res.status(409).json({
+          success: false,
+          error: result.error,
+          hasConflicts: true,
+          aborted: result.aborted,
+        });
       }
     } catch (error) {
+      // Emit failure event
+      events.emit('cherry-pick:failure', {
+        error: getErrorMessage(error),
+      });
+
       logError(error, 'Cherry-pick failed');
       res.status(500).json({ success: false, error: getErrorMessage(error) });
     }

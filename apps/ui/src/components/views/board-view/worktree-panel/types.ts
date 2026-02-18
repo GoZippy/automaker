@@ -86,6 +86,13 @@ export interface BranchSwitchConflictInfo {
   previousBranch: string;
 }
 
+/** Info passed when a checkout failure triggers a stash-pop that itself produces conflicts */
+export interface StashPopConflictInfo {
+  worktreePath: string;
+  branchName: string;
+  stashPopConflictMessage: string;
+}
+
 export interface WorktreePanelProps {
   projectPath: string;
   onCreateWorktree: () => void;
@@ -98,6 +105,8 @@ export interface WorktreePanelProps {
   onCreateMergeConflictResolutionFeature?: (conflictInfo: MergeConflictInfo) => void;
   /** Called when branch switch stash reapply results in merge conflicts */
   onBranchSwitchConflict?: (conflictInfo: BranchSwitchConflictInfo) => void;
+  /** Called when checkout fails and the stash-pop restoration itself produces merge conflicts */
+  onStashPopConflict?: (conflictInfo: StashPopConflictInfo) => void;
   /** Called when a branch is deleted during merge - features should be reassigned to main */
   onBranchDeletedDuringMerge?: (branchName: string) => void;
   onRemovedWorktrees?: (removedWorktrees: Array<{ path: string; branch: string }>) => void;

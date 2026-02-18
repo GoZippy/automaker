@@ -71,9 +71,10 @@ export function createStashListHandler() {
         const message = parts[1].trim();
         const date = parts[2].trim();
 
-        // Extract index from stash@{N}
+        // Extract index from stash@{N}; skip entries that don't match the expected format
         const indexMatch = refSpec.match(/stash@\{(\d+)\}/);
-        const index = indexMatch ? parseInt(indexMatch[1], 10) : 0;
+        if (!indexMatch) continue;
+        const index = parseInt(indexMatch[1], 10);
 
         // Extract branch name from message (format: "WIP on branch: hash message" or "On branch: hash message")
         let branch = '';

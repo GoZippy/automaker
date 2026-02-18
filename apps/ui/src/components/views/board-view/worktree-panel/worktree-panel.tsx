@@ -60,6 +60,7 @@ export function WorktreePanel({
   onResolveConflicts,
   onCreateMergeConflictResolutionFeature,
   onBranchSwitchConflict,
+  onStashPopConflict,
   onBranchDeletedDuringMerge,
   onRemovedWorktrees,
   runningFeatureIds = [],
@@ -113,6 +114,7 @@ export function WorktreePanel({
     handleOpenInExternalTerminal,
   } = useWorktreeActions({
     onBranchSwitchConflict: onBranchSwitchConflict,
+    onStashPopConflict: onStashPopConflict,
   });
 
   const { hasRunningFeatures } = useRunningFeatures({
@@ -563,8 +565,12 @@ export function WorktreePanel({
           setSelectRemoteWorktree(worktree);
           setSelectRemoteOperation('pull');
           setSelectRemoteDialogOpen(true);
+        } else if (result.success && result.result && result.result.remotes.length === 1) {
+          // Exactly one remote - use it directly
+          const remoteName = result.result.remotes[0].name;
+          handlePull(worktree, remoteName);
         } else {
-          // Single or no remote - proceed with default behavior
+          // No remotes - proceed with default behavior
           handlePull(worktree);
         }
       } catch {
@@ -587,8 +593,12 @@ export function WorktreePanel({
           setSelectRemoteWorktree(worktree);
           setSelectRemoteOperation('push');
           setSelectRemoteDialogOpen(true);
+        } else if (result.success && result.result && result.result.remotes.length === 1) {
+          // Exactly one remote - use it directly
+          const remoteName = result.result.remotes[0].name;
+          handlePush(worktree, remoteName);
         } else {
-          // Single or no remote - proceed with default behavior
+          // No remotes - proceed with default behavior
           handlePush(worktree);
         }
       } catch {

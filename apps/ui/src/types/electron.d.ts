@@ -1034,6 +1034,10 @@ export interface WorktreeAPI {
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS' | 'UNCOMMITTED_CHANGES';
+    /** True when the checkout failed AND the stash-pop used to restore changes produced merge conflicts */
+    stashPopConflicts?: boolean;
+    /** Human-readable message describing the stash-pop conflict situation */
+    stashPopConflictMessage?: string;
   }>;
 
   // List all remotes and their branches
@@ -1524,6 +1528,7 @@ export interface WorktreeAPI {
     };
     error?: string;
     hasConflicts?: boolean;
+    aborted?: boolean;
   }>;
 
   // Get commit log for a specific branch (not just the current one)

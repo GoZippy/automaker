@@ -68,6 +68,7 @@ import type {
   WorktreeInfo,
   MergeConflictInfo,
   BranchSwitchConflictInfo,
+  StashPopConflictInfo,
 } from './board-view/worktree-panel/types';
 import { COLUMNS, getColumnsWithPipeline } from './board-view/constants';
 import {
@@ -1083,6 +1084,64 @@ export function BoardView() {
     [handleAddFeature, handleStartImplementation, defaultSkipTests]
   );
 
+  // Handler called when checkout fails AND the stash-pop restoration produces merge conflicts.
+  // Creates an AI-assisted board task to guide the user through resolving the conflicts.
+  const handleStashPopConflict = useCallback(
+    async (conflictInfo: StashPopConflictInfo) => {
+      const description =
+        `Resolve merge conflicts that occurred when attempting to switch to branch "${conflictInfo.branchName}". ` +
+        `The checkout failed and, while restoring the previously stashed local changes, git reported merge conflicts. ` +
+        `${conflictInfo.stashPopConflictMessage} ` +
+        `Please review all conflicted files, resolve the conflicts, ensure the code compiles and tests pass, ` +
+        `then re-attempt the branch switch.`;
+
+      // Create the feature
+      const featureData = {
+        title: `Resolve Stash-Pop Conflicts: branch switch to ${conflictInfo.branchName}`,
+        category: 'Maintenance',
+        description,
+        images: [],
+        imagePaths: [],
+        skipTests: defaultSkipTests,
+        model: 'opus' as const,
+        thinkingLevel: 'none' as const,
+        branchName: conflictInfo.branchName,
+        workMode: 'custom' as const,
+        priority: 1,
+        planningMode: 'skip' as const,
+        requirePlanApproval: false,
+      };
+
+      // Capture existing feature IDs before adding
+      const featuresBeforeIds = new Set(useAppStore.getState().features.map((f) => f.id));
+      try {
+        await handleAddFeature(featureData);
+      } catch (error) {
+        logger.error('Failed to create stash-pop conflict resolution feature:', error);
+        toast.error('Failed to create feature', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        return;
+      }
+
+      // Find the newly created feature by looking for an ID that wasn't in the original set
+      const latestFeatures = useAppStore.getState().features;
+      const newFeature = latestFeatures.find((f) => !featuresBeforeIds.has(f.id));
+
+      if (newFeature) {
+        await handleStartImplementation(newFeature);
+      } else {
+        logger.error(
+          'Could not find newly created stash-pop conflict feature to start it automatically.'
+        );
+        toast.error('Failed to auto-start feature', {
+          description: 'The feature was created but could not be started automatically.',
+        });
+      }
+    },
+    [handleAddFeature, handleStartImplementation, defaultSkipTests]
+  );
+
   // Handler for "Make" button - creates a feature and immediately starts it
   const handleAddAndStartFeature = useCallback(
     async (featureData: Parameters<typeof handleAddFeature>[0]) => {
@@ -1523,6 +1582,7 @@ export function BoardView() {
             onResolveConflicts={handleResolveConflicts}
             onCreateMergeConflictResolutionFeature={handleCreateMergeConflictResolutionFeature}
             onBranchSwitchConflict={handleBranchSwitchConflict}
+            onStashPopConflict={handleStashPopConflict}
             onBranchDeletedDuringMerge={(branchName) => {
               // Reset features that were assigned to the deleted branch (same logic as onDeleted in DeleteWorktreeDialog)
               hookFeatures.forEach((feature) => {

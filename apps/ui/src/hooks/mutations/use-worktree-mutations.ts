@@ -298,11 +298,21 @@ export function useMergeWorktree(projectPath: string) {
  * If the reapply causes merge conflicts, the onConflict callback is called so
  * the UI can create a conflict resolution task.
  *
- * @param options.onConflict - Callback when merge conflicts occur after stash reapply
+ * If the checkout itself fails and the stash-pop used to restore changes also
+ * produces conflicts, the onStashPopConflict callback is called so the UI can
+ * create an AI-assisted conflict resolution task on the board.
+ *
+ * @param options.onConflict - Callback when merge conflicts occur after stash reapply (success path)
+ * @param options.onStashPopConflict - Callback when checkout fails AND stash-pop restoration has conflicts
  * @returns Mutation for switching branches
  */
 export function useSwitchBranch(options?: {
   onConflict?: (info: { worktreePath: string; branchName: string; previousBranch: string }) => void;
+  onStashPopConflict?: (info: {
+    worktreePath: string;
+    branchName: string;
+    stashPopConflictMessage: string;
+  }) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -318,6 +328,47 @@ export function useSwitchBranch(options?: {
       if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.switchBranch(worktreePath, branchName);
       if (!result.success) {
+        // When the checkout failed and restoring the stash produced conflicts, surface
+        // this as a structured error so the caller can create a board task for resolution.
+        if (result.stashPopConflicts) {
+          const conflictError = new Error(result.error || 'Failed to switch branch');
+          // Attach the extra metadata so onError can forward it to the callback.
+          (
+            conflictError as Error & {
+              stashPopConflicts: boolean;
+              stashPopConflictMessage: string;
+              worktreePath: string;
+              branchName: string;
+            }
+          ).stashPopConflicts = true;
+          (
+            conflictError as Error & {
+              stashPopConflicts: boolean;
+              stashPopConflictMessage: string;
+              worktreePath: string;
+              branchName: string;
+            }
+          ).stashPopConflictMessage =
+            result.stashPopConflictMessage ??
+            'Stash pop resulted in conflicts: please resolve conflicts before retrying.';
+          (
+            conflictError as Error & {
+              stashPopConflicts: boolean;
+              stashPopConflictMessage: string;
+              worktreePath: string;
+              branchName: string;
+            }
+          ).worktreePath = worktreePath;
+          (
+            conflictError as Error & {
+              stashPopConflicts: boolean;
+              stashPopConflictMessage: string;
+              worktreePath: string;
+              branchName: string;
+            }
+          ).branchName = branchName;
+          throw conflictError;
+        }
         throw new Error(result.error || 'Failed to switch branch');
       }
       if (!result.result) {
@@ -345,9 +396,38 @@ export function useSwitchBranch(options?: {
       }
     },
     onError: (error: Error) => {
-      toast.error('Failed to switch branch', {
-        description: error.message,
-      });
+      const enrichedError = error as Error & {
+        stashPopConflicts?: boolean;
+        stashPopConflictMessage?: string;
+        worktreePath?: string;
+        branchName?: string;
+      };
+
+      if (
+        enrichedError.stashPopConflicts &&
+        enrichedError.worktreePath &&
+        enrichedError.branchName
+      ) {
+        // Checkout failed AND the stash-pop produced conflicts — notify the UI so it
+        // can create an AI-assisted board task to guide the user through resolution.
+        toast.error('Branch switch failed with stash conflicts', {
+          description:
+            enrichedError.stashPopConflictMessage ??
+            'Stash pop resulted in conflicts. Please resolve the conflicts in your working tree.',
+          duration: 10000,
+        });
+        options?.onStashPopConflict?.({
+          worktreePath: enrichedError.worktreePath,
+          branchName: enrichedError.branchName,
+          stashPopConflictMessage:
+            enrichedError.stashPopConflictMessage ??
+            'Stash pop resulted in conflicts. Please resolve the conflicts in your working tree.',
+        });
+      } else {
+        toast.error('Failed to switch branch', {
+          description: error.message,
+        });
+      }
     },
   });
 }

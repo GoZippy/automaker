@@ -197,13 +197,7 @@ export function createSwitchBranchHandler() {
         isRemote = true;
         const parsed = parseRemoteBranch(branchName);
         if (parsed) {
-          // If a local branch with the same name already exists, just switch to it
-          if (await localBranchExists(worktreePath, parsed.branch)) {
-            targetBranch = parsed.branch;
-          } else {
-            // Will create a local tracking branch from the remote
-            targetBranch = parsed.branch;
-          }
+          targetBranch = parsed.branch;
         }
       }
 
@@ -307,11 +301,37 @@ export function createSwitchBranchHandler() {
       } catch (checkoutError) {
         // If checkout failed and we stashed, try to restore the stash
         if (didStash) {
-          try {
-            await popStash(worktreePath);
-          } catch {
-            // Ignore errors restoring stash - it's still in the stash list
+          const popResult = await popStash(worktreePath);
+          if (popResult.hasConflicts) {
+            // Stash pop itself produced merge conflicts — the working tree is now in a
+            // conflicted state even though the checkout failed. Surface this clearly so
+            // the caller can prompt the user (or AI) to resolve conflicts rather than
+            // simply retrying the branch switch.
+            const checkoutErrorMsg = getErrorMessage(checkoutError);
+            res.status(500).json({
+              success: false,
+              error: checkoutErrorMsg,
+              stashPopConflicts: true,
+              stashPopConflictMessage:
+                'Stash pop resulted in conflicts: your stashed changes were partially reapplied ' +
+                'but produced merge conflicts. Please resolve the conflicts before retrying the branch switch.',
+            });
+            return;
+          } else if (!popResult.success) {
+            // Stash pop failed for a non-conflict reason; the stash entry is still intact.
+            // Include this detail alongside the original checkout error.
+            const checkoutErrorMsg = getErrorMessage(checkoutError);
+            const combinedMessage =
+              `${checkoutErrorMsg}. Additionally, restoring your stashed changes failed: ` +
+              `${popResult.error ?? 'unknown error'} — your changes are still saved in the stash.`;
+            res.status(500).json({
+              success: false,
+              error: combinedMessage,
+              stashPopConflicts: false,
+            });
+            return;
           }
+          // popResult.success === true: stash was cleanly restored, re-throw the checkout error
         }
         throw checkoutError;
       }

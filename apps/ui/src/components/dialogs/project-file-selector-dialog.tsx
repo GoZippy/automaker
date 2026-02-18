@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   FolderOpen,
   Folder,
@@ -70,6 +70,9 @@ export function ProjectFileSelectorDialog({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Ref to track the current request generation; incremented to cancel stale requests
+  const requestGenRef = useRef(0);
+
   // Track the path segments for breadcrumb navigation
   const breadcrumbs = useMemo(() => {
     if (!currentRelativePath) return [];
@@ -82,6 +85,11 @@ export function ProjectFileSelectorDialog({
 
   const browseDirectory = useCallback(
     async (relativePath?: string) => {
+      // Increment the generation counter so any previously in-flight request
+      // knows it has been superseded and should not update state.
+      const generation = ++requestGenRef.current;
+      const isCancelled = () => requestGenRef.current !== generation;
+
       setLoading(true);
       setError('');
       setWarning('');
@@ -93,6 +101,8 @@ export function ProjectFileSelectorDialog({
           relativePath: relativePath || '',
         });
 
+        if (isCancelled()) return;
+
         if (result.success) {
           setCurrentRelativePath(result.currentRelativePath);
           setParentRelativePath(result.parentRelativePath);
@@ -102,9 +112,12 @@ export function ProjectFileSelectorDialog({
           setError(result.error || 'Failed to browse directory');
         }
       } catch (err) {
+        if (isCancelled()) return;
         setError(err instanceof Error ? err.message : 'Failed to load directory contents');
       } finally {
-        setLoading(false);
+        if (!isCancelled()) {
+          setLoading(false);
+        }
       }
     },
     [projectPath]
@@ -117,6 +130,8 @@ export function ProjectFileSelectorDialog({
       setSearchQuery('');
       browseDirectory();
     } else {
+      // Invalidate any in-flight request so it won't clobber the cleared state
+      requestGenRef.current++;
       setCurrentRelativePath('');
       setParentRelativePath(null);
       setEntries([]);

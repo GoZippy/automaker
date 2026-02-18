@@ -40,7 +40,17 @@ export function createStashApplyHandler() {
         return;
       }
 
-      const stashRef = `stash@{${stashIndex}}`;
+      const idx = typeof stashIndex === 'string' ? Number(stashIndex) : stashIndex;
+
+      if (!Number.isInteger(idx) || idx < 0) {
+        res.status(400).json({
+          success: false,
+          error: 'stashIndex must be a non-negative integer',
+        });
+        return;
+      }
+
+      const stashRef = `stash@{${idx}}`;
       const operation = pop ? 'pop' : 'apply';
 
       try {

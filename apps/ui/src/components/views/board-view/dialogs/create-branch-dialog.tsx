@@ -78,9 +78,13 @@ export function CreateBranchDialog({
 
       if (result.success && result.result) {
         setBranches(result.result.branches);
-        // Default to current branch
-        if (result.result.currentBranch) {
-          setBaseBranch(result.result.currentBranch);
+        // Only set the default base branch if no branch is currently selected,
+        // or if the currently selected branch is no longer present in the fetched list
+        const branchNames = result.result.branches.map((b: BranchInfo) => b.name);
+        if (!baseBranch || !branchNames.includes(baseBranch)) {
+          if (result.result.currentBranch) {
+            setBaseBranch(result.result.currentBranch);
+          }
         }
       }
     } catch (err) {
@@ -88,7 +92,7 @@ export function CreateBranchDialog({
     } finally {
       setIsLoadingBranches(false);
     }
-  }, [worktree]);
+  }, [worktree, baseBranch]);
 
   // Reset state and fetch branches when dialog opens
   useEffect(() => {

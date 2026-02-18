@@ -69,6 +69,12 @@ export function SelectRemoteDialog({
           url: r.url,
         }));
         setRemotes(remoteInfos);
+        setSelectedRemote((prev) => {
+          if (prev && remoteInfos.some((r) => r.name === prev)) {
+            return prev;
+          }
+          return remoteInfos.find((r) => r.name === 'origin')?.name ?? remoteInfos[0]?.name ?? '';
+        });
       } else {
         setError(result.error || 'Failed to fetch remotes');
       }
@@ -120,6 +126,12 @@ export function SelectRemoteDialog({
           url: r.url,
         }));
         setRemotes(remoteInfos);
+        setSelectedRemote((prev) => {
+          if (prev && remoteInfos.some((r) => r.name === prev)) {
+            return prev;
+          }
+          return remoteInfos.find((r) => r.name === 'origin')?.name ?? remoteInfos[0]?.name ?? '';
+        });
       } else {
         setError(result.error || 'Failed to refresh remotes');
       }

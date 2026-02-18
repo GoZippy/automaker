@@ -394,6 +394,7 @@ export function Sidebar() {
               onNewProject={handleNewProject}
               onOpenFolder={handleOpenFolder}
               onProjectContextMenu={handleContextMenu}
+              setShowRemoveFromAutomakerDialog={setShowRemoveFromAutomakerDialog}
             />
           )}
 

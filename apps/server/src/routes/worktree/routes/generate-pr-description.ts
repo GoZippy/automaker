@@ -7,7 +7,7 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -20,7 +20,7 @@ import { getErrorMessage, logError } from '../common.js';
 import { getPhaseModelWithOverrides } from '../../../lib/settings-helpers.js';
 
 const logger = createLogger('GeneratePRDescription');
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /** Timeout for AI provider calls in milliseconds (30 seconds) */
 const AI_TIMEOUT_MS = 30_000;
@@ -59,20 +59,33 @@ async function* withTimeout<T>(
   generator: AsyncIterable<T>,
   timeoutMs: number
 ): AsyncGenerator<T, void, unknown> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`AI provider timed out after ${timeoutMs}ms`)), timeoutMs);
+    timerId = setTimeout(
+      () => reject(new Error(`AI provider timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
   });
 
   const iterator = generator[Symbol.asyncIterator]();
   let done = false;
 
-  while (!done) {
-    const result = await Promise.race([iterator.next(), timeoutPromise]);
-    if (result.done) {
-      done = true;
-    } else {
-      yield result.value;
+  try {
+    while (!done) {
+      const result = await Promise.race([iterator.next(), timeoutPromise]).catch(async (err) => {
+        // Timeout (or other error) — attempt to gracefully close the source generator
+        await iterator.return?.();
+        throw err;
+      });
+      if (result.done) {
+        done = true;
+      } else {
+        yield result.value;
+      }
     }
+  } finally {
+    clearTimeout(timerId);
   }
 }
 
@@ -129,12 +142,24 @@ export function createGeneratePRDescriptionHandler(
         return;
       }
 
+      // Validate baseBranch to allow only safe branch name characters
+      if (baseBranch !== undefined && !/^[\w.\-/]+$/.test(baseBranch)) {
+        const response: GeneratePRDescriptionErrorResponse = {
+          success: false,
+          error: 'baseBranch contains invalid characters',
+        };
+        res.status(400).json(response);
+        return;
+      }
+
       logger.info(`Generating PR description for worktree: ${worktreePath}`);
 
       // Get current branch name
-      const { stdout: branchOutput } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-        cwd: worktreePath,
-      });
+      const { stdout: branchOutput } = await execFileAsync(
+        'git',
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { cwd: worktreePath }
+      );
       const branchName = branchOutput.trim();
 
       // Determine the base branch for comparison
@@ -149,7 +174,7 @@ export function createGeneratePRDescriptionHandler(
       let diffIncludesUncommitted = false;
       try {
         // First, try to get diff against the base branch
-        const { stdout: branchDiff } = await execAsync(`git diff ${base}...HEAD`, {
+        const { stdout: branchDiff } = await execFileAsync('git', ['diff', `${base}...HEAD`], {
           cwd: worktreePath,
           maxBuffer: 1024 * 1024 * 5, // 5MB buffer
         });
@@ -160,17 +185,21 @@ export function createGeneratePRDescriptionHandler(
         // If branch comparison fails (e.g., base branch doesn't exist locally),
         // try fetching and comparing against remote base
         try {
-          const { stdout: remoteDiff } = await execAsync(`git diff origin/${base}...HEAD`, {
-            cwd: worktreePath,
-            maxBuffer: 1024 * 1024 * 5,
-          });
+          const { stdout: remoteDiff } = await execFileAsync(
+            'git',
+            ['diff', `origin/${base}...HEAD`],
+            {
+              cwd: worktreePath,
+              maxBuffer: 1024 * 1024 * 5,
+            }
+          );
           diff = remoteDiff;
           // git diff origin/base...HEAD only shows committed changes
           diffIncludesUncommitted = false;
         } catch {
           // Fall back to getting all uncommitted + committed changes
           try {
-            const { stdout: allDiff } = await execAsync('git diff HEAD', {
+            const { stdout: allDiff } = await execFileAsync('git', ['diff', 'HEAD'], {
               cwd: worktreePath,
               maxBuffer: 1024 * 1024 * 5,
             });
@@ -179,11 +208,11 @@ export function createGeneratePRDescriptionHandler(
             diffIncludesUncommitted = true;
           } catch {
             // Last resort: get staged + unstaged changes
-            const { stdout: stagedDiff } = await execAsync('git diff --cached', {
+            const { stdout: stagedDiff } = await execFileAsync('git', ['diff', '--cached'], {
               cwd: worktreePath,
               maxBuffer: 1024 * 1024 * 5,
             });
-            const { stdout: unstagedDiff } = await execAsync('git diff', {
+            const { stdout: unstagedDiff } = await execFileAsync('git', ['diff'], {
               cwd: worktreePath,
               maxBuffer: 1024 * 1024 * 5,
             });
@@ -200,7 +229,7 @@ export function createGeneratePRDescriptionHandler(
       // when the primary diff method (base...HEAD) was used, since it only shows committed changes.
       let hasUncommittedChanges = false;
       try {
-        const { stdout: statusOutput } = await execAsync('git status --porcelain', {
+        const { stdout: statusOutput } = await execFileAsync('git', ['status', '--porcelain'], {
           cwd: worktreePath,
         });
         hasUncommittedChanges = statusOutput.trim().length > 0;
@@ -212,7 +241,7 @@ export function createGeneratePRDescriptionHandler(
 
           // Get staged changes
           try {
-            const { stdout: stagedDiff } = await execAsync('git diff --cached', {
+            const { stdout: stagedDiff } = await execFileAsync('git', ['diff', '--cached'], {
               cwd: worktreePath,
               maxBuffer: 1024 * 1024 * 5,
             });
@@ -225,7 +254,7 @@ export function createGeneratePRDescriptionHandler(
 
           // Get unstaged changes (tracked files only)
           try {
-            const { stdout: unstagedDiff } = await execAsync('git diff', {
+            const { stdout: unstagedDiff } = await execFileAsync('git', ['diff'], {
               cwd: worktreePath,
               maxBuffer: 1024 * 1024 * 5,
             });
@@ -259,8 +288,9 @@ export function createGeneratePRDescriptionHandler(
       // Also get the commit log for context
       let commitLog = '';
       try {
-        const { stdout: logOutput } = await execAsync(
-          `git log ${base}..HEAD --oneline --no-decorate 2>/dev/null || git log --oneline -10 --no-decorate`,
+        const { stdout: logOutput } = await execFileAsync(
+          'git',
+          ['log', `${base}..HEAD`, '--oneline', '--no-decorate'],
           {
             cwd: worktreePath,
             maxBuffer: 1024 * 1024,
@@ -268,7 +298,20 @@ export function createGeneratePRDescriptionHandler(
         );
         commitLog = logOutput.trim();
       } catch {
-        // Ignore commit log errors
+        // If comparing against base fails, fall back to recent commits
+        try {
+          const { stdout: logOutput } = await execFileAsync(
+            'git',
+            ['log', '--oneline', '-10', '--no-decorate'],
+            {
+              cwd: worktreePath,
+              maxBuffer: 1024 * 1024,
+            }
+          );
+          commitLog = logOutput.trim();
+        } catch {
+          // Ignore commit log errors
+        }
       }
 
       if (!diff.trim() && !commitLog.trim()) {

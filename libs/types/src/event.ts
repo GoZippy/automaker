@@ -40,6 +40,9 @@ export type EventType =
   | 'ideation:idea-updated'
   | 'ideation:idea-deleted'
   | 'ideation:idea-converted'
+  | 'worktree:copy-files:copied'
+  | 'worktree:copy-files:skipped'
+  | 'worktree:copy-files:failed'
   | 'worktree:init-started'
   | 'worktree:init-output'
   | 'worktree:init-completed'
@@ -53,6 +56,14 @@ export type EventType =
   | 'test-runner:completed'
   | 'test-runner:error'
   | 'test-runner:result'
+  | 'cherry-pick:started'
+  | 'cherry-pick:success'
+  | 'cherry-pick:conflict'
+  | 'cherry-pick:failure'
+  | 'branchCommitLog:start'
+  | 'branchCommitLog:progress'
+  | 'branchCommitLog:done'
+  | 'branchCommitLog:error'
   | 'notification:created';
 
 export type EventCallback = (type: EventType, payload: unknown) => void;
