@@ -389,11 +389,18 @@
   body {
     overflow: hidden;
     overscroll-behavior: none;
-    -webkit-overflow-scrolling: touch;
-    position: fixed;
     width: 100%;
     height: 100%;
     height: 100dvh;
+  }
+
+  /* iOS Safari: position:fixed on body prevents pull-to-refresh and overscroll bounce.
+     Scoped to touch devices only to avoid breaking desktop browser behaviours. */
+  `@media` (hover: none) and (pointer: coarse) {
+    html,
+    body {
+      position: fixed;
+    }
   }
 
   #app {
