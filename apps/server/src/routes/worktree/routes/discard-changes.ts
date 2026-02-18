@@ -20,20 +20,39 @@ import type { Request, Response } from 'express';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import * as fs from 'fs';
 import { getErrorMessage, logError } from '../common.js';
 
 const execFileAsync = promisify(execFile);
 
 /**
  * Validate that a file path does not escape the worktree directory.
- * Prevents path traversal attacks (e.g., ../../etc/passwd).
+ * Prevents path traversal attacks (e.g., ../../etc/passwd) and
+ * rejects symlinks inside the worktree that point outside of it.
  */
 function validateFilePath(filePath: string, worktreePath: string): boolean {
-  // Resolve the full path relative to the worktree
+  // Resolve the full path relative to the worktree (lexical resolution)
   const resolved = path.resolve(worktreePath, filePath);
   const normalizedWorktree = path.resolve(worktreePath);
-  // Ensure the resolved path starts with the worktree path
-  return resolved.startsWith(normalizedWorktree + path.sep) || resolved === normalizedWorktree;
+
+  // First, perform lexical prefix check
+  const lexicalOk =
+    resolved.startsWith(normalizedWorktree + path.sep) || resolved === normalizedWorktree;
+  if (!lexicalOk) {
+    return false;
+  }
+
+  // Then, attempt symlink-aware validation using realpath.
+  // This catches symlinks inside the worktree that point outside of it.
+  try {
+    const realResolved = fs.realpathSync(resolved);
+    const realWorktree = fs.realpathSync(normalizedWorktree);
+    return realResolved.startsWith(realWorktree + path.sep) || realResolved === realWorktree;
+  } catch {
+    // If realpath fails (e.g., target doesn't exist yet for untracked files),
+    // fall back to the lexical startsWith check which already passed above.
+    return true;
+  }
 }
 
 export function createDiscardChangesHandler() {
