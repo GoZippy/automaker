@@ -28,10 +28,29 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
     ) => {
       if (!currentProject) return;
 
+      // Capture previous cache snapshot for rollback on error
+      const previousFeatures = queryClient.getQueryData<Feature[]>(
+        queryKeys.features.all(currentProject.path)
+      );
+
+      // Optimistically update React Query cache for immediate board refresh
+      // This ensures status changes (e.g., restoring archived features) are reflected immediately
+      queryClient.setQueryData<Feature[]>(
+        queryKeys.features.all(currentProject.path),
+        (existing) => {
+          if (!existing) return existing;
+          return existing.map((f) => (f.id === featureId ? { ...f, ...updates } : f));
+        }
+      );
+
       try {
         const api = getElectronAPI();
         if (!api.features) {
           logger.error('Features API not available');
+          // Rollback optimistic update since we can't persist
+          if (previousFeatures) {
+            queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+          }
           return;
         }
 
@@ -51,6 +70,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         if (result.success && result.feature) {
           const updatedFeature = result.feature as Feature;
           updateFeature(updatedFeature.id, updatedFeature as Partial<Feature>);
+          // Update cache with server-confirmed feature before invalidating
           queryClient.setQueryData<Feature[]>(
             queryKeys.features.all(currentProject.path),
             (features) => {
@@ -66,9 +86,23 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
           });
         } else if (!result.success) {
           logger.error('API features.update failed', result);
+          // Rollback optimistic update on failure
+          if (previousFeatures) {
+            queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+          }
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.features.all(currentProject.path),
+          });
         }
       } catch (error) {
         logger.error('Failed to persist feature update:', error);
+        // Rollback optimistic update on error
+        if (previousFeatures) {
+          queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+        }
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.features.all(currentProject.path),
+        });
       }
     },
     [currentProject, updateFeature, queryClient]

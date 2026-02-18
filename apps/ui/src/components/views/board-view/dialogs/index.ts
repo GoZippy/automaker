@@ -5,6 +5,7 @@ export { CompletedFeaturesModal } from './completed-features-modal';
 export { ArchiveAllVerifiedDialog } from './archive-all-verified-dialog';
 export { DeleteCompletedFeatureDialog } from './delete-completed-feature-dialog';
 export { DependencyLinkDialog, type DependencyLinkType } from './dependency-link-dialog';
+export { DiscardWorktreeChangesDialog } from './discard-worktree-changes-dialog';
 export { EditFeatureDialog } from './edit-feature-dialog';
 export { FollowUpDialog, type FollowUpHistoryEntry } from './follow-up-dialog';
 export { MergeWorktreeDialog, type MergeConflictInfo } from './merge-worktree-dialog';

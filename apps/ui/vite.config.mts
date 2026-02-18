@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
@@ -12,6 +13,67 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Read version from package.json
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const appVersion = packageJson.version;
+
+// Generate a build hash for cache busting.
+// Uses git commit hash when available (deterministic across CI builds),
+// falls back to version + timestamp for non-git environments.
+// This ensures users get fresh SW caches after each deployment.
+function getBuildHash(): string {
+  // Try git commit hash first (deterministic, same across CI workers)
+  try {
+    const { execSync } = require('child_process');
+    const gitHash = execSync('git rev-parse --short=8 HEAD', { encoding: 'utf-8' }).trim();
+    if (gitHash) return gitHash;
+  } catch {
+    // Not a git repo or git not available — fall back
+  }
+  // Fallback: version + timestamp (unique per build)
+  return crypto.createHash('md5').update(`${appVersion}-${Date.now()}`).digest('hex').slice(0, 8);
+}
+
+const buildHash = getBuildHash();
+
+/**
+ * Vite plugin to inject the build hash into sw.js for cache busting.
+ *
+ * Problem: CACHE_NAME = 'automaker-v3' is hardcoded in the service worker.
+ * After a deployment, users may continue getting stale HTML from the SW cache
+ * if someone forgets to manually bump the version.
+ *
+ * Solution: Replace the hardcoded version with a build-time hash so the
+ * SW cache is automatically invalidated on each deployment.
+ */
+function swCacheBuster(): Plugin {
+  const CACHE_NAME_PATTERN = /const CACHE_NAME = 'automaker-v3';/;
+  return {
+    name: 'sw-cache-buster',
+    // In build mode: copy sw.js to output with hash injected
+    // In dev mode: no transformation needed (sw.js is served from public/)
+    apply: 'build',
+    closeBundle() {
+      const swPath = path.resolve(__dirname, 'dist', 'sw.js');
+      if (!fs.existsSync(swPath)) {
+        console.warn('[sw-cache-buster] sw.js not found in dist/ — skipping cache bust');
+        return;
+      }
+      const swContent = fs.readFileSync(swPath, 'utf-8');
+      if (!CACHE_NAME_PATTERN.test(swContent)) {
+        console.error(
+          '[sw-cache-buster] Could not find CACHE_NAME declaration in sw.js. ' +
+            'The service worker cache will NOT be busted on this deploy! ' +
+            "Check that public/sw.js still contains: const CACHE_NAME = 'automaker-v3';"
+        );
+        return;
+      }
+      const updated = swContent.replace(
+        CACHE_NAME_PATTERN,
+        `const CACHE_NAME = 'automaker-v3-${buildHash}';`
+      );
+      fs.writeFileSync(swPath, updated, 'utf-8');
+      console.log(`[sw-cache-buster] Injected build hash: automaker-v3-${buildHash}`);
+    },
+  };
+}
 
 /**
  * Vite plugin to optimize the HTML output for mobile PWA loading speed.
@@ -121,6 +183,8 @@ export default defineConfig(({ command }) => {
       // Mobile PWA optimization: demote route-specific vendor chunks from
       // modulepreload (blocks FCP) to prefetch (background download)
       mobilePreloadOptimizer(),
+      // Inject build hash into sw.js CACHE_NAME for automatic cache busting
+      swCacheBuster(),
     ],
     resolve: {
       alias: {
@@ -215,6 +279,9 @@ export default defineConfig(({ command }) => {
     },
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
+      // Build hash injected for IDB cache busting — matches what swCacheBuster injects
+      // into the SW CACHE_NAME. When the build changes, both caches are invalidated together.
+      __APP_BUILD_HASH__: JSON.stringify(buildHash),
     },
   };
 });

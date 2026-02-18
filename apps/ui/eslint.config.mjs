@@ -51,6 +51,7 @@ const eslintConfig = defineConfig([
         getComputedStyle: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
+        requestIdleCallback: 'readonly',
         alert: 'readonly',
         // DOM Element Types
         HTMLElement: 'readonly',
@@ -62,6 +63,8 @@ const eslintConfig = defineConfig([
         HTMLHeadingElement: 'readonly',
         HTMLParagraphElement: 'readonly',
         HTMLImageElement: 'readonly',
+        HTMLLinkElement: 'readonly',
+        HTMLScriptElement: 'readonly',
         Element: 'readonly',
         SVGElement: 'readonly',
         SVGSVGElement: 'readonly',
@@ -91,6 +94,7 @@ const eslintConfig = defineConfig([
         Response: 'readonly',
         RequestInit: 'readonly',
         RequestCache: 'readonly',
+        ServiceWorkerRegistration: 'readonly',
         // Timers
         setTimeout: 'readonly',
         setInterval: 'readonly',
@@ -136,6 +140,25 @@ const eslintConfig = defineConfig([
           minimumDescriptionLength: 10,
         },
       ],
+    },
+  },
+  {
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: {
+        // Service Worker globals
+        self: 'readonly',
+        caches: 'readonly',
+        fetch: 'readonly',
+        Headers: 'readonly',
+        Response: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     },
   },
   globalIgnores([

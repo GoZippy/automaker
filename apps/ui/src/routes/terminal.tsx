@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { TerminalView } from '@/components/views/terminal-view';
 import { z } from 'zod';
 
 const terminalSearchSchema = z.object({
@@ -9,12 +8,7 @@ const terminalSearchSchema = z.object({
   nonce: z.coerce.number().optional(),
 });
 
+// Component is lazy-loaded via terminal.lazy.tsx for code splitting
 export const Route = createFileRoute('/terminal')({
   validateSearch: terminalSearchSchema,
-  component: RouteComponent,
 });
-
-function RouteComponent() {
-  const { cwd, branch, mode, nonce } = Route.useSearch();
-  return <TerminalView initialCwd={cwd} initialBranch={branch} initialMode={mode} nonce={nonce} />;
-}

@@ -44,13 +44,28 @@ describe('switch-branch route', () => {
       if (command === 'git rev-parse --abbrev-ref HEAD') {
         return { stdout: 'main\n', stderr: '' };
       }
-      if (command === 'git rev-parse --verify feature/test') {
+      if (command === 'git rev-parse --verify "feature/test"') {
         return { stdout: 'abc123\n', stderr: '' };
+      }
+      if (command === 'git branch -r --format="%(refname:short)"') {
+        return { stdout: '', stderr: '' };
       }
       if (command === 'git status --porcelain') {
         return { stdout: '?? .automaker/\n?? notes.txt\n', stderr: '' };
       }
       if (command === 'git checkout "feature/test"') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git fetch --all --quiet') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git stash list') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command.startsWith('git stash push')) {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git stash pop') {
         return { stdout: '', stderr: '' };
       }
       return { stdout: '', stderr: '' };
@@ -65,12 +80,14 @@ describe('switch-branch route', () => {
         previousBranch: 'main',
         currentBranch: 'feature/test',
         message: "Switched to branch 'feature/test'",
+        hasConflicts: false,
+        stashedChanges: false,
       },
     });
     expect(mockExec).toHaveBeenCalledWith('git checkout "feature/test"', { cwd: '/repo/path' });
   });
 
-  it('should block switching when tracked files are modified', async () => {
+  it('should stash changes and switch when tracked files are modified', async () => {
     req.body = {
       worktreePath: '/repo/path',
       branchName: 'feature/test',
@@ -80,14 +97,34 @@ describe('switch-branch route', () => {
       if (command === 'git rev-parse --abbrev-ref HEAD') {
         return { stdout: 'main\n', stderr: '' };
       }
-      if (command === 'git rev-parse --verify feature/test') {
+      if (command === 'git rev-parse --verify "feature/test"') {
         return { stdout: 'abc123\n', stderr: '' };
       }
       if (command === 'git status --porcelain') {
         return { stdout: ' M src/index.ts\n?? notes.txt\n', stderr: '' };
       }
-      if (command === 'git status --short') {
-        return { stdout: ' M src/index.ts\n?? notes.txt\n', stderr: '' };
+      if (command === 'git branch -r --format="%(refname:short)"') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git stash list') {
+        // Return different counts before and after stash to indicate stash was created
+        if (!mockExec._stashCalled) {
+          mockExec._stashCalled = true;
+          return { stdout: '', stderr: '' };
+        }
+        return { stdout: 'stash@{0}: automaker-branch-switch\n', stderr: '' };
+      }
+      if (command.startsWith('git stash push')) {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git checkout "feature/test"') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git fetch --all --quiet') {
+        return { stdout: '', stderr: '' };
+      }
+      if (command === 'git stash pop') {
+        return { stdout: 'Already applied.\n', stderr: '' };
       }
       return { stdout: '', stderr: '' };
     });
@@ -95,12 +132,15 @@ describe('switch-branch route', () => {
     const handler = createSwitchBranchHandler();
     await handler(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      error:
-        'Cannot switch branches: you have uncommitted changes (M src/index.ts). Please commit your changes first.',
-      code: 'UNCOMMITTED_CHANGES',
+      success: true,
+      result: {
+        previousBranch: 'main',
+        currentBranch: 'feature/test',
+        message: "Switched to branch 'feature/test' (local changes stashed and reapplied)",
+        hasConflicts: false,
+        stashedChanges: true,
+      },
     });
   });
 });

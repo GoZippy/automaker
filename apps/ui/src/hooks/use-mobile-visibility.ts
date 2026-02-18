@@ -23,6 +23,7 @@
 import { useEffect } from 'react';
 import { focusManager, onlineManager } from '@tanstack/react-query';
 import { isMobileDevice } from '@/lib/mobile-detect';
+import { queryClient } from '@/lib/query-client';
 
 /**
  * Grace period (ms) after the app becomes visible before allowing refetches.
@@ -108,9 +109,19 @@ export function useMobileOnlineManager(): void {
           // App was backgrounded for a long time.
           // Briefly mark as offline to prevent all queries from refetching at once,
           // then restore online status after a delay so queries refetch gradually.
+          //
+          // IMPORTANT: When online is restored, invalidate all stale queries.
+          // This fixes a race condition where WebSocket reconnects immediately
+          // and fires invalidations during the offline window — those invalidations
+          // are silently dropped by React Query because it thinks we're offline.
+          // By invalidating stale queries after going online, we catch any updates
+          // that were missed during the offline grace period.
           onlineManager.setOnline(false);
           setTimeout(() => {
             onlineManager.setOnline(true);
+            // Re-invalidate all stale queries to catch any WebSocket events
+            // that were dropped during the offline grace period
+            queryClient.invalidateQueries({ stale: true });
           }, 2000);
         }
       }

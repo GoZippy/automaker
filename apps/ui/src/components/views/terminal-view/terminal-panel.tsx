@@ -53,7 +53,12 @@ import { getElectronAPI } from '@/lib/electron';
 import { getApiKey, getSessionToken, getServerUrlSync } from '@/lib/http-api-client';
 import { useIsMobile } from '@/hooks/use-media-query';
 import { useVirtualKeyboardResize } from '@/hooks/use-virtual-keyboard-resize';
-import { MobileTerminalControls } from './mobile-terminal-controls';
+import { MobileTerminalShortcuts } from './mobile-terminal-shortcuts';
+import {
+  StickyModifierKeys,
+  applyStickyModifier,
+  type StickyModifier,
+} from './sticky-modifier-keys';
 
 const logger = createLogger('Terminal');
 const NO_STORE_CACHE_MODE: RequestCache = 'no-store';
@@ -158,6 +163,10 @@ export function TerminalPanel({
   const showSearchRef = useRef(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
+  // Sticky modifier key state (Ctrl or Alt) for the terminal toolbar
+  const [stickyModifier, setStickyModifier] = useState<StickyModifier>(null);
+  const stickyModifierRef = useRef<StickyModifier>(null);
+
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'auth_failed'
   >('connecting');
@@ -166,7 +175,7 @@ export function TerminalPanel({
   const INITIAL_RECONNECT_DELAY = 1000;
   const [processExitCode, setProcessExitCode] = useState<number | null>(null);
 
-  // Detect mobile viewport for quick controls
+  // Detect mobile viewport for shortcuts bar
   const isMobile = useIsMobile();
 
   // Track virtual keyboard height on mobile to prevent overlap
@@ -354,7 +363,13 @@ export function TerminalPanel({
     }
   }, []);
 
-  // Send raw input to terminal via WebSocket (used by mobile quick controls)
+  // Handle sticky modifier toggle and keep ref in sync
+  const handleStickyModifierChange = useCallback((modifier: StickyModifier) => {
+    setStickyModifier(modifier);
+    stickyModifierRef.current = modifier;
+  }, []);
+
+  // Send raw input to terminal via WebSocket (used by mobile shortcuts bar)
   const sendTerminalInput = useCallback((data: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'input', data }));
@@ -1207,10 +1222,24 @@ export function TerminalPanel({
 
     connect();
 
-    // Handle terminal input
+    // Handle terminal input - apply sticky modifier if active
     const dataHandler = terminal.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'input', data }));
+        const modifier = stickyModifierRef.current;
+        if (modifier) {
+          const modified = applyStickyModifier(data, modifier);
+          if (modified !== null) {
+            wsRef.current.send(JSON.stringify({ type: 'input', data: modified }));
+          } else {
+            // Could not apply modifier (e.g. non-ASCII input), send as-is
+            wsRef.current.send(JSON.stringify({ type: 'input', data }));
+          }
+          // Clear sticky modifier after one key press (one-shot behavior)
+          stickyModifierRef.current = null;
+          setStickyModifier(null);
+        } else {
+          wsRef.current.send(JSON.stringify({ type: 'input', data }));
+        }
       }
     });
 
@@ -2037,6 +2066,15 @@ export function TerminalPanel({
 
           <div className="w-px h-3 mx-0.5 bg-border" />
 
+          {/* Sticky modifier keys (Ctrl, Alt) */}
+          <StickyModifierKeys
+            activeModifier={stickyModifier}
+            onModifierChange={handleStickyModifierChange}
+            isConnected={connectionStatus === 'connected'}
+          />
+
+          <div className="w-px h-3 mx-0.5 bg-border" />
+
           {/* Split/close buttons */}
           <Button
             variant="ghost"
@@ -2157,9 +2195,9 @@ export function TerminalPanel({
         </div>
       )}
 
-      {/* Mobile quick controls - special keys and arrow keys for touch devices */}
+      {/* Mobile shortcuts bar - special keys and arrow keys for touch devices */}
       {isMobile && (
-        <MobileTerminalControls
+        <MobileTerminalShortcuts
           onSendInput={sendTerminalInput}
           isConnected={connectionStatus === 'connected'}
         />

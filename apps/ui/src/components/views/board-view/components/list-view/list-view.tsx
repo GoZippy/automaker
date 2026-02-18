@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { getBlockingDependencies } from '@automaker/dependency-resolver';
+import { useAppStore, formatShortcut } from '@/store/app-store';
 import type { Feature } from '@/store/app-store';
 import type { PipelineConfig, FeatureStatusWithPipeline } from '@automaker/types';
 import { ListHeader } from './list-header';
@@ -134,7 +135,7 @@ const EmptyState = memo(function EmptyState({ onAddFeature }: { onAddFeature?: (
     >
       <p className="text-sm mb-4">No features to display</p>
       {onAddFeature && (
-        <Button variant="outline" size="sm" onClick={onAddFeature}>
+        <Button variant="default" size="sm" onClick={onAddFeature}>
           <Plus className="w-4 h-4 mr-2" />
           Add Feature
         </Button>
@@ -196,6 +197,10 @@ export const ListView = memo(function ListView({
 }: ListViewProps) {
   // Track collapsed state for each status group
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Get the keyboard shortcut for adding features
+  const keyboardShortcuts = useAppStore((state) => state.keyboardShortcuts);
+  const addFeatureShortcut = keyboardShortcuts.addFeature || 'N';
 
   // Generate status groups from columnFeaturesMap
   const statusGroups = useMemo<StatusGroup[]>(() => {
@@ -439,18 +444,21 @@ export const ListView = memo(function ListView({
         })}
       </div>
 
-      {/* Footer with Add Feature button */}
+      {/* Footer with Add Feature button, styled like board view */}
       {onAddFeature && (
-        <div className="border-t border-border px-4 py-3">
+        <div className="border-t border-border px-4 py-2">
           <Button
-            variant="outline"
+            variant="default"
             size="sm"
             onClick={onAddFeature}
-            className="w-full sm:w-auto"
+            className="w-full h-9 text-sm"
             data-testid="list-view-add-feature"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Feature
+            <span className="ml-auto pl-2 text-[10px] font-mono opacity-70 bg-black/20 px-1.5 py-0.5 rounded">
+              {formatShortcut(addFeatureShortcut, true)}
+            </span>
           </Button>
         </div>
       )}

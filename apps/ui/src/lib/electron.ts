@@ -2572,8 +2572,8 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    discardChanges: async (worktreePath: string) => {
-      console.log('[Mock] Discarding changes:', { worktreePath });
+    discardChanges: async (worktreePath: string, files?: string[]) => {
+      console.log('[Mock] Discarding changes:', { worktreePath, files });
       return {
         success: true,
         result: {

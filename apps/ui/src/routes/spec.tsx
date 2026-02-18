@@ -1,6 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { SpecView } from '@/components/views/spec-view';
 
-export const Route = createFileRoute('/spec')({
-  component: SpecView,
-});
+// Component is lazy-loaded via spec.lazy.tsx for code splitting
+export const Route = createFileRoute('/spec')({});

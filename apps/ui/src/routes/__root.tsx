@@ -1,6 +1,6 @@
 import { createRootRoute, Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState, useCallback, useDeferredValue, useRef } from 'react';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { createLogger } from '@automaker/utils/logger';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -26,10 +26,17 @@ import {
 } from '@/lib/http-api-client';
 import {
   hydrateStoreFromSettings,
+  parseLocalStorageSettings,
   signalMigrationComplete,
   performSettingsMigration,
 } from '@/hooks/use-settings-migration';
 import { queryClient } from '@/lib/query-client';
+import {
+  createIDBPersister,
+  hasWarmIDBCache,
+  PERSIST_MAX_AGE_MS,
+  PERSIST_THROTTLE_MS,
+} from '@/lib/query-persist';
 import { Toaster } from 'sonner';
 import { ThemeOption, themeOptions } from '@/config/theme-options';
 import { SandboxRiskDialog } from '@/components/dialogs/sandbox-risk-dialog';
@@ -38,6 +45,8 @@ import { LoadingState } from '@/components/ui/loading-state';
 import { useProjectSettingsLoader } from '@/hooks/use-project-settings-loader';
 import { useIsCompact } from '@/hooks/use-media-query';
 import type { Project } from '@/lib/electron';
+import type { GlobalSettings } from '@automaker/types';
+import { syncUICache, restoreFromUICache } from '@/store/ui-cache-store';
 
 const logger = createLogger('RootLayout');
 const IS_DEV = import.meta.env.DEV;
@@ -49,6 +58,28 @@ const NO_STORE_CACHE_MODE: RequestCache = 'no-store';
 const AUTO_OPEN_HISTORY_INDEX = 0;
 const SINGLE_PROJECT_COUNT = 1;
 const DEFAULT_LAST_OPENED_TIME_MS = 0;
+
+// IndexedDB persister for React Query cache (survives tab discard)
+const idbPersister = createIDBPersister();
+
+/** Options for PersistQueryClientProvider */
+const persistOptions = {
+  persister: idbPersister,
+  maxAge: PERSIST_MAX_AGE_MS,
+  // Throttle IndexedDB writes to prevent excessive I/O on every query state change.
+  // Without this, every query update triggers an IndexedDB write — especially costly on mobile.
+  throttleTime: PERSIST_THROTTLE_MS,
+  // Build hash injected by Vite — same hash used by swCacheBuster for the SW CACHE_NAME.
+  // When the app is rebuilt, this changes and both the IDB query cache and SW cache
+  // are invalidated together, preventing stale data from surviving a deployment.
+  // In dev mode this is a stable hash of the package version so the cache persists
+  // across hot reloads.
+  buster: typeof __APP_BUILD_HASH__ !== 'undefined' ? __APP_BUILD_HASH__ : '',
+  dehydrateOptions: {
+    shouldDehydrateQuery: (query: { state: { status: string } }) =>
+      query.state.status === 'success',
+  },
+};
 const AUTO_OPEN_STATUS = {
   idle: 'idle',
   opening: 'opening',
@@ -265,6 +296,21 @@ function RootLayoutContent() {
     setIsMounted(true);
   }, []);
 
+  // Sync critical UI state to the persistent UI cache store
+  // This keeps the cache up-to-date so tab discard recovery is instant
+  useEffect(() => {
+    const unsubscribe = useAppStore.subscribe((state) => {
+      syncUICache({
+        currentProject: state.currentProject,
+        sidebarOpen: state.sidebarOpen,
+        sidebarStyle: state.sidebarStyle,
+        worktreePanelCollapsed: state.worktreePanelCollapsed,
+        collapsedNavSections: state.collapsedNavSections,
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   // Check sandbox environment only after user is authenticated, setup is complete, and settings are loaded
   useEffect(() => {
     // Skip if already decided
@@ -391,6 +437,11 @@ function RootLayoutContent() {
   // Initialize authentication
   // - Electron mode: Uses API key from IPC (header-based auth)
   // - Web mode: Uses HTTP-only session cookie
+  //
+  // Optimizations applied:
+  // 1. Instant hydration from localStorage settings cache (optimistic)
+  // 2. Parallelized server checks: verifySession + fetchSettings fire together
+  // 3. Server settings reconcile in background after optimistic render
   useEffect(() => {
     // Prevent concurrent auth checks
     if (authCheckRunning.current) {
@@ -401,40 +452,171 @@ function RootLayoutContent() {
       authCheckRunning.current = true;
 
       try {
+        // OPTIMIZATION: Restore UI layout from the UI cache store immediately.
+        // This gives instant visual continuity (sidebar state, nav sections, etc.)
+        // before server settings arrive. Will be reconciled by hydrateStoreFromSettings().
+        restoreFromUICache((state) => useAppStore.setState(state));
+
+        // OPTIMIZATION: Immediately hydrate from localStorage settings cache
+        // This gives the user an instant UI while server data loads in the background
+        const cachedSettings = parseLocalStorageSettings();
+        let optimisticallyHydrated = false;
+        if (cachedSettings && cachedSettings.projects && cachedSettings.projects.length > 0) {
+          logger.info('[FAST_HYDRATE] Optimistically hydrating from localStorage cache');
+          hydrateStoreFromSettings(cachedSettings as GlobalSettings);
+          optimisticallyHydrated = true;
+        }
+
         // Initialize API key for Electron mode
         await initApiKey();
 
+        // OPTIMIZATION: Skip blocking on server health check when both caches are warm.
+        //
+        // On a normal cold start, we must wait for the server to be ready before
+        // making auth/settings requests. But on a tab restore or page reload, the
+        // server is almost certainly already running — waiting up to ~12s for health
+        // check retries just shows a blank loading screen when the user has data cached.
+        //
+        // When BOTH of these are true:
+        //   1. localStorage settings cache has valid project data (optimisticallyHydrated)
+        //   2. IndexedDB React Query cache exists and is recent (< 24h old)
+        //
+        // ...we mark auth as complete immediately with the cached data, then verify
+        // the session in the background. If the session turns out to be invalid, the
+        // 401 handler in http-api-client.ts will fire automaker:logged-out and redirect.
+        // If the server isn't reachable, automaker:server-offline will redirect to /login.
+        //
+        // This turns tab-restore from: blank screen → 1-3s wait → board
+        // into:                        board renders instantly → silent background verify
+        // Pass the current buster so hasWarmIDBCache can verify the cache is still
+        // valid for this build. If the buster changed (new deployment or dev restart),
+        // PersistQueryClientProvider will wipe the IDB cache — we must not treat
+        // it as warm in that case or we'll render the board with empty queries.
+        const currentBuster = typeof __APP_BUILD_HASH__ !== 'undefined' ? __APP_BUILD_HASH__ : '';
+        const idbWarm = optimisticallyHydrated && (await hasWarmIDBCache(currentBuster));
+        if (idbWarm) {
+          logger.info('[FAST_HYDRATE] Warm caches detected — marking auth complete optimistically');
+          signalMigrationComplete();
+          useAuthStore.getState().setAuthState({
+            isAuthenticated: true,
+            authChecked: true,
+            settingsLoaded: true,
+          });
+
+          // Verify session + fetch fresh settings in the background.
+          // The UI is already rendered; this reconciles any stale data.
+          void (async () => {
+            try {
+              const serverReady = await waitForServerReady();
+              if (!serverReady) {
+                // Server is down — the server-offline event handler in __root will redirect
+                handleServerOffline();
+                return;
+              }
+              const api = getHttpApiClient();
+              const [sessionValid, settingsResult] = await Promise.all([
+                verifySession().catch(() => false),
+                api.settings.getGlobal().catch(() => ({ success: false, settings: null }) as const),
+              ]);
+              if (!sessionValid) {
+                // Session expired while user was away — log them out
+                logger.warn('[FAST_HYDRATE] Background verify: session invalid, logging out');
+                useAuthStore.getState().setAuthState({ isAuthenticated: false, authChecked: true });
+                return;
+              }
+              if (settingsResult.success && settingsResult.settings) {
+                const { settings: finalSettings } = await performSettingsMigration(
+                  settingsResult.settings as unknown as Parameters<
+                    typeof performSettingsMigration
+                  >[0]
+                );
+                hydrateStoreFromSettings(finalSettings);
+                logger.info('[FAST_HYDRATE] Background reconcile complete');
+              }
+            } catch (error) {
+              logger.warn(
+                '[FAST_HYDRATE] Background verify failed (server may be restarting):',
+                error
+              );
+            }
+          })();
+
+          return; // Auth is done — foreground initAuth exits here
+        }
+
+        // Cold start path: server not yet confirmed running, wait for it
         const serverReady = await waitForServerReady();
         if (!serverReady) {
           handleServerOffline();
           return;
         }
 
-        // 1. Verify session (Single Request, ALL modes)
-        let isValid = false;
-        try {
-          isValid = await verifySession();
-        } catch (error) {
-          logger.warn('Session verification failed (likely network/server issue):', error);
-          isValid = false;
-        }
+        // OPTIMIZATION: Fire verifySession and fetchSettings in parallel
+        // instead of waiting for session verification before fetching settings
+        const api = getHttpApiClient();
+        const [sessionValid, settingsResult] = await Promise.all([
+          verifySession().catch((error) => {
+            logger.warn('Session verification failed (likely network/server issue):', error);
+            return false;
+          }),
+          api.settings.getGlobal().catch((error) => {
+            logger.warn('Settings fetch failed during parallel init:', error);
+            return { success: false, settings: null } as const;
+          }),
+        ]);
 
-        if (isValid) {
-          // 2. Load settings (and hydrate stores) before marking auth as checked.
-          // This prevents useSettingsSync from pushing default/empty state to the server
-          // when the backend is still starting up or temporarily unavailable.
-          const api = getHttpApiClient();
+        if (sessionValid) {
+          // Settings were fetched in parallel - use them directly
+          if (settingsResult.success && settingsResult.settings) {
+            const { settings: finalSettings, migrated } = await performSettingsMigration(
+              settingsResult.settings as unknown as Parameters<typeof performSettingsMigration>[0]
+            );
+
+            if (migrated) {
+              logger.info('Settings migration from localStorage completed');
+            }
+
+            // Hydrate store with the final settings (reconcile with optimistic data)
+            hydrateStoreFromSettings(finalSettings);
+
+            // CRITICAL: Wait for React to render the hydrated state before
+            // signaling completion. Zustand updates are synchronous, but React
+            // hasn't necessarily re-rendered yet. This prevents race conditions
+            // where useSettingsSync reads state before the UI has updated.
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            // Signal that settings hydration is complete FIRST.
+            signalMigrationComplete();
+
+            // Now mark auth as checked AND settings as loaded.
+            useAuthStore.getState().setAuthState({
+              isAuthenticated: true,
+              authChecked: true,
+              settingsLoaded: true,
+            });
+
+            return;
+          }
+
+          // Settings weren't available in parallel response - retry with backoff
           try {
-            const maxAttempts = 8;
+            const maxAttempts = 6;
             const baseDelayMs = 250;
-            let lastError: unknown = null;
+            let lastError: unknown = settingsResult;
 
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+              const delayMs = Math.min(1500, baseDelayMs * attempt);
+              logger.warn(
+                `Settings not ready (attempt ${attempt}/${maxAttempts}); retrying in ${delayMs}ms...`,
+                lastError
+              );
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+
               try {
-                const settingsResult = await api.settings.getGlobal();
-                if (settingsResult.success && settingsResult.settings) {
+                const retryResult = await api.settings.getGlobal();
+                if (retryResult.success && retryResult.settings) {
                   const { settings: finalSettings, migrated } = await performSettingsMigration(
-                    settingsResult.settings as unknown as Parameters<
+                    retryResult.settings as unknown as Parameters<
                       typeof performSettingsMigration
                     >[0]
                   );
@@ -443,25 +625,10 @@ function RootLayoutContent() {
                     logger.info('Settings migration from localStorage completed');
                   }
 
-                  // Hydrate store with the final settings (merged if migration occurred)
                   hydrateStoreFromSettings(finalSettings);
-
-                  // CRITICAL: Wait for React to render the hydrated state before
-                  // signaling completion. Zustand updates are synchronous, but React
-                  // hasn't necessarily re-rendered yet. This prevents race conditions
-                  // where useSettingsSync reads state before the UI has updated.
                   await new Promise((resolve) => setTimeout(resolve, 0));
-
-                  // Signal that settings hydration is complete FIRST.
-                  // This ensures useSettingsSync's waitForMigrationComplete() will resolve
-                  // immediately when it starts after auth state change, preventing it from
-                  // syncing default empty state to the server.
                   signalMigrationComplete();
 
-                  // Now mark auth as checked AND settings as loaded.
-                  // The settingsLoaded flag ensures useSettingsSync won't start syncing
-                  // until settings have been properly hydrated, even if authChecked was
-                  // set earlier by login-view.
                   useAuthStore.getState().setAuthState({
                     isAuthenticated: true,
                     authChecked: true,
@@ -471,24 +638,29 @@ function RootLayoutContent() {
                   return;
                 }
 
-                lastError = settingsResult;
+                lastError = retryResult;
               } catch (error) {
                 lastError = error;
               }
-
-              const delayMs = Math.min(1500, baseDelayMs * attempt);
-              logger.warn(
-                `Settings not ready (attempt ${attempt}/${maxAttempts}); retrying in ${delayMs}ms...`,
-                lastError
-              );
-              await new Promise((resolve) => setTimeout(resolve, delayMs));
             }
 
             throw lastError ?? new Error('Failed to load settings');
           } catch (error) {
             logger.error('Failed to fetch settings after valid session:', error);
+
+            // If optimistically hydrated, allow the user to continue with cached data
+            if (optimisticallyHydrated) {
+              logger.info('[FAST_HYDRATE] Using optimistic cache as fallback (server unavailable)');
+              signalMigrationComplete();
+              useAuthStore.getState().setAuthState({
+                isAuthenticated: true,
+                authChecked: true,
+                settingsLoaded: true,
+              });
+              return;
+            }
+
             // If we can't load settings, we must NOT start syncing defaults to the server.
-            // Treat as not authenticated for now (backend likely unavailable) and unblock sync hook.
             useAuthStore.getState().setAuthState({ isAuthenticated: false, authChecked: true });
             signalMigrationComplete();
             if (location.pathname !== '/logged-out' && location.pathname !== '/login') {
@@ -892,14 +1064,14 @@ function RootLayout() {
   const shouldShowDevtools = IS_DEV && showQueryDevtools && !isCompact;
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <FileBrowserProvider>
         <RootLayoutContent />
       </FileBrowserProvider>
       {shouldShowDevtools && (
         <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
       )}
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 }
 

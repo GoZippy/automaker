@@ -10,7 +10,7 @@
  * blank screens, reloads, and battery drain on flaky mobile connections.
  */
 
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createLogger } from '@automaker/utils/logger';
 import { isConnectionError, handleServerOffline } from './http-api-client';
@@ -63,10 +63,10 @@ export const STALE_TIMES = {
  * and component unmounts, preventing blank screens on re-mount.
  */
 export const GC_TIMES = {
-  /** Default garbage collection time */
-  DEFAULT: isMobileDevice ? 15 * 60 * 1000 : 5 * 60 * 1000, // 15 min on mobile, 5 min desktop
+  /** Default garbage collection time - must exceed persist maxAge for cache to survive tab discard */
+  DEFAULT: isMobileDevice ? 15 * 60 * 1000 : 10 * 60 * 1000, // 15 min on mobile, 10 min desktop
   /** Extended for expensive queries */
-  EXTENDED: isMobileDevice ? 30 * 60 * 1000 : 10 * 60 * 1000, // 30 min on mobile, 10 min desktop
+  EXTENDED: isMobileDevice ? 30 * 60 * 1000 : 15 * 60 * 1000, // 30 min on mobile, 15 min desktop
 } as const;
 
 /**
@@ -143,13 +143,14 @@ export const queryClient = new QueryClient({
       // invalidation handles real-time updates; polling handles the rest.
       refetchOnWindowFocus: !isMobileDevice,
       refetchOnReconnect: true,
-      // On mobile, only refetch on mount if data is stale (not always).
+      // On mobile, only refetch on mount if data is stale (true = refetch only when stale).
+      // On desktop, always refetch on mount for freshest data ('always' = refetch even if fresh).
       // This prevents unnecessary network requests when navigating between
       // routes, which was causing blank screen flickers on mobile.
-      refetchOnMount: isMobileDevice ? true : true,
+      refetchOnMount: isMobileDevice ? true : 'always',
       // Keep previous data visible while refetching to prevent blank flashes.
       // This is especially important on mobile where network is slower.
-      placeholderData: isMobileDevice ? (previousData: unknown) => previousData : undefined,
+      placeholderData: isMobileDevice ? keepPreviousData : undefined,
     },
     mutations: {
       onError: handleMutationError,

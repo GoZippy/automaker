@@ -1,5 +1,8 @@
 // Automaker Service Worker - Optimized for mobile PWA loading performance
-const CACHE_NAME = 'automaker-v3';
+// NOTE: CACHE_NAME is injected with a build hash at build time by the swCacheBuster
+// Vite plugin (see vite.config.mts). In development it stays as-is; in production
+// builds it becomes e.g. 'automaker-v3-a1b2c3d4' for automatic cache invalidation.
+const CACHE_NAME = 'automaker-v3'; // replaced at build time → 'automaker-v3-<hash>'
 
 // Separate cache for immutable hashed assets (long-lived)
 const IMMUTABLE_CACHE = 'automaker-immutable-v2';
@@ -17,8 +20,47 @@ const SHELL_ASSETS = [
   '/favicon.ico',
 ];
 
-// Whether mobile caching is enabled (set via message from main thread)
+// Whether mobile caching is enabled (set via message from main thread).
+// Persisted to Cache Storage so it survives aggressive SW termination on mobile.
 let mobileMode = false;
+const MOBILE_MODE_CACHE_KEY = 'automaker-sw-config';
+const MOBILE_MODE_URL = '/sw-config/mobile-mode';
+
+/**
+ * Persist mobileMode to Cache Storage so it survives SW restarts.
+ * Service workers on mobile get killed aggressively — without persistence,
+ * mobileMode resets to false and API caching silently stops working.
+ */
+async function persistMobileMode(enabled) {
+  try {
+    const cache = await caches.open(MOBILE_MODE_CACHE_KEY);
+    const response = new Response(JSON.stringify({ mobileMode: enabled }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await cache.put(MOBILE_MODE_URL, response);
+  } catch (_e) {
+    // Best-effort persistence — SW still works without it
+  }
+}
+
+/**
+ * Restore mobileMode from Cache Storage on SW startup.
+ */
+async function restoreMobileMode() {
+  try {
+    const cache = await caches.open(MOBILE_MODE_CACHE_KEY);
+    const response = await cache.match(MOBILE_MODE_URL);
+    if (response) {
+      const data = await response.json();
+      mobileMode = !!data.mobileMode;
+    }
+  } catch (_e) {
+    // Best-effort restore — defaults to false
+  }
+}
+
+// Restore mobileMode immediately on SW startup
+restoreMobileMode();
 
 // API endpoints that are safe to serve from stale cache on mobile.
 // These are GET-only, read-heavy endpoints where showing slightly stale data
@@ -64,12 +106,13 @@ function isApiCacheFresh(response) {
 }
 
 /**
- * Clone a response and add a timestamp header for cache freshness tracking
+ * Clone a response and add a timestamp header for cache freshness tracking.
+ * Uses arrayBuffer() instead of blob() to avoid doubling memory for large responses.
  */
 async function addCacheTimestamp(response) {
   const headers = new Headers(response.headers);
   headers.set('x-sw-cached-at', String(Date.now()));
-  const body = await response.clone().blob();
+  const body = await response.clone().arrayBuffer();
   return new Response(body, {
     status: response.status,
     statusText: response.statusText,
@@ -89,7 +132,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   // Remove old caches (both regular and immutable)
-  const validCaches = new Set([CACHE_NAME, IMMUTABLE_CACHE, API_CACHE]);
+  const validCaches = new Set([CACHE_NAME, IMMUTABLE_CACHE, API_CACHE, MOBILE_MODE_CACHE_KEY]);
   event.waitUntil(
     Promise.all([
       // Clean old caches
@@ -116,7 +159,7 @@ self.addEventListener('activate', (event) => {
 function isImmutableAsset(url) {
   const path = url.pathname;
   // Match Vite's hashed asset pattern: /assets/<name>-<hash>.<ext>
-  if (path.startsWith('/assets/') && /\-[A-Za-z0-9_-]{6,}\.\w+$/.test(path)) {
+  if (path.startsWith('/assets/') && /-[A-Za-z0-9_-]{6,}\.\w+$/.test(path)) {
     return true;
   }
   // Font files are immutable (woff2, woff, ttf, otf)
@@ -166,28 +209,35 @@ self.addEventListener('fetch', (event) => {
           const cache = await caches.open(API_CACHE);
           const cachedResponse = await cache.match(event.request);
 
-          // Start network fetch in background regardless
-          const fetchPromise = fetch(event.request)
-            .then(async (networkResponse) => {
-              if (networkResponse.ok) {
-                // Store with timestamp for freshness checking
-                const timestampedResponse = await addCacheTimestamp(networkResponse);
-                cache.put(event.request, timestampedResponse);
-              }
-              return networkResponse;
-            })
-            .catch((err) => {
-              // Network failed - if we have cache, that's fine (returned below)
-              // If no cache, propagate the error
-              if (cachedResponse) return null;
-              throw err;
-            });
+          // Helper: start a network fetch that updates the cache on success.
+          // Lazily invoked so we don't fire a network request when the cache
+          // is already fresh — saves bandwidth and battery on mobile.
+          const startNetworkFetch = () =>
+            fetch(event.request)
+              .then(async (networkResponse) => {
+                if (networkResponse.ok) {
+                  // Store with timestamp for freshness checking
+                  const timestampedResponse = await addCacheTimestamp(networkResponse);
+                  cache.put(event.request, timestampedResponse);
+                }
+                return networkResponse;
+              })
+              .catch((err) => {
+                // Network failed - if we have cache, that's fine (returned below)
+                // If no cache, propagate the error
+                if (cachedResponse) return null;
+                throw err;
+              });
 
           // If we have a fresh-enough cached response, return it immediately
+          // without firing a background fetch — React Query's own refetching
+          // will request fresh data when its stale time expires.
           if (cachedResponse && isApiCacheFresh(cachedResponse)) {
-            // Return cached data instantly - network update happens in background
             return cachedResponse;
           }
+
+          // From here the cache is either stale or missing — start the network fetch.
+          const fetchPromise = startNetworkFetch();
 
           // If we have a stale cached response but network is slow, race them:
           // Return whichever resolves first (cached immediately vs network)
@@ -283,7 +333,7 @@ self.addEventListener('fetch', (event) => {
             });
           }
           return response;
-        } catch (e) {
+        } catch (_e) {
           // Offline: serve the cached app shell
           const cached = await caches.match('/');
           return (
@@ -344,8 +394,10 @@ self.addEventListener('message', (event) => {
   // Enable/disable mobile caching mode.
   // Sent from main thread after detecting the device is mobile.
   // This allows the SW to apply mobile-specific caching strategies.
+  // Persisted to Cache Storage so it survives SW restarts on mobile.
   if (event.data?.type === 'SET_MOBILE_MODE') {
     mobileMode = !!event.data.enabled;
+    persistMobileMode(mobileMode);
   }
 
   // Warm the immutable cache with critical assets the app will need.

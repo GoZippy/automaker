@@ -11,7 +11,7 @@ import {
 import type { ReasoningEffort } from '@automaker/types';
 import { FeatureImagePath as DescriptionImagePath } from '@/components/ui/description-image-dropzone';
 import { getElectronAPI } from '@/lib/electron';
-import { isConnectionError, handleServerOffline } from '@/lib/http-api-client';
+import { isConnectionError, handleServerOffline, getHttpApiClient } from '@/lib/http-api-client';
 import { toast } from 'sonner';
 import { useAutoMode } from '@/hooks/use-auto-mode';
 import { useVerifyFeature, useResumeFeature } from '@/hooks/mutations';
@@ -903,17 +903,40 @@ export function useBoardActions({
 
   const handleUnarchiveFeature = useCallback(
     (feature: Feature) => {
-      const updates = {
+      // Determine the branch to restore to:
+      // - If the feature had a branch assigned, keep it (preserves worktree context)
+      // - If no branch was assigned, it will show on the primary worktree
+      const featureBranch = feature.branchName;
+
+      // Check if the feature will be visible on the current worktree view
+      const willBeVisibleOnCurrentView = !featureBranch
+        ? !currentWorktreeBranch ||
+          (projectPath ? isPrimaryWorktreeBranch(projectPath, currentWorktreeBranch) : true)
+        : featureBranch === currentWorktreeBranch;
+
+      const updates: Partial<Feature> = {
         status: 'verified' as const,
       };
       updateFeature(feature.id, updates);
       persistFeatureUpdate(feature.id, updates);
 
-      toast.success('Feature restored', {
-        description: `Moved back to verified: ${truncateDescription(feature.description)}`,
-      });
+      if (willBeVisibleOnCurrentView) {
+        toast.success('Feature restored', {
+          description: `Moved back to verified: ${truncateDescription(feature.description)}`,
+        });
+      } else {
+        toast.success('Feature restored', {
+          description: `Moved back to verified on branch "${featureBranch}": ${truncateDescription(feature.description)}`,
+        });
+      }
     },
-    [updateFeature, persistFeatureUpdate]
+    [
+      updateFeature,
+      persistFeatureUpdate,
+      currentWorktreeBranch,
+      projectPath,
+      isPrimaryWorktreeBranch,
+    ]
   );
 
   const handleViewOutput = useCallback(
@@ -1073,28 +1096,53 @@ export function useBoardActions({
 
   const handleArchiveAllVerified = useCallback(async () => {
     const verifiedFeatures = features.filter((f) => f.status === 'verified');
+    if (verifiedFeatures.length === 0) return;
 
+    // Optimistically update all features in the UI immediately
     for (const feature of verifiedFeatures) {
-      const isRunning = runningAutoTasks.includes(feature.id);
-      if (isRunning) {
-        try {
-          await autoMode.stopFeature(feature.id);
-        } catch (error) {
-          logger.error('Error stopping feature before archive:', error);
+      updateFeature(feature.id, { status: 'completed' as const });
+    }
+
+    // Stop any running features in parallel (non-blocking for the UI)
+    const runningVerified = verifiedFeatures.filter((f) => runningAutoTasks.includes(f.id));
+    if (runningVerified.length > 0) {
+      await Promise.allSettled(
+        runningVerified.map((feature) =>
+          autoMode.stopFeature(feature.id).catch((error) => {
+            logger.error('Error stopping feature before archive:', error);
+          })
+        )
+      );
+    }
+
+    // Use bulk update API for a single server request instead of N individual calls
+    try {
+      if (currentProject) {
+        const api = getHttpApiClient();
+        const featureIds = verifiedFeatures.map((f) => f.id);
+        const result = await api.features.bulkUpdate(currentProject.path, featureIds, {
+          status: 'completed' as const,
+        });
+
+        if (result.success) {
+          // Refresh features from server to sync React Query cache
+          loadFeatures();
+        } else {
+          logger.error('Bulk archive failed:', result);
+          // Reload features to sync state with server
+          loadFeatures();
         }
       }
-      // Archive the feature by setting status to completed
-      const updates = {
-        status: 'completed' as const,
-      };
-      updateFeature(feature.id, updates);
-      persistFeatureUpdate(feature.id, updates);
+    } catch (error) {
+      logger.error('Failed to bulk archive features:', error);
+      // Reload features to sync state with server on error
+      loadFeatures();
     }
 
     toast.success('All verified features archived', {
       description: `Archived ${verifiedFeatures.length} feature(s).`,
     });
-  }, [features, runningAutoTasks, autoMode, updateFeature, persistFeatureUpdate]);
+  }, [features, runningAutoTasks, autoMode, updateFeature, currentProject, loadFeatures]);
 
   const handleDuplicateFeature = useCallback(
     async (feature: Feature, asChild: boolean = false) => {

@@ -14,12 +14,7 @@ import type {
   TestRunnerOutputEvent,
   TestRunnerCompletedEvent,
 } from '@/types/electron';
-import type {
-  WorktreePanelProps,
-  WorktreeInfo,
-  TestSessionInfo,
-  BranchSwitchConflictInfo,
-} from './types';
+import type { WorktreePanelProps, WorktreeInfo, TestSessionInfo } from './types';
 import {
   useWorktrees,
   useDevServers,
@@ -36,10 +31,13 @@ import {
   WorktreeDropdown,
 } from './components';
 import { useAppStore } from '@/store/app-store';
-import { ViewWorktreeChangesDialog, PushToRemoteDialog, MergeWorktreeDialog } from '../dialogs';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import {
+  ViewWorktreeChangesDialog,
+  PushToRemoteDialog,
+  MergeWorktreeDialog,
+  DiscardWorktreeChangesDialog,
+} from '../dialogs';
 import { TestLogsPanel } from '@/components/ui/test-logs-panel';
-import { Undo2 } from 'lucide-react';
 import { getElectronAPI } from '@/lib/electron';
 
 /** Threshold for switching from tabs to dropdown layout (number of worktrees) */
@@ -471,30 +469,9 @@ export function WorktreePanel({
     setDiscardChangesDialogOpen(true);
   }, []);
 
-  const handleConfirmDiscardChanges = useCallback(async () => {
-    if (!discardChangesWorktree) return;
-
-    try {
-      const api = getHttpApiClient();
-      const result = await api.worktree.discardChanges(discardChangesWorktree.path);
-
-      if (result.success) {
-        toast.success('Changes discarded', {
-          description: `Discarded changes in ${discardChangesWorktree.branch}`,
-        });
-        // Refresh worktrees to update the changes status
-        fetchWorktrees({ silent: true });
-      } else {
-        toast.error('Failed to discard changes', {
-          description: result.error || 'Unknown error',
-        });
-      }
-    } catch (error) {
-      toast.error('Failed to discard changes', {
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }, [discardChangesWorktree, fetchWorktrees]);
+  const handleDiscardCompleted = useCallback(() => {
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees]);
 
   // Handle opening the log panel for a specific worktree
   const handleViewDevServerLogs = useCallback((worktree: WorktreeInfo) => {
@@ -679,17 +656,12 @@ export function WorktreePanel({
           projectPath={projectPath}
         />
 
-        {/* Discard Changes Confirmation Dialog */}
-        <ConfirmDialog
+        {/* Discard Changes Dialog */}
+        <DiscardWorktreeChangesDialog
           open={discardChangesDialogOpen}
           onOpenChange={setDiscardChangesDialogOpen}
-          onConfirm={handleConfirmDiscardChanges}
-          title="Discard Changes"
-          description={`Are you sure you want to discard all changes in "${discardChangesWorktree?.branch}"? This will reset staged changes, discard modifications to tracked files, and remove untracked files. This action cannot be undone.`}
-          icon={Undo2}
-          iconClassName="text-destructive"
-          confirmText="Discard Changes"
-          confirmVariant="destructive"
+          worktree={discardChangesWorktree}
+          onDiscarded={handleDiscardCompleted}
         />
 
         {/* Dev Server Logs Panel */}
@@ -1015,17 +987,12 @@ export function WorktreePanel({
         projectPath={projectPath}
       />
 
-      {/* Discard Changes Confirmation Dialog */}
-      <ConfirmDialog
+      {/* Discard Changes Dialog */}
+      <DiscardWorktreeChangesDialog
         open={discardChangesDialogOpen}
         onOpenChange={setDiscardChangesDialogOpen}
-        onConfirm={handleConfirmDiscardChanges}
-        title="Discard Changes"
-        description={`Are you sure you want to discard all changes in "${discardChangesWorktree?.branch}"? This will reset staged changes, discard modifications to tracked files, and remove untracked files. This action cannot be undone.`}
-        icon={Undo2}
-        iconClassName="text-destructive"
-        confirmText="Discard Changes"
-        confirmVariant="destructive"
+        worktree={discardChangesWorktree}
+        onDiscarded={handleDiscardCompleted}
       />
 
       {/* Dev Server Logs Panel */}

@@ -21,8 +21,6 @@ const SPECIAL_KEYS = {
 const CTRL_KEYS = {
   'Ctrl+C': '\x03', // Interrupt / SIGINT
   'Ctrl+Z': '\x1a', // Suspend / SIGTSTP
-  'Ctrl+D': '\x04', // EOF
-  'Ctrl+L': '\x0c', // Clear screen
   'Ctrl+A': '\x01', // Move to beginning of line
   'Ctrl+B': '\x02', // Move cursor back (tmux prefix)
 } as const;
@@ -34,7 +32,7 @@ const ARROW_KEYS = {
   left: '\x1b[D',
 } as const;
 
-interface MobileTerminalControlsProps {
+interface MobileTerminalShortcutsProps {
   /** Callback to send input data to the terminal WebSocket */
   onSendInput: (data: string) => void;
   /** Whether the terminal is connected and ready */
@@ -42,14 +40,17 @@ interface MobileTerminalControlsProps {
 }
 
 /**
- * Mobile quick controls bar for terminal interaction on touch devices.
+ * Mobile shortcuts bar for terminal interaction on touch devices.
  * Provides special keys (Escape, Tab, Ctrl+C, etc.) and arrow keys that are
  * typically unavailable on mobile virtual keyboards.
  *
  * Anchored at the top of the terminal panel, above the terminal content.
  * Can be collapsed to a minimal toggle to maximize terminal space.
  */
-export function MobileTerminalControls({ onSendInput, isConnected }: MobileTerminalControlsProps) {
+export function MobileTerminalShortcuts({
+  onSendInput,
+  isConnected,
+}: MobileTerminalShortcutsProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Track repeat interval for arrow key long-press
@@ -108,10 +109,10 @@ export function MobileTerminalControls({ onSendInput, isConnected }: MobileTermi
         <button
           className="flex items-center gap-1 px-4 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors touch-manipulation"
           onClick={() => setIsCollapsed(false)}
-          title="Show quick controls"
+          title="Show shortcuts"
         >
           <ChevronDown className="h-3.5 w-3.5" />
-          <span>Controls</span>
+          <span>Shortcuts</span>
         </button>
       </div>
     );
@@ -123,7 +124,7 @@ export function MobileTerminalControls({ onSendInput, isConnected }: MobileTermi
       <button
         className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 touch-manipulation"
         onClick={() => setIsCollapsed(true)}
-        title="Hide quick controls"
+        title="Hide shortcuts"
       >
         <ChevronUp className="h-4 w-4" />
       </button>
@@ -132,12 +133,12 @@ export function MobileTerminalControls({ onSendInput, isConnected }: MobileTermi
       <div className="w-px h-6 bg-border shrink-0" />
 
       {/* Special keys */}
-      <ControlButton
+      <ShortcutButton
         label="Esc"
         onPress={() => sendKey(SPECIAL_KEYS.escape)}
         disabled={!isConnected}
       />
-      <ControlButton
+      <ShortcutButton
         label="Tab"
         onPress={() => sendKey(SPECIAL_KEYS.tab)}
         disabled={!isConnected}
@@ -147,54 +148,22 @@ export function MobileTerminalControls({ onSendInput, isConnected }: MobileTermi
       <div className="w-px h-6 bg-border shrink-0" />
 
       {/* Common Ctrl shortcuts */}
-      <ControlButton
+      <ShortcutButton
         label="^C"
         title="Ctrl+C (Interrupt)"
         onPress={() => sendKey(CTRL_KEYS['Ctrl+C'])}
         disabled={!isConnected}
       />
-      <ControlButton
+      <ShortcutButton
         label="^Z"
         title="Ctrl+Z (Suspend)"
         onPress={() => sendKey(CTRL_KEYS['Ctrl+Z'])}
         disabled={!isConnected}
       />
-      <ControlButton
-        label="^D"
-        title="Ctrl+D (EOF)"
-        onPress={() => sendKey(CTRL_KEYS['Ctrl+D'])}
-        disabled={!isConnected}
-      />
-      <ControlButton
-        label="^L"
-        title="Ctrl+L (Clear)"
-        onPress={() => sendKey(CTRL_KEYS['Ctrl+L'])}
-        disabled={!isConnected}
-      />
-      <ControlButton
+      <ShortcutButton
         label="^B"
         title="Ctrl+B (Back/tmux prefix)"
         onPress={() => sendKey(CTRL_KEYS['Ctrl+B'])}
-        disabled={!isConnected}
-      />
-
-      {/* Separator */}
-      <div className="w-px h-6 bg-border shrink-0" />
-
-      {/* Navigation keys */}
-      <ControlButton
-        label="Del"
-        onPress={() => sendKey(SPECIAL_KEYS.delete)}
-        disabled={!isConnected}
-      />
-      <ControlButton
-        label="Home"
-        onPress={() => sendKey(SPECIAL_KEYS.home)}
-        disabled={!isConnected}
-      />
-      <ControlButton
-        label="End"
-        onPress={() => sendKey(SPECIAL_KEYS.end)}
         disabled={!isConnected}
       />
 
@@ -226,14 +195,34 @@ export function MobileTerminalControls({ onSendInput, isConnected }: MobileTermi
         onRelease={handleArrowRelease}
         disabled={!isConnected}
       />
+
+      {/* Separator */}
+      <div className="w-px h-6 bg-border shrink-0" />
+
+      {/* Navigation keys */}
+      <ShortcutButton
+        label="Del"
+        onPress={() => sendKey(SPECIAL_KEYS.delete)}
+        disabled={!isConnected}
+      />
+      <ShortcutButton
+        label="Home"
+        onPress={() => sendKey(SPECIAL_KEYS.home)}
+        disabled={!isConnected}
+      />
+      <ShortcutButton
+        label="End"
+        onPress={() => sendKey(SPECIAL_KEYS.end)}
+        disabled={!isConnected}
+      />
     </div>
   );
 }
 
 /**
- * Individual control button for special keys and shortcuts.
+ * Individual shortcut button for special keys.
  */
-function ControlButton({
+function ShortcutButton({
   label,
   title,
   onPress,

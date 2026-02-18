@@ -692,6 +692,10 @@ export class HttpApiClient implements ElectronAPI {
   private eventCallbacks: Map<EventType, Set<EventCallback>> = new Map();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnecting = false;
+  /** Consecutive reconnect failure count for exponential backoff */
+  private reconnectAttempts = 0;
+  /** Visibility change handler reference for cleanup */
+  private visibilityHandler: (() => void) | null = null;
 
   constructor() {
     this.serverUrl = getServerUrl();
@@ -708,6 +712,27 @@ export class HttpApiClient implements ElectronAPI {
           // Still attempt WebSocket connection - it may work with cookie auth
           this.connectWebSocket();
         });
+    }
+
+    // OPTIMIZATION: Reconnect WebSocket immediately when tab becomes visible
+    // This eliminates the reconnection delay after tab discard/background
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        // If WebSocket is disconnected, reconnect immediately
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          logger.info('Tab became visible - attempting immediate WebSocket reconnect');
+          // Clear any pending reconnect timer
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.reconnectAttempts = 0; // Reset backoff on visibility change
+          this.connectWebSocket();
+        }
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.visibilityHandler);
     }
   }
 
@@ -832,6 +857,7 @@ export class HttpApiClient implements ElectronAPI {
       this.ws.onopen = () => {
         logger.info('WebSocket connected');
         this.isConnecting = false;
+        this.reconnectAttempts = 0; // Reset backoff on successful connection
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
@@ -863,12 +889,27 @@ export class HttpApiClient implements ElectronAPI {
         logger.info('WebSocket disconnected');
         this.isConnecting = false;
         this.ws = null;
-        // Attempt to reconnect after 5 seconds
+
+        // OPTIMIZATION: Exponential backoff instead of fixed 5-second delay
+        // First attempt: immediate (0ms), then 500ms → 1s → 2s → 5s max
         if (!this.reconnectTimer) {
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
+          const backoffDelays = [0, 500, 1000, 2000, 5000];
+          const delayMs =
+            backoffDelays[Math.min(this.reconnectAttempts, backoffDelays.length - 1)] ?? 5000;
+          this.reconnectAttempts++;
+
+          if (delayMs === 0) {
+            // Immediate reconnect on first attempt
             this.connectWebSocket();
-          }, 5000);
+          } else {
+            logger.info(
+              `WebSocket reconnecting in ${delayMs}ms (attempt ${this.reconnectAttempts})`
+            );
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              this.connectWebSocket();
+            }, delayMs);
+          }
         }
       };
 
@@ -2147,8 +2188,8 @@ export class HttpApiClient implements ElectronAPI {
       this.httpDelete('/api/worktree/init-script', { projectPath }),
     runInitScript: (projectPath: string, worktreePath: string, branch: string) =>
       this.post('/api/worktree/run-init-script', { projectPath, worktreePath, branch }),
-    discardChanges: (worktreePath: string) =>
-      this.post('/api/worktree/discard-changes', { worktreePath }),
+    discardChanges: (worktreePath: string, files?: string[]) =>
+      this.post('/api/worktree/discard-changes', { worktreePath, files }),
     onInitScriptEvent: (
       callback: (event: {
         type: 'worktree:init-started' | 'worktree:init-output' | 'worktree:init-completed';

@@ -28,8 +28,13 @@ export default function App() {
     if (savedPreference === 'true') {
       return false;
     }
-    // Only show splash once per session
-    if (sessionStorage.getItem('automaker-splash-shown')) {
+    // Only show splash once per browser session.
+    // Uses localStorage (not sessionStorage) so tab restores after discard
+    // don't replay the splash — sessionStorage is cleared when a tab is discarded.
+    // The flag is written on splash complete and cleared when the tab is fully closed
+    // (via the 'pagehide' + persisted=false event, which fires on true tab close but
+    // not on discard/background). This gives "once per actual session" semantics.
+    if (localStorage.getItem('automaker-splash-shown-session')) {
       return false;
     }
     return true;
@@ -103,8 +108,23 @@ export default function App() {
   useMobileOnlineManager();
 
   const handleSplashComplete = useCallback(() => {
-    sessionStorage.setItem('automaker-splash-shown', 'true');
+    // Mark splash as shown for this session (survives tab discard/restore)
+    localStorage.setItem('automaker-splash-shown-session', 'true');
     setShowSplash(false);
+  }, []);
+
+  // Clear the splash-shown flag when the tab is truly closed (not just discarded).
+  // `pagehide` with persisted=false fires on real navigation/close but NOT on discard,
+  // so discarded tabs that are restored skip the splash while true re-opens show it.
+  useEffect(() => {
+    const handlePageHide = (e: PageTransitionEvent) => {
+      if (!e.persisted) {
+        // Tab is being closed or navigating away (not going into bfcache)
+        localStorage.removeItem('automaker-splash-shown-session');
+      }
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
   }, []);
 
   return (

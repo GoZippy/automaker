@@ -1304,8 +1304,11 @@ export interface WorktreeAPI {
     }) => void
   ) => () => void;
 
-  // Discard changes for a worktree
-  discardChanges: (worktreePath: string) => Promise<{
+  // Discard changes for a worktree (optionally only specific files)
+  discardChanges: (
+    worktreePath: string,
+    files?: string[]
+  ) => Promise<{
     success: boolean;
     result?: {
       discarded: boolean;
