@@ -407,7 +407,7 @@ export function ProjectFileSelectorDialog({
                             e.stopPropagation();
                             handleNavigateInto(entry);
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent/50 transition-all shrink-0"
+                          className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 p-0.5 rounded hover:bg-accent/50 transition-all shrink-0"
                           title={`Open ${entry.name}`}
                         >
                           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
