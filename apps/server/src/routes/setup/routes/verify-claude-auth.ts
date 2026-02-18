@@ -110,6 +110,7 @@ export function createVerifyClaudeAuthHandler() {
       let authenticated = false;
       let errorMessage = '';
       let receivedAnyContent = false;
+      let cleanupEnv: (() => void) | undefined;
 
       // Create secure auth session
       const sessionId = `claude-auth-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -151,7 +152,7 @@ export function createVerifyClaudeAuthHandler() {
         AuthSessionManager.createSession(sessionId, authMethod || 'api_key', apiKey, 'anthropic');
 
         // Create temporary environment override for SDK call
-        const _cleanupEnv = createTempEnvOverride(authEnv);
+        cleanupEnv = createTempEnvOverride(authEnv);
 
         // Run a minimal query to verify authentication
         const stream = query({
@@ -313,6 +314,8 @@ export function createVerifyClaudeAuthHandler() {
         }
       } finally {
         clearTimeout(timeoutId);
+        // Restore process.env to its original state
+        cleanupEnv?.();
         // Clean up the auth session
         AuthSessionManager.destroySession(sessionId);
       }

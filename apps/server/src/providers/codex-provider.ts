@@ -788,7 +788,7 @@ export class CodexProvider extends BaseProvider {
         overrides.push({ key: 'features.web_search_request', value: true });
       }
 
-      buildConfigOverrides(overrides);
+      const configOverrideArgs = buildConfigOverrides(overrides);
       const preExecArgs: string[] = [];
 
       // Add additional directories with write access
@@ -807,6 +807,7 @@ export class CodexProvider extends BaseProvider {
         CODEX_MODEL_FLAG,
         options.model,
         CODEX_JSON_FLAG,
+        ...configOverrideArgs,
         '-', // Read prompt from stdin to avoid shell escaping issues
       ];
 

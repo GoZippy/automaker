@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { GeminiAuthStatus } from '@automaker/types';
 // Note: persist middleware removed - settings now sync via API (use-settings-sync.ts)
 
 // CLI Installation Status
@@ -127,21 +128,8 @@ export interface ZaiAuthStatus {
   error?: string;
 }
 
-// Gemini Auth Method
-export type GeminiAuthMethod =
-  | 'cli_login' // Gemini CLI is installed and authenticated
-  | 'api_key_env' // GOOGLE_API_KEY or GEMINI_API_KEY environment variable
-  | 'api_key' // Manually stored API key
-  | 'none';
-
-// Gemini Auth Status
-export interface GeminiAuthStatus {
-  authenticated: boolean;
-  method: GeminiAuthMethod;
-  hasApiKey?: boolean;
-  hasEnvApiKey?: boolean;
-  error?: string;
-}
+// GeminiAuthStatus is imported from @automaker/types (method: 'google_login' | 'api_key' | 'vertex_ai' | 'none')
+export type { GeminiAuthStatus };
 
 // Claude Auth Method - all possible authentication sources
 export type ClaudeAuthMethod =

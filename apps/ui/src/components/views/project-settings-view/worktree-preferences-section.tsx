@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ShellSyntaxEditor } from '@/components/ui/shell-syntax-editor';
 import {
   GitBranch,
@@ -11,6 +12,9 @@ import {
   RotateCcw,
   Trash2,
   PanelBottomClose,
+  Copy,
+  Plus,
+  FolderOpen,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -19,6 +23,7 @@ import { toast } from 'sonner';
 import { useAppStore } from '@/store/app-store';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import type { Project } from '@/lib/electron';
+import { ProjectFileSelectorDialog } from '@/components/dialogs/project-file-selector-dialog';
 
 interface WorktreePreferencesSectionProps {
   project: Project;
@@ -42,6 +47,8 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
   const setDefaultDeleteBranch = useAppStore((s) => s.setDefaultDeleteBranch);
   const getAutoDismissInitScriptIndicator = useAppStore((s) => s.getAutoDismissInitScriptIndicator);
   const setAutoDismissInitScriptIndicator = useAppStore((s) => s.setAutoDismissInitScriptIndicator);
+  const getWorktreeCopyFiles = useAppStore((s) => s.getWorktreeCopyFiles);
+  const setWorktreeCopyFiles = useAppStore((s) => s.setWorktreeCopyFiles);
 
   // Get effective worktrees setting (project override or global fallback)
   const projectUseWorktrees = getProjectUseWorktrees(project.path);
@@ -53,6 +60,11 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Copy files state
+  const [newCopyFilePath, setNewCopyFilePath] = useState('');
+  const [fileSelectorOpen, setFileSelectorOpen] = useState(false);
+  const copyFiles = getWorktreeCopyFiles(project.path);
 
   // Get the current settings for this project
   const showIndicator = getShowInitScriptIndicator(project.path);
@@ -93,6 +105,9 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
               response.settings.autoDismissInitScriptIndicator
             );
           }
+          if (response.settings.worktreeCopyFiles !== undefined) {
+            setWorktreeCopyFiles(currentPath, response.settings.worktreeCopyFiles);
+          }
         }
       } catch (error) {
         if (!isCancelled) {
@@ -112,6 +127,7 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
     setShowInitScriptIndicator,
     setDefaultDeleteBranch,
     setAutoDismissInitScriptIndicator,
+    setWorktreeCopyFiles,
   ]);
 
   // Load init script content when project changes
@@ -218,6 +234,97 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
   const handleContentChange = useCallback((value: string) => {
     setScriptContent(value);
   }, []);
+
+  // Add a new file path to copy list
+  const handleAddCopyFile = useCallback(async () => {
+    const trimmed = newCopyFilePath.trim();
+    if (!trimmed) return;
+
+    // Normalize: remove leading ./ or /
+    const normalized = trimmed.replace(/^\.\//, '').replace(/^\//, '');
+    if (!normalized) return;
+
+    // Check for duplicates
+    const currentFiles = getWorktreeCopyFiles(project.path);
+    if (currentFiles.includes(normalized)) {
+      toast.error('File already in list', {
+        description: `"${normalized}" is already configured for copying.`,
+      });
+      return;
+    }
+
+    const updatedFiles = [...currentFiles, normalized];
+    setWorktreeCopyFiles(project.path, updatedFiles);
+    setNewCopyFilePath('');
+
+    // Persist to server
+    try {
+      const httpClient = getHttpApiClient();
+      await httpClient.settings.updateProject(project.path, {
+        worktreeCopyFiles: updatedFiles,
+      });
+      toast.success('Copy file added', {
+        description: `"${normalized}" will be copied to new worktrees.`,
+      });
+    } catch (error) {
+      console.error('Failed to persist worktreeCopyFiles:', error);
+      toast.error('Failed to save copy files setting');
+    }
+  }, [project.path, newCopyFilePath, getWorktreeCopyFiles, setWorktreeCopyFiles]);
+
+  // Remove a file path from copy list
+  const handleRemoveCopyFile = useCallback(
+    async (filePath: string) => {
+      const currentFiles = getWorktreeCopyFiles(project.path);
+      const updatedFiles = currentFiles.filter((f) => f !== filePath);
+      setWorktreeCopyFiles(project.path, updatedFiles);
+
+      // Persist to server
+      try {
+        const httpClient = getHttpApiClient();
+        await httpClient.settings.updateProject(project.path, {
+          worktreeCopyFiles: updatedFiles,
+        });
+        toast.success('Copy file removed');
+      } catch (error) {
+        console.error('Failed to persist worktreeCopyFiles:', error);
+        toast.error('Failed to save copy files setting');
+      }
+    },
+    [project.path, getWorktreeCopyFiles, setWorktreeCopyFiles]
+  );
+
+  // Handle files selected from the file selector dialog
+  const handleFileSelectorSelect = useCallback(
+    async (paths: string[]) => {
+      const currentFiles = getWorktreeCopyFiles(project.path);
+
+      // Filter out duplicates
+      const newPaths = paths.filter((p) => !currentFiles.includes(p));
+      if (newPaths.length === 0) {
+        toast.info('All selected files are already in the list');
+        return;
+      }
+
+      const updatedFiles = [...currentFiles, ...newPaths];
+      setWorktreeCopyFiles(project.path, updatedFiles);
+
+      // Persist to server
+      try {
+        const httpClient = getHttpApiClient();
+        await httpClient.settings.updateProject(project.path, {
+          worktreeCopyFiles: updatedFiles,
+        });
+        toast.success(`${newPaths.length} ${newPaths.length === 1 ? 'file' : 'files'} added`, {
+          description: newPaths.map((p) => `"${p}"`).join(', '),
+        });
+      } catch (error) {
+        console.error('Failed to persist worktreeCopyFiles:', error);
+        toast.error('Failed to save copy files setting');
+      }
+    },
+    [project.path, getWorktreeCopyFiles, setWorktreeCopyFiles]
+  );
 
   return (
     <div
@@ -382,6 +489,92 @@ export function WorktreePreferencesSection({ project }: WorktreePreferencesSecti
               When deleting a worktree, automatically check the "Also delete the branch" option.
             </p>
           </div>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t border-border/30" />
+
+        {/* Copy Files Section */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Copy className="w-4 h-4 text-brand-500" />
+            <Label className="text-foreground font-medium">Copy Files to Worktrees</Label>
+          </div>
+          <p className="text-xs text-muted-foreground/80 leading-relaxed">
+            Specify files or directories (relative to project root) to automatically copy into new
+            worktrees. Useful for untracked files like{' '}
+            <code className="font-mono text-foreground/60">.env</code>,{' '}
+            <code className="font-mono text-foreground/60">.env.local</code>, or local config files
+            that aren&apos;t committed to git.
+          </p>
+
+          {/* Current file list */}
+          {copyFiles.length > 0 && (
+            <div className="space-y-1.5">
+              {copyFiles.map((filePath) => (
+                <div
+                  key={filePath}
+                  className="flex items-center gap-2 group/item px-3 py-1.5 rounded-lg bg-accent/20 hover:bg-accent/40 transition-colors"
+                >
+                  <FileCode className="w-3.5 h-3.5 text-muted-foreground/60 flex-shrink-0" />
+                  <code className="font-mono text-sm text-foreground/80 flex-1 truncate">
+                    {filePath}
+                  </code>
+                  <button
+                    onClick={() => handleRemoveCopyFile(filePath)}
+                    className="p-0.5 rounded text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive transition-all flex-shrink-0"
+                    title={`Remove ${filePath}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add new file input */}
+          <div className="flex items-center gap-2">
+            <Input
+              value={newCopyFilePath}
+              onChange={(e) => setNewCopyFilePath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCopyFile();
+                }
+              }}
+              placeholder=".env, config/local.json, etc."
+              className="flex-1 h-8 text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddCopyFile}
+              disabled={!newCopyFilePath.trim()}
+              className="gap-1.5 h-8"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFileSelectorOpen(true)}
+              className="gap-1.5 h-8"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Browse
+            </Button>
+          </div>
+
+          {/* File selector dialog */}
+          <ProjectFileSelectorDialog
+            open={fileSelectorOpen}
+            onOpenChange={setFileSelectorOpen}
+            onSelect={handleFileSelectorSelect}
+            projectPath={project.path}
+            existingFiles={copyFiles}
+          />
         </div>
 
         {/* Separator */}

@@ -15,8 +15,9 @@ const execAsync = promisify(exec);
 export function createPullHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath } = req.body as {
+      const { worktreePath, remote } = req.body as {
         worktreePath: string;
+        remote?: string;
       };
 
       if (!worktreePath) {
@@ -33,8 +34,11 @@ export function createPullHandler() {
       });
       const branchName = branchOutput.trim();
 
+      // Use specified remote or default to 'origin'
+      const targetRemote = remote || 'origin';
+
       // Fetch latest from remote
-      await execAsync('git fetch origin', { cwd: worktreePath });
+      await execAsync(`git fetch ${targetRemote}`, { cwd: worktreePath });
 
       // Check if there are local changes that would be overwritten
       const { stdout: status } = await execAsync('git status --porcelain', {
@@ -52,7 +56,7 @@ export function createPullHandler() {
 
       // Pull latest changes
       try {
-        const { stdout: pullOutput } = await execAsync(`git pull origin ${branchName}`, {
+        const { stdout: pullOutput } = await execAsync(`git pull ${targetRemote} ${branchName}`, {
           cwd: worktreePath,
         });
 
@@ -75,7 +79,7 @@ export function createPullHandler() {
         if (errorMsg.includes('no tracking information')) {
           res.status(400).json({
             success: false,
-            error: `Branch '${branchName}' has no upstream branch. Push it first or set upstream with: git branch --set-upstream-to=origin/${branchName}`,
+            error: `Branch '${branchName}' has no upstream branch. Push it first or set upstream with: git branch --set-upstream-to=${targetRemote}/${branchName}`,
           });
           return;
         }

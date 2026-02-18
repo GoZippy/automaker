@@ -15,9 +15,10 @@ import { getErrorMessage, logError, isValidBranchName, execGitCommand } from '..
 export function createCheckoutBranchHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath, branchName } = req.body as {
+      const { worktreePath, branchName, baseBranch } = req.body as {
         worktreePath: string;
         branchName: string;
+        baseBranch?: string; // Optional base branch to create from (defaults to current HEAD)
       };
 
       if (!worktreePath) {
@@ -42,6 +43,16 @@ export function createCheckoutBranchHandler() {
           success: false,
           error:
             'Invalid branch name. Must contain only letters, numbers, dots, dashes, underscores, or slashes.',
+        });
+        return;
+      }
+
+      // Validate base branch if provided
+      if (baseBranch && !isValidBranchName(baseBranch) && baseBranch !== 'HEAD') {
+        res.status(400).json({
+          success: false,
+          error:
+            'Invalid base branch name. Must contain only letters, numbers, dots, dashes, underscores, or slashes.',
         });
         return;
       }
@@ -88,7 +99,12 @@ export function createCheckoutBranchHandler() {
       }
 
       // Create and checkout the new branch (using argument array to avoid shell injection)
-      await execGitCommand(['checkout', '-b', branchName], resolvedPath);
+      // If baseBranch is provided, create the branch from that starting point
+      const checkoutArgs = ['checkout', '-b', branchName];
+      if (baseBranch) {
+        checkoutArgs.push(baseBranch);
+      }
+      await execGitCommand(checkoutArgs, resolvedPath);
 
       res.json({
         success: true,

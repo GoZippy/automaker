@@ -4,8 +4,8 @@ import {
   type ClaudeAuthMethod,
   type CodexAuthMethod,
   type ZaiAuthMethod,
-  type GeminiAuthMethod,
 } from '@/store/setup-store';
+import type { GeminiAuthStatus } from '@automaker/types';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { createLogger } from '@automaker/utils/logger';
 
@@ -159,11 +159,16 @@ export function useProviderAuthInit() {
         // Set Auth status - always set a status to mark initialization as complete
         if (result.auth) {
           const auth = result.auth;
-          const validMethods: GeminiAuthMethod[] = ['cli_login', 'api_key_env', 'api_key', 'none'];
+          const validMethods: GeminiAuthStatus['method'][] = [
+            'google_login',
+            'api_key',
+            'vertex_ai',
+            'none',
+          ];
 
-          const method = validMethods.includes(auth.method as GeminiAuthMethod)
-            ? (auth.method as GeminiAuthMethod)
-            : ((auth.authenticated ? 'cli_login' : 'none') as GeminiAuthMethod);
+          const method = validMethods.includes(auth.method as GeminiAuthStatus['method'])
+            ? (auth.method as GeminiAuthStatus['method'])
+            : ((auth.authenticated ? 'google_login' : 'none') as GeminiAuthStatus['method']);
 
           setGeminiAuthStatus({
             authenticated: auth.authenticated,

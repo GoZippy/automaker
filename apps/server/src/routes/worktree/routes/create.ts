@@ -11,8 +11,10 @@ import type { Request, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import fs from 'fs/promises';
 import * as secureFs from '../../../lib/secure-fs.js';
 import type { EventEmitter } from '../../../lib/events.js';
+import type { SettingsService } from '../../../services/settings-service.js';
 import { isGitRepo } from '@automaker/git-utils';
 import {
   getErrorMessage,
@@ -81,7 +83,66 @@ async function findExistingWorktreeForBranch(
   }
 }
 
-export function createCreateHandler(events: EventEmitter) {
+/**
+ * Copy configured files from project root into the new worktree.
+ * Reads worktreeCopyFiles from project settings and copies each file/directory.
+ * Silently skips files that don't exist in the source.
+ */
+async function copyConfiguredFiles(
+  projectPath: string,
+  worktreePath: string,
+  settingsService?: SettingsService
+): Promise<void> {
+  if (!settingsService) return;
+
+  try {
+    const projectSettings = await settingsService.getProjectSettings(projectPath);
+    const copyFiles = projectSettings.worktreeCopyFiles;
+
+    if (!copyFiles || copyFiles.length === 0) return;
+
+    for (const relativePath of copyFiles) {
+      // Security: prevent path traversal
+      const normalized = path.normalize(relativePath);
+      if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+        logger.warn(`Skipping suspicious copy path: ${relativePath}`);
+        continue;
+      }
+
+      const sourcePath = path.join(projectPath, normalized);
+      const destPath = path.join(worktreePath, normalized);
+
+      try {
+        // Check if source exists
+        const stat = await fs.stat(sourcePath);
+
+        // Ensure destination directory exists
+        const destDir = path.dirname(destPath);
+        await fs.mkdir(destDir, { recursive: true });
+
+        if (stat.isDirectory()) {
+          // Recursively copy directory
+          await fs.cp(sourcePath, destPath, { recursive: true, force: true });
+          logger.info(`Copied directory "${normalized}" to worktree`);
+        } else {
+          // Copy single file
+          await fs.copyFile(sourcePath, destPath);
+          logger.info(`Copied file "${normalized}" to worktree`);
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          logger.debug(`Skipping copy of "${normalized}" - file not found in project root`);
+        } else {
+          logger.warn(`Failed to copy "${normalized}" to worktree:`, err);
+        }
+      }
+    }
+  } catch (error) {
+    logger.warn('Failed to read project settings for file copying:', error);
+  }
+}
+
+export function createCreateHandler(events: EventEmitter, settingsService?: SettingsService) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, branchName, baseBranch } = req.body as {
@@ -199,6 +260,10 @@ export function createCreateHandler(events: EventEmitter) {
       // Resolve to absolute path for cross-platform compatibility
       // normalizePath converts to forward slashes for API consistency
       const absoluteWorktreePath = path.resolve(worktreePath);
+
+      // Copy configured files into the new worktree before responding
+      // This runs synchronously to ensure files are in place before any init script
+      await copyConfiguredFiles(projectPath, absoluteWorktreePath, settingsService);
 
       // Respond immediately (non-blocking)
       res.json({

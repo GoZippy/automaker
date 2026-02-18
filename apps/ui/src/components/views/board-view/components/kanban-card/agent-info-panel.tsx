@@ -48,7 +48,7 @@ interface AgentInfoPanelProps {
   projectPath: string;
   contextContent?: string;
   summary?: string;
-  isCurrentAutoTask?: boolean;
+  isActivelyRunning?: boolean;
 }
 
 export const AgentInfoPanel = memo(function AgentInfoPanel({
@@ -56,7 +56,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
   projectPath,
   contextContent,
   summary,
-  isCurrentAutoTask,
+  isActivelyRunning,
 }: AgentInfoPanelProps) {
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const [isTodosExpanded, setIsTodosExpanded] = useState(false);
@@ -107,7 +107,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
   // - If not receiving WebSocket events but in_progress: use normal interval (3s)
   // - Otherwise: no polling
   const pollingInterval = useMemo((): number | false => {
-    if (!(isCurrentAutoTask || feature.status === 'in_progress')) {
+    if (!(isActivelyRunning || feature.status === 'in_progress')) {
       return false;
     }
     // If receiving WebSocket events, use longer polling interval as fallback
@@ -116,7 +116,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
     }
     // Default polling interval
     return 3000;
-  }, [isCurrentAutoTask, feature.status, isReceivingWsEvents]);
+  }, [isActivelyRunning, feature.status, isReceivingWsEvents]);
 
   // Fetch fresh feature data for planSpec (store data can be stale for task progress)
   const { data: freshFeature } = useFeature(projectPath, feature.id, {

@@ -324,7 +324,8 @@ export class AutoModeServiceFacade {
         feature.status === 'completed' ||
         feature.status === 'verified' ||
         feature.status === 'waiting_approval',
-      (featureId) => concurrencyManager.isRunning(featureId)
+      (featureId) => concurrencyManager.isRunning(featureId),
+      async (pPath) => featureLoader.getAll(pPath)
     );
 
     // ExecutionService - runAgentFn calls AgentExecutor.execute

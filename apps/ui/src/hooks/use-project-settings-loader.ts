@@ -25,6 +25,7 @@ export function useProjectSettingsLoader() {
   const setAutoDismissInitScriptIndicator = useAppStore(
     (state) => state.setAutoDismissInitScriptIndicator
   );
+  const setWorktreeCopyFiles = useAppStore((state) => state.setWorktreeCopyFiles);
   const setCurrentProject = useAppStore((state) => state.setCurrentProject);
 
   const appliedProjectRef = useRef<{ path: string; dataUpdatedAt: number } | null>(null);
@@ -95,6 +96,11 @@ export function useProjectSettingsLoader() {
       setAutoDismissInitScriptIndicator(projectPath, settings.autoDismissInitScriptIndicator);
     }
 
+    // Apply worktreeCopyFiles if present
+    if (settings.worktreeCopyFiles !== undefined) {
+      setWorktreeCopyFiles(projectPath, settings.worktreeCopyFiles);
+    }
+
     // Apply activeClaudeApiProfileId and phaseModelOverrides if present
     // These are stored directly on the project, so we need to update both
     // currentProject AND the projects array to keep them in sync
@@ -152,6 +158,7 @@ export function useProjectSettingsLoader() {
     setShowInitScriptIndicator,
     setDefaultDeleteBranch,
     setAutoDismissInitScriptIndicator,
+    setWorktreeCopyFiles,
     setCurrentProject,
   ]);
 }

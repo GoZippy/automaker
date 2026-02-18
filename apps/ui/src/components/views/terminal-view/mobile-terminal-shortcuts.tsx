@@ -88,6 +88,9 @@ export function MobileTerminalShortcuts({
   /** Handles arrow key press with long-press repeat support. */
   const handleArrowPress = useCallback(
     (data: string) => {
+      // Cancel any in-flight timeout/interval before starting a new one
+      // to prevent timer leaks when multiple touches occur.
+      clearRepeat();
       sendKey(data);
       // Start repeat after 400ms hold, then every 80ms
       repeatTimeoutRef.current = setTimeout(() => {
@@ -96,7 +99,7 @@ export function MobileTerminalShortcuts({
         }, 80);
       }, 400);
     },
-    [sendKey]
+    [clearRepeat, sendKey]
   );
 
   const handleArrowRelease = useCallback(() => {

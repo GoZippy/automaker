@@ -335,6 +335,7 @@ const initialState: AppState = {
   defaultDeleteBranchByProject: {},
   autoDismissInitScriptIndicatorByProject: {},
   useWorktreesByProject: {},
+  worktreeCopyFilesByProject: {},
   worktreePanelCollapsed: false,
   lastProjectDir: '',
   recentFolders: [],
@@ -359,10 +360,15 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
     }
   },
 
-  removeProject: (projectId) =>
+  removeProject: (projectId: string) => {
     set((state) => ({
       projects: state.projects.filter((p) => p.id !== projectId),
-    })),
+      currentProject: state.currentProject?.id === projectId ? null : state.currentProject,
+    }));
+
+    // Persist to storage
+    saveProjects(get().projects);
+  },
 
   moveProjectToTrash: (projectId: string) => {
     const project = get().projects.find((p) => p.id === projectId);
@@ -2393,6 +2399,16 @@ export const useAppStore = create<AppState & AppActions>()((set, get) => ({
     const projectOverride = get().useWorktreesByProject[projectPath];
     return projectOverride !== undefined ? projectOverride : get().useWorktrees;
   },
+
+  // Worktree Copy Files actions
+  setWorktreeCopyFiles: (projectPath, files) =>
+    set((state) => ({
+      worktreeCopyFilesByProject: {
+        ...state.worktreeCopyFilesByProject,
+        [projectPath]: files,
+      },
+    })),
+  getWorktreeCopyFiles: (projectPath) => get().worktreeCopyFilesByProject[projectPath] ?? [],
 
   // UI State actions
   setWorktreePanelCollapsed: (collapsed) => set({ worktreePanelCollapsed: collapsed }),

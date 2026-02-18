@@ -10,6 +10,7 @@ import { ProjectModelsSection } from './project-models-section';
 import { DataManagementSection } from './data-management-section';
 import { DangerZoneSection } from '../settings-view/danger-zone/danger-zone-section';
 import { DeleteProjectDialog } from '../settings-view/components/delete-project-dialog';
+import { RemoveFromAutomakerDialog } from '../settings-view/components/remove-from-automaker-dialog';
 import { ProjectSettingsNavigation } from './components/project-settings-navigation';
 import { useProjectSettingsView } from './hooks/use-project-settings-view';
 import type { Project as ElectronProject } from '@/lib/electron';
@@ -28,8 +29,9 @@ interface SettingsProject {
 }
 
 export function ProjectSettingsView() {
-  const { currentProject, moveProjectToTrash } = useAppStore();
+  const { currentProject, moveProjectToTrash, removeProject } = useAppStore();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showRemoveFromAutomakerDialog, setShowRemoveFromAutomakerDialog] = useState(false);
 
   // Use project settings view navigation hook
   const { activeView, navigateTo } = useProjectSettingsView();
@@ -98,6 +100,7 @@ export function ProjectSettingsView() {
           <DangerZoneSection
             project={settingsProject}
             onDeleteClick={() => setShowDeleteDialog(true)}
+            onRemoveFromAutomakerClick={() => setShowRemoveFromAutomakerDialog(true)}
           />
         );
       default:
@@ -177,6 +180,14 @@ export function ProjectSettingsView() {
         onOpenChange={setShowDeleteDialog}
         project={currentProject}
         onConfirm={moveProjectToTrash}
+      />
+
+      {/* Remove from Automaker Confirmation Dialog */}
+      <RemoveFromAutomakerDialog
+        open={showRemoveFromAutomakerDialog}
+        onOpenChange={setShowRemoveFromAutomakerDialog}
+        project={currentProject}
+        onConfirm={removeProject}
       />
     </div>
   );

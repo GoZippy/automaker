@@ -51,9 +51,17 @@ import {
   createDeleteInitScriptHandler,
   createRunInitScriptHandler,
 } from './routes/init-script.js';
+import { createCommitLogHandler } from './routes/commit-log.js';
 import { createDiscardChangesHandler } from './routes/discard-changes.js';
 import { createListRemotesHandler } from './routes/list-remotes.js';
 import { createAddRemoteHandler } from './routes/add-remote.js';
+import { createStashPushHandler } from './routes/stash-push.js';
+import { createStashListHandler } from './routes/stash-list.js';
+import { createStashApplyHandler } from './routes/stash-apply.js';
+import { createStashDropHandler } from './routes/stash-drop.js';
+import { createCherryPickHandler } from './routes/cherry-pick.js';
+import { createBranchCommitLogHandler } from './routes/branch-commit-log.js';
+import { createGeneratePRDescriptionHandler } from './routes/generate-pr-description.js';
 import type { SettingsService } from '../../services/settings-service.js';
 
 export function createWorktreeRoutes(
@@ -73,7 +81,11 @@ export function createWorktreeRoutes(
     requireValidProject,
     createMergeHandler()
   );
-  router.post('/create', validatePathParams('projectPath'), createCreateHandler(events));
+  router.post(
+    '/create',
+    validatePathParams('projectPath'),
+    createCreateHandler(events, settingsService)
+  );
   router.post('/delete', validatePathParams('projectPath', 'worktreePath'), createDeleteHandler());
   router.post('/create-pr', createCreatePRHandler());
   router.post('/pr-info', createPRInfoHandler());
@@ -190,6 +202,64 @@ export function createWorktreeRoutes(
     validatePathParams('worktreePath'),
     requireGitRepoOnly,
     createAddRemoteHandler()
+  );
+
+  // Commit log route
+  router.post(
+    '/commit-log',
+    validatePathParams('worktreePath'),
+    requireValidWorktree,
+    createCommitLogHandler()
+  );
+
+  // Stash routes
+  router.post(
+    '/stash-push',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createStashPushHandler()
+  );
+  router.post(
+    '/stash-list',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createStashListHandler()
+  );
+  router.post(
+    '/stash-apply',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createStashApplyHandler()
+  );
+  router.post(
+    '/stash-drop',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createStashDropHandler()
+  );
+
+  // Cherry-pick route
+  router.post(
+    '/cherry-pick',
+    validatePathParams('worktreePath'),
+    requireValidWorktree,
+    createCherryPickHandler()
+  );
+
+  // Generate PR description route
+  router.post(
+    '/generate-pr-description',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createGeneratePRDescriptionHandler(settingsService)
+  );
+
+  // Branch commit log route (get commits from a specific branch)
+  router.post(
+    '/branch-commit-log',
+    validatePathParams('worktreePath'),
+    requireValidWorktree,
+    createBranchCommitLogHandler()
   );
 
   return router;

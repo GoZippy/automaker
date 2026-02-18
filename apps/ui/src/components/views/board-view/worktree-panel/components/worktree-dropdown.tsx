@@ -91,6 +91,7 @@ export interface WorktreeDropdownProps {
   onOpenInIntegratedTerminal: (worktree: WorktreeInfo, mode?: 'tab' | 'split') => void;
   onOpenInExternalTerminal: (worktree: WorktreeInfo, terminalId?: string) => void;
   onViewChanges: (worktree: WorktreeInfo) => void;
+  onViewCommits: (worktree: WorktreeInfo) => void;
   onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
@@ -107,6 +108,12 @@ export interface WorktreeDropdownProps {
   onStartTests: (worktree: WorktreeInfo) => void;
   onStopTests: (worktree: WorktreeInfo) => void;
   onViewTestLogs: (worktree: WorktreeInfo) => void;
+  /** Stash changes for this worktree */
+  onStashChanges?: (worktree: WorktreeInfo) => void;
+  /** View stashes for this worktree */
+  onViewStashes?: (worktree: WorktreeInfo) => void;
+  /** Cherry-pick commits from another branch */
+  onCherryPick?: (worktree: WorktreeInfo) => void;
 }
 
 /**
@@ -168,6 +175,7 @@ export function WorktreeDropdown({
   onOpenInIntegratedTerminal,
   onOpenInExternalTerminal,
   onViewChanges,
+  onViewCommits,
   onDiscardChanges,
   onCommit,
   onCreatePR,
@@ -184,6 +192,9 @@ export function WorktreeDropdown({
   onStartTests,
   onStopTests,
   onViewTestLogs,
+  onStashChanges,
+  onViewStashes,
+  onCherryPick,
 }: WorktreeDropdownProps) {
   // Find the currently selected worktree to display in the trigger
   const selectedWorktree = worktrees.find((w) => isWorktreeSelected(w));
@@ -442,6 +453,7 @@ export function WorktreeDropdown({
           isDevServerRunning={isDevServerRunning(selectedWorktree)}
           devServerInfo={getDevServerInfo(selectedWorktree)}
           gitRepoStatus={gitRepoStatus}
+          isLoadingGitStatus={isLoadingBranches}
           isAutoModeRunning={isAutoModeRunningForWorktree(selectedWorktree)}
           hasTestCommand={hasTestCommand}
           isStartingTests={isStartingTests}
@@ -455,6 +467,7 @@ export function WorktreeDropdown({
           onOpenInIntegratedTerminal={onOpenInIntegratedTerminal}
           onOpenInExternalTerminal={onOpenInExternalTerminal}
           onViewChanges={onViewChanges}
+          onViewCommits={onViewCommits}
           onDiscardChanges={onDiscardChanges}
           onCommit={onCommit}
           onCreatePR={onCreatePR}
@@ -471,6 +484,9 @@ export function WorktreeDropdown({
           onStartTests={onStartTests}
           onStopTests={onStopTests}
           onViewTestLogs={onViewTestLogs}
+          onStashChanges={onStashChanges}
+          onViewStashes={onViewStashes}
+          onCherryPick={onCherryPick}
           hasInitScript={hasInitScript}
         />
       )}

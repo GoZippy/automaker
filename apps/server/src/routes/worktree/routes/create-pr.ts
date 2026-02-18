@@ -20,16 +20,25 @@ const logger = createLogger('CreatePR');
 export function createCreatePRHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath, projectPath, commitMessage, prTitle, prBody, baseBranch, draft } =
-        req.body as {
-          worktreePath: string;
-          projectPath?: string;
-          commitMessage?: string;
-          prTitle?: string;
-          prBody?: string;
-          baseBranch?: string;
-          draft?: boolean;
-        };
+      const {
+        worktreePath,
+        projectPath,
+        commitMessage,
+        prTitle,
+        prBody,
+        baseBranch,
+        draft,
+        remote,
+      } = req.body as {
+        worktreePath: string;
+        projectPath?: string;
+        commitMessage?: string;
+        prTitle?: string;
+        prBody?: string;
+        baseBranch?: string;
+        draft?: boolean;
+        remote?: string;
+      };
 
       if (!worktreePath) {
         res.status(400).json({
@@ -110,17 +119,18 @@ export function createCreatePRHandler() {
         }
       }
 
-      // Push the branch to remote
+      // Push the branch to remote (use selected remote or default to 'origin')
+      const pushRemote = remote || 'origin';
       let pushError: string | null = null;
       try {
-        await execAsync(`git push -u origin ${branchName}`, {
+        await execAsync(`git push -u ${pushRemote} ${branchName}`, {
           cwd: worktreePath,
           env: execEnv,
         });
       } catch {
         // If push fails, try with --set-upstream
         try {
-          await execAsync(`git push --set-upstream origin ${branchName}`, {
+          await execAsync(`git push --set-upstream ${pushRemote} ${branchName}`, {
             cwd: worktreePath,
             env: execEnv,
           });

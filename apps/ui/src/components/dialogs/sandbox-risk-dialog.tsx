@@ -37,18 +37,21 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="bg-popover border-border max-w-lg"
+        className="bg-popover border-border max-w-lg flex flex-col"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
         showCloseButton={false}
       >
-        <DialogHeader>
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2 text-destructive">
-            <ShieldAlert className="w-6 h-6" />
+            <ShieldAlert className="w-6 h-6 flex-shrink-0" />
             Sandbox Environment Not Detected
           </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
           <DialogDescription asChild>
-            <div className="space-y-4 pt-2">
+            <div className="space-y-4 pt-2 pb-2">
               <p className="text-muted-foreground">
                 <strong>Warning:</strong> This application is running outside of a containerized
                 sandbox environment. AI agents will have direct access to your filesystem and can
@@ -94,9 +97,9 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
               </div>
             </div>
           </DialogDescription>
-        </DialogHeader>
+        </div>
 
-        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4">
+        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4 flex-shrink-0 border-t border-border mt-4">
           <div className="flex items-center space-x-2 self-start">
             <Checkbox
               id="skip-sandbox-warning"

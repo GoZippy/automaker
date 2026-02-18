@@ -46,18 +46,22 @@ export function useWorktreeActions(options?: UseWorktreeActionsOptions) {
   );
 
   const handlePull = useCallback(
-    async (worktree: WorktreeInfo) => {
+    async (worktree: WorktreeInfo, remote?: string) => {
       if (pullMutation.isPending) return;
-      pullMutation.mutate(worktree.path);
+      pullMutation.mutate({
+        worktreePath: worktree.path,
+        remote,
+      });
     },
     [pullMutation]
   );
 
   const handlePush = useCallback(
-    async (worktree: WorktreeInfo) => {
+    async (worktree: WorktreeInfo, remote?: string) => {
       if (pushMutation.isPending) return;
       pushMutation.mutate({
         worktreePath: worktree.path,
+        remote,
       });
     },
     [pushMutation]

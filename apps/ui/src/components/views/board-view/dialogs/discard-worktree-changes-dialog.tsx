@@ -313,8 +313,8 @@ export function DiscardWorktreeChangesDialog({
               const fileList = result.files ?? [];
               setFiles(fileList);
               setDiffContent(result.diff ?? '');
-              // Select all files by default
-              setSelectedFiles(new Set(fileList.map((f) => f.path)));
+              // No files selected by default
+              setSelectedFiles(new Set());
             }
           }
         } catch (err) {

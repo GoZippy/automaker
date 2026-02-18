@@ -16,39 +16,14 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getErrorMessage, logError } from '../common.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 function isExcludedWorktreeLine(line: string): boolean {
   return line.includes('.worktrees/') || line.endsWith('.worktrees');
-}
-
-function isUntrackedLine(line: string): boolean {
-  return line.startsWith('?? ');
-}
-
-function isBlockingChangeLine(line: string): boolean {
-  if (!line.trim()) return false;
-  if (isExcludedWorktreeLine(line)) return false;
-  if (isUntrackedLine(line)) return false;
-  return true;
-}
-
-/**
- * Check if there are uncommitted changes in the working directory
- * Excludes .worktrees/ directory which is created by automaker
- */
-async function hasUncommittedChanges(cwd: string): Promise<boolean> {
-  try {
-    const { stdout } = await execAsync('git status --porcelain', { cwd });
-    const lines = stdout.trim().split('\n').filter(isBlockingChangeLine);
-    return lines.length > 0;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -56,7 +31,7 @@ async function hasUncommittedChanges(cwd: string): Promise<boolean> {
  */
 async function hasAnyChanges(cwd: string): Promise<boolean> {
   try {
-    const { stdout } = await execAsync('git status --porcelain', { cwd });
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd });
     const lines = stdout
       .trim()
       .split('\n')
@@ -78,17 +53,17 @@ async function hasAnyChanges(cwd: string): Promise<boolean> {
 async function stashChanges(cwd: string, message: string): Promise<boolean> {
   try {
     // Get stash count before
-    const { stdout: beforeCount } = await execAsync('git stash list', { cwd });
+    const { stdout: beforeCount } = await execFileAsync('git', ['stash', 'list'], { cwd });
     const countBefore = beforeCount
       .trim()
       .split('\n')
       .filter((l) => l.trim()).length;
 
     // Stash including untracked files
-    await execAsync(`git stash push --include-untracked -m "${message}"`, { cwd });
+    await execFileAsync('git', ['stash', 'push', '--include-untracked', '-m', message], { cwd });
 
     // Get stash count after to verify something was stashed
-    const { stdout: afterCount } = await execAsync('git stash list', { cwd });
+    const { stdout: afterCount } = await execFileAsync('git', ['stash', 'list'], { cwd });
     const countAfter = afterCount
       .trim()
       .split('\n')
@@ -108,7 +83,7 @@ async function popStash(
   cwd: string
 ): Promise<{ success: boolean; hasConflicts: boolean; error?: string }> {
   try {
-    const { stdout, stderr } = await execAsync('git stash pop', { cwd });
+    const { stdout, stderr } = await execFileAsync('git', ['stash', 'pop'], { cwd });
     const output = `${stdout}\n${stderr}`;
     // Check for conflict markers in the output
     if (output.includes('CONFLICT') || output.includes('Merge conflict')) {
@@ -129,7 +104,7 @@ async function popStash(
  */
 async function fetchRemotes(cwd: string): Promise<void> {
   try {
-    await execAsync('git fetch --all --quiet', {
+    await execFileAsync('git', ['fetch', '--all', '--quiet'], {
       cwd,
       timeout: 15000, // 15 second timeout
     });
@@ -155,7 +130,9 @@ function parseRemoteBranch(branchName: string): { remote: string; branch: string
  */
 async function isRemoteBranch(cwd: string, branchName: string): Promise<boolean> {
   try {
-    const { stdout } = await execAsync('git branch -r --format="%(refname:short)"', { cwd });
+    const { stdout } = await execFileAsync('git', ['branch', '-r', '--format=%(refname:short)'], {
+      cwd,
+    });
     const remoteBranches = stdout
       .trim()
       .split('\n')
@@ -172,7 +149,7 @@ async function isRemoteBranch(cwd: string, branchName: string): Promise<boolean>
  */
 async function localBranchExists(cwd: string, branchName: string): Promise<boolean> {
   try {
-    await execAsync(`git rev-parse --verify "refs/heads/${branchName}"`, { cwd });
+    await execFileAsync('git', ['rev-parse', '--verify', `refs/heads/${branchName}`], { cwd });
     return true;
   } catch {
     return false;
@@ -204,9 +181,11 @@ export function createSwitchBranchHandler() {
       }
 
       // Get current branch
-      const { stdout: currentBranchOutput } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-        cwd: worktreePath,
-      });
+      const { stdout: currentBranchOutput } = await execFileAsync(
+        'git',
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { cwd: worktreePath }
+      );
       const previousBranch = currentBranchOutput.trim();
 
       // Determine the actual target branch name for checkout
@@ -243,7 +222,7 @@ export function createSwitchBranchHandler() {
       // Check if target branch exists (locally or as remote ref)
       if (!isRemote) {
         try {
-          await execAsync(`git rev-parse --verify "${branchName}"`, {
+          await execFileAsync('git', ['rev-parse', '--verify', branchName], {
             cwd: worktreePath,
           });
         } catch {
@@ -271,16 +250,16 @@ export function createSwitchBranchHandler() {
           if (parsed) {
             if (await localBranchExists(worktreePath, parsed.branch)) {
               // Local branch exists, just checkout
-              await execAsync(`git checkout "${parsed.branch}"`, { cwd: worktreePath });
+              await execFileAsync('git', ['checkout', parsed.branch], { cwd: worktreePath });
             } else {
               // Create local tracking branch from remote
-              await execAsync(`git checkout -b "${parsed.branch}" "${branchName}"`, {
+              await execFileAsync('git', ['checkout', '-b', parsed.branch, branchName], {
                 cwd: worktreePath,
               });
             }
           }
         } else {
-          await execAsync(`git checkout "${targetBranch}"`, { cwd: worktreePath });
+          await execFileAsync('git', ['checkout', targetBranch], { cwd: worktreePath });
         }
 
         // Fetch latest from remotes after switching

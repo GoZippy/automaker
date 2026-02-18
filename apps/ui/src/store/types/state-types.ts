@@ -341,6 +341,10 @@ export interface AppState {
   // undefined = use global setting, true/false = project-specific override
   useWorktreesByProject: Record<string, boolean | undefined>;
 
+  // Worktree Copy Files (per-project, keyed by project path)
+  // List of relative file paths to copy from project root into new worktrees
+  worktreeCopyFilesByProject: Record<string, string[]>;
+
   // UI State (previously in localStorage, now synced via API)
   /** Whether worktree panel is collapsed in board view */
   worktreePanelCollapsed: boolean;
@@ -755,6 +759,10 @@ export interface AppActions {
   setProjectUseWorktrees: (projectPath: string, useWorktrees: boolean | null) => void; // null = use global
   getProjectUseWorktrees: (projectPath: string) => boolean | undefined; // undefined = using global
   getEffectiveUseWorktrees: (projectPath: string) => boolean; // Returns actual value (project or global fallback)
+
+  // Worktree Copy Files actions (per-project)
+  setWorktreeCopyFiles: (projectPath: string, files: string[]) => void;
+  getWorktreeCopyFiles: (projectPath: string) => string[];
 
   // UI State actions (previously in localStorage, now synced via API)
   setWorktreePanelCollapsed: (collapsed: boolean) => void;

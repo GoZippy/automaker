@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Trash2,
   Search,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatShortcut, type ThemeMode, useAppStore } from '@/store/app-store';
@@ -47,6 +48,8 @@ interface ProjectSelectorWithOptionsProps {
   setIsProjectPickerOpen: (value: boolean | ((prev: boolean) => boolean)) => void;
   /** Callback to show the delete project confirmation dialog */
   setShowDeleteProjectDialog: (show: boolean) => void;
+  /** Callback to show the remove from automaker confirmation dialog */
+  setShowRemoveFromAutomakerDialog: (show: boolean) => void;
 }
 
 /**
@@ -70,6 +73,7 @@ export function ProjectSelectorWithOptions({
   isProjectPickerOpen,
   setIsProjectPickerOpen,
   setShowDeleteProjectDialog,
+  setShowRemoveFromAutomakerDialog,
 }: ProjectSelectorWithOptionsProps) {
   const {
     projects,
@@ -371,8 +375,16 @@ export function ProjectSelectorWithOptions({
               </>
             )}
 
-            {/* Move to Trash Section */}
+            {/* Remove / Trash Section */}
             <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setShowRemoveFromAutomakerDialog(true)}
+              className="text-muted-foreground focus:text-foreground"
+              data-testid="remove-from-automaker"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              <span>Remove from Automaker</span>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setShowDeleteProjectDialog(true)}
               className="text-destructive focus:text-destructive focus:bg-destructive/10"

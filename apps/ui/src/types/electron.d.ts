@@ -2,7 +2,12 @@
  * Electron API type definitions
  */
 
-import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
+import type {
+  ClaudeUsageResponse,
+  CodexUsageResponse,
+  ZaiUsageResponse,
+  GeminiUsageResponse,
+} from '@/store/app-store';
 import type { ParsedTask, FeatureStatusWithPipeline } from '@automaker/types';
 
 export interface ImageAttachment {
@@ -710,6 +715,16 @@ export interface ElectronAPI {
     getUsage: () => Promise<CodexUsageResponse>;
   };
 
+  // z.ai Usage API
+  zai: {
+    getUsage: () => Promise<ZaiUsageResponse>;
+  };
+
+  // Gemini Usage API
+  gemini: {
+    getUsage: () => Promise<GeminiUsageResponse>;
+  };
+
   // Worktree Management APIs
   worktree: WorktreeAPI;
 
@@ -884,6 +899,17 @@ export interface WorktreeAPI {
     error?: string;
   }>;
 
+  // Generate an AI PR title and description from branch diff
+  generatePRDescription: (
+    worktreePath: string,
+    baseBranch?: string
+  ) => Promise<{
+    success: boolean;
+    title?: string;
+    body?: string;
+    error?: string;
+  }>;
+
   // Push a worktree branch to remote
   push: (
     worktreePath: string,
@@ -910,6 +936,7 @@ export interface WorktreeAPI {
       prBody?: string;
       baseBranch?: string;
       draft?: boolean;
+      remote?: string;
     }
   ) => Promise<{
     success: boolean;
@@ -940,7 +967,10 @@ export interface WorktreeAPI {
   ) => Promise<FileDiffResult>;
 
   // Pull latest changes from remote
-  pull: (worktreePath: string) => Promise<{
+  pull: (
+    worktreePath: string,
+    remote?: string
+  ) => Promise<{
     success: boolean;
     result?: {
       branch: string;
@@ -954,7 +984,8 @@ export interface WorktreeAPI {
   // Create and checkout a new branch
   checkoutBranch: (
     worktreePath: string,
-    branchName: string
+    branchName: string,
+    baseBranch?: string
   ) => Promise<{
     success: boolean;
     result?: {
@@ -998,6 +1029,8 @@ export interface WorktreeAPI {
       previousBranch: string;
       currentBranch: string;
       message: string;
+      hasConflicts: boolean;
+      stashedChanges: boolean;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS' | 'UNCOMMITTED_CHANGES';
@@ -1388,6 +1421,134 @@ export interface WorktreeAPI {
           }
     ) => void
   ) => () => void;
+
+  // Get recent commit history for a worktree
+  getCommitLog: (
+    worktreePath: string,
+    limit?: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      commits: Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        authorEmail: string;
+        date: string;
+        subject: string;
+        body: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
+
+  // Stash changes in a worktree (with optional message and optional file selection)
+  stashPush: (
+    worktreePath: string,
+    message?: string,
+    files?: string[]
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      stashed: boolean;
+      branch?: string;
+      message?: string;
+    };
+    error?: string;
+  }>;
+
+  // List all stashes in a worktree
+  stashList: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      stashes: Array<{
+        index: number;
+        message: string;
+        branch: string;
+        date: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
+
+  // Apply or pop a stash entry
+  stashApply: (
+    worktreePath: string,
+    stashIndex: number,
+    pop?: boolean
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      applied: boolean;
+      hasConflicts: boolean;
+      operation: 'apply' | 'pop';
+      stashIndex: number;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Drop (delete) a stash entry
+  stashDrop: (
+    worktreePath: string,
+    stashIndex: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      dropped: boolean;
+      stashIndex: number;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Cherry-pick one or more commits into the current branch
+  cherryPick: (
+    worktreePath: string,
+    commitHashes: string[],
+    options?: {
+      noCommit?: boolean;
+    }
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      cherryPicked: boolean;
+      commitHashes: string[];
+      branch: string;
+      message: string;
+    };
+    error?: string;
+    hasConflicts?: boolean;
+  }>;
+
+  // Get commit log for a specific branch (not just the current one)
+  getBranchCommitLog: (
+    worktreePath: string,
+    branchName?: string,
+    limit?: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      commits: Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        authorEmail: string;
+        date: string;
+        subject: string;
+        body: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
 }
 
 // Test runner status type

@@ -54,6 +54,7 @@ interface KanbanCardProps {
   onSpawnTask?: () => void;
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
+  onDuplicateAsChildMultiple?: () => void;
   hasContext?: boolean;
   isCurrentAutoTask?: boolean;
   shortcutKey?: string;
@@ -90,6 +91,7 @@ export const KanbanCard = memo(function KanbanCard({
   onSpawnTask,
   onDuplicate,
   onDuplicateAsChild,
+  onDuplicateAsChildMultiple,
   hasContext,
   isCurrentAutoTask,
   shortcutKey,
@@ -266,6 +268,7 @@ export const KanbanCard = memo(function KanbanCard({
         onSpawnTask={onSpawnTask}
         onDuplicate={onDuplicate}
         onDuplicateAsChild={onDuplicateAsChild}
+        onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
         dragHandleListeners={isDraggable ? listeners : undefined}
         dragHandleAttributes={isDraggable ? attributes : undefined}
       />
@@ -280,7 +283,7 @@ export const KanbanCard = memo(function KanbanCard({
           projectPath={currentProject?.path ?? ''}
           contextContent={contextContent}
           summary={summary}
-          isCurrentAutoTask={isCurrentAutoTask}
+          isActivelyRunning={isActivelyRunning}
         />
 
         {/* Actions */}

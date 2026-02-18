@@ -34,13 +34,18 @@ function formatResetTime(unixTimestamp: number, isMilliseconds = false): string 
   const now = new Date();
   const diff = date.getTime() - now.getTime();
 
+  // Guard against past timestamps: clamp negative diffs to a friendly fallback
+  if (diff <= 0) {
+    return 'Resets now';
+  }
+
   if (diff < 3600000) {
-    const mins = Math.ceil(diff / 60000);
+    const mins = Math.max(0, Math.ceil(diff / 60000));
     return `Resets in ${mins}m`;
   }
   if (diff < 86400000) {
-    const hours = Math.floor(diff / 3600000);
-    const mins = Math.ceil((diff % 3600000) / 60000);
+    const hours = Math.max(0, Math.floor(diff / 3600000));
+    const mins = Math.max(0, Math.ceil((diff % 3600000) / 60000));
     return `Resets in ${hours}h ${mins > 0 ? `${mins}m` : ''}`;
   }
   return `Resets ${date.toLocaleDateString()} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;

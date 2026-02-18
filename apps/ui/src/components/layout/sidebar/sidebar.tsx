@@ -39,6 +39,7 @@ import { EditProjectDialog } from '../project-switcher/components/edit-project-d
 
 // Import shared dialogs
 import { DeleteProjectDialog } from '@/components/views/settings-view/components/delete-project-dialog';
+import { RemoveFromAutomakerDialog } from '@/components/views/settings-view/components/remove-from-automaker-dialog';
 import { NewProjectModal } from '@/components/dialogs/new-project-modal';
 import { CreateSpecDialog } from '@/components/views/spec-view/dialogs';
 
@@ -65,6 +66,7 @@ export function Sidebar() {
     cyclePrevProject,
     cycleNextProject,
     moveProjectToTrash,
+    removeProject,
     specCreatingForProject,
     setSpecCreatingForProject,
     setCurrentProject,
@@ -91,6 +93,8 @@ export function Sidebar() {
 
   // State for delete project confirmation dialog
   const [showDeleteProjectDialog, setShowDeleteProjectDialog] = useState(false);
+  // State for remove from automaker confirmation dialog
+  const [showRemoveFromAutomakerDialog, setShowRemoveFromAutomakerDialog] = useState(false);
 
   // State for trash dialog
   const [showTrashDialog, setShowTrashDialog] = useState(false);
@@ -486,6 +490,14 @@ export function Sidebar() {
           onOpenChange={setShowDeleteProjectDialog}
           project={currentProject}
           onConfirm={moveProjectToTrash}
+        />
+
+        {/* Remove from Automaker Confirmation Dialog */}
+        <RemoveFromAutomakerDialog
+          open={showRemoveFromAutomakerDialog}
+          onOpenChange={setShowRemoveFromAutomakerDialog}
+          project={currentProject}
+          onConfirm={removeProject}
         />
 
         {/* New Project Modal */}

@@ -307,6 +307,8 @@ export function CommitWorktreeDialog({
       setSelectedFiles(new Set());
       setExpandedFile(null);
 
+      let cancelled = false;
+
       const loadDiffs = async () => {
         try {
           const api = getElectronAPI();
@@ -314,20 +316,24 @@ export function CommitWorktreeDialog({
             const result = await api.git.getDiffs(worktree.path);
             if (result.success) {
               const fileList = result.files ?? [];
-              setFiles(fileList);
-              setDiffContent(result.diff ?? '');
+              if (!cancelled) setFiles(fileList);
+              if (!cancelled) setDiffContent(result.diff ?? '');
               // Select all files by default
-              setSelectedFiles(new Set(fileList.map((f) => f.path)));
+              if (!cancelled) setSelectedFiles(new Set(fileList.map((f) => f.path)));
             }
           }
         } catch (err) {
           console.warn('Failed to load diffs for commit dialog:', err);
         } finally {
-          setIsLoadingDiffs(false);
+          if (!cancelled) setIsLoadingDiffs(false);
         }
       };
 
       loadDiffs();
+
+      return () => {
+        cancelled = true;
+      };
     }
   }, [open, worktree]);
 

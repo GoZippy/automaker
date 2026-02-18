@@ -397,7 +397,7 @@ export function LoginView() {
 
   // Login form (awaiting_login or logging_in)
   const isLoggingIn = state.phase === 'logging_in';
-  const apiKey = state.phase === 'awaiting_login' ? state.apiKey : state.apiKey;
+  const apiKey = state.apiKey;
   const error = state.phase === 'awaiting_login' ? state.error : null;
 
   return (

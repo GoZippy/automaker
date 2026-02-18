@@ -6,6 +6,7 @@ import {
   type ProjectAutoLoopState,
   type ExecuteFeatureFn,
   type LoadPendingFeaturesFn,
+  type LoadAllFeaturesFn,
   type SaveExecutionStateFn,
   type ClearExecutionStateFn,
   type ResetStuckFeaturesFn,
@@ -25,6 +26,7 @@ describe('auto-loop-coordinator.ts', () => {
   // Callback mocks
   let mockExecuteFeature: ExecuteFeatureFn;
   let mockLoadPendingFeatures: LoadPendingFeaturesFn;
+  let mockLoadAllFeatures: LoadAllFeaturesFn;
   let mockSaveExecutionState: SaveExecutionStateFn;
   let mockClearExecutionState: ClearExecutionStateFn;
   let mockResetStuckFeatures: ResetStuckFeaturesFn;
@@ -65,6 +67,7 @@ describe('auto-loop-coordinator.ts', () => {
     // Callback mocks
     mockExecuteFeature = vi.fn().mockResolvedValue(undefined);
     mockLoadPendingFeatures = vi.fn().mockResolvedValue([]);
+    mockLoadAllFeatures = vi.fn().mockResolvedValue([]);
     mockSaveExecutionState = vi.fn().mockResolvedValue(undefined);
     mockClearExecutionState = vi.fn().mockResolvedValue(undefined);
     mockResetStuckFeatures = vi.fn().mockResolvedValue(undefined);
@@ -81,7 +84,8 @@ describe('auto-loop-coordinator.ts', () => {
       mockClearExecutionState,
       mockResetStuckFeatures,
       mockIsFeatureFinished,
-      mockIsFeatureRunning
+      mockIsFeatureRunning,
+      mockLoadAllFeatures
     );
   });
 
@@ -323,6 +327,282 @@ describe('auto-loop-coordinator.ts', () => {
 
       // Should not have executed features because at capacity
       expect(mockExecuteFeature).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('priority-based feature selection', () => {
+    it('selects highest priority feature first (lowest number)', async () => {
+      const lowPriority: Feature = {
+        ...testFeature,
+        id: 'feature-low',
+        priority: 3,
+        title: 'Low Priority',
+      };
+      const highPriority: Feature = {
+        ...testFeature,
+        id: 'feature-high',
+        priority: 1,
+        title: 'High Priority',
+      };
+      const medPriority: Feature = {
+        ...testFeature,
+        id: 'feature-med',
+        priority: 2,
+        title: 'Med Priority',
+      };
+
+      // Return features in non-priority order
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([
+        lowPriority,
+        medPriority,
+        highPriority,
+      ]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([lowPriority, medPriority, highPriority]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // Should execute the highest priority feature (priority=1)
+      expect(mockExecuteFeature).toHaveBeenCalledWith('/test/project', 'feature-high', true, true);
+    });
+
+    it('uses default priority of 2 when not specified', async () => {
+      const noPriority: Feature = { ...testFeature, id: 'feature-none', title: 'No Priority' };
+      const highPriority: Feature = {
+        ...testFeature,
+        id: 'feature-high',
+        priority: 1,
+        title: 'High Priority',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([noPriority, highPriority]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([noPriority, highPriority]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // High priority (1) should be selected over default priority (2)
+      expect(mockExecuteFeature).toHaveBeenCalledWith('/test/project', 'feature-high', true, true);
+    });
+
+    it('selects first feature when priorities are equal', async () => {
+      const featureA: Feature = {
+        ...testFeature,
+        id: 'feature-a',
+        priority: 2,
+        title: 'Feature A',
+      };
+      const featureB: Feature = {
+        ...testFeature,
+        id: 'feature-b',
+        priority: 2,
+        title: 'Feature B',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([featureA, featureB]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([featureA, featureB]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // When priorities equal, the first feature from the filtered list should be chosen
+      expect(mockExecuteFeature).toHaveBeenCalledWith('/test/project', 'feature-a', true, true);
+    });
+  });
+
+  describe('dependency-aware feature selection', () => {
+    it('skips features with unsatisfied dependencies', async () => {
+      const depFeature: Feature = {
+        ...testFeature,
+        id: 'feature-dep',
+        status: 'in_progress',
+        title: 'Dependency Feature',
+      };
+      const blockedFeature: Feature = {
+        ...testFeature,
+        id: 'feature-blocked',
+        dependencies: ['feature-dep'],
+        priority: 1,
+        title: 'Blocked Feature',
+      };
+      const readyFeature: Feature = {
+        ...testFeature,
+        id: 'feature-ready',
+        priority: 2,
+        title: 'Ready Feature',
+      };
+
+      // Pending features (backlog/ready status)
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([blockedFeature, readyFeature]);
+      // All features (including the in-progress dependency)
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([depFeature, blockedFeature, readyFeature]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // Should skip blocked feature (dependency not complete) and execute ready feature
+      expect(mockExecuteFeature).toHaveBeenCalledWith('/test/project', 'feature-ready', true, true);
+      expect(mockExecuteFeature).not.toHaveBeenCalledWith(
+        '/test/project',
+        'feature-blocked',
+        true,
+        true
+      );
+    });
+
+    it('picks features whose dependencies are completed', async () => {
+      const completedDep: Feature = {
+        ...testFeature,
+        id: 'feature-dep',
+        status: 'completed',
+        title: 'Completed Dependency',
+      };
+      const unblockedFeature: Feature = {
+        ...testFeature,
+        id: 'feature-unblocked',
+        dependencies: ['feature-dep'],
+        priority: 1,
+        title: 'Unblocked Feature',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([unblockedFeature]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([completedDep, unblockedFeature]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // Should execute the unblocked feature since its dependency is completed
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-unblocked',
+        true,
+        true
+      );
+    });
+
+    it('picks features whose dependencies are verified', async () => {
+      const verifiedDep: Feature = {
+        ...testFeature,
+        id: 'feature-dep',
+        status: 'verified',
+        title: 'Verified Dependency',
+      };
+      const unblockedFeature: Feature = {
+        ...testFeature,
+        id: 'feature-unblocked',
+        dependencies: ['feature-dep'],
+        priority: 1,
+        title: 'Unblocked Feature',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([unblockedFeature]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([verifiedDep, unblockedFeature]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-unblocked',
+        true,
+        true
+      );
+    });
+
+    it('respects both priority and dependencies together', async () => {
+      const completedDep: Feature = {
+        ...testFeature,
+        id: 'feature-dep',
+        status: 'completed',
+        title: 'Completed Dep',
+      };
+      const blockedHighPriority: Feature = {
+        ...testFeature,
+        id: 'feature-blocked-hp',
+        dependencies: ['feature-not-done'],
+        priority: 1,
+        title: 'Blocked High Priority',
+      };
+      const unblockedLowPriority: Feature = {
+        ...testFeature,
+        id: 'feature-unblocked-lp',
+        dependencies: ['feature-dep'],
+        priority: 3,
+        title: 'Unblocked Low Priority',
+      };
+      const unblockedMedPriority: Feature = {
+        ...testFeature,
+        id: 'feature-unblocked-mp',
+        priority: 2,
+        title: 'Unblocked Med Priority',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([
+        blockedHighPriority,
+        unblockedLowPriority,
+        unblockedMedPriority,
+      ]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([
+        completedDep,
+        blockedHighPriority,
+        unblockedLowPriority,
+        unblockedMedPriority,
+      ]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      // Should skip blocked high-priority and pick the unblocked medium-priority
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-unblocked-mp',
+        true,
+        true
+      );
+      expect(mockExecuteFeature).not.toHaveBeenCalledWith(
+        '/test/project',
+        'feature-blocked-hp',
+        true,
+        true
+      );
+    });
+
+    it('handles features with no dependencies (always eligible)', async () => {
+      const noDeps: Feature = {
+        ...testFeature,
+        id: 'feature-no-deps',
+        priority: 2,
+        title: 'No Dependencies',
+      };
+
+      vi.mocked(mockLoadPendingFeatures).mockResolvedValue([noDeps]);
+      vi.mocked(mockLoadAllFeatures).mockResolvedValue([noDeps]);
+      vi.mocked(mockConcurrencyManager.getRunningCountForWorktree).mockResolvedValue(0);
+
+      await coordinator.startAutoLoopForProject('/test/project', null, 1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await coordinator.stopAutoLoopForProject('/test/project', null);
+
+      expect(mockExecuteFeature).toHaveBeenCalledWith(
+        '/test/project',
+        'feature-no-deps',
+        true,
+        true
+      );
     });
   });
 

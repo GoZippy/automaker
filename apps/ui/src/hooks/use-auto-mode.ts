@@ -86,6 +86,7 @@ export function useAutoMode(worktree?: WorktreeInfo) {
     getMaxConcurrencyForWorktree,
     setMaxConcurrencyForWorktree,
     isPrimaryWorktreeBranch,
+    globalMaxConcurrency,
   } = useAppStore(
     useShallow((state) => ({
       autoModeByWorktree: state.autoModeByWorktree,
@@ -100,6 +101,7 @@ export function useAutoMode(worktree?: WorktreeInfo) {
       getMaxConcurrencyForWorktree: state.getMaxConcurrencyForWorktree,
       setMaxConcurrencyForWorktree: state.setMaxConcurrencyForWorktree,
       isPrimaryWorktreeBranch: state.isPrimaryWorktreeBranch,
+      globalMaxConcurrency: state.maxConcurrency,
     }))
   );
 
@@ -143,11 +145,13 @@ export function useAutoMode(worktree?: WorktreeInfo) {
 
   const isAutoModeRunning = worktreeAutoModeState.isRunning;
   const runningAutoTasks = worktreeAutoModeState.runningTasks;
-  // Use getMaxConcurrencyForWorktree which properly falls back to the global
-  // maxConcurrency setting, instead of DEFAULT_MAX_CONCURRENCY (1) which would
-  // incorrectly block agents when the user has set a higher global limit
+  // Use the subscribed worktreeAutoModeState.maxConcurrency (from the reactive
+  // autoModeByWorktree store slice) so canStartNewTask stays reactive when
+  // refreshStatus updates worktree state or when the global setting changes.
+  // Falls back to the subscribed globalMaxConcurrency (also reactive) when no
+  // per-worktree value is set, and to DEFAULT_MAX_CONCURRENCY when no project.
   const maxConcurrency = projectId
-    ? getMaxConcurrencyForWorktree(projectId, branchName)
+    ? (worktreeAutoModeState.maxConcurrency ?? globalMaxConcurrency)
     : DEFAULT_MAX_CONCURRENCY;
 
   // Check if we can start a new task based on concurrency limit

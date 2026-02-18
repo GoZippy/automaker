@@ -79,10 +79,12 @@ export function createDiscardChangesHandler() {
       const branchName = branchOutput.trim();
 
       // Parse the status output to categorize files
+      // Git --porcelain format: XY PATH where X=index status, Y=worktree status
+      // Preserve the exact two-character XY status (no trim) to keep index vs worktree info
       const statusLines = status.trim().split('\n').filter(Boolean);
       const allFiles = statusLines.map((line) => {
-        const fileStatus = line.substring(0, 2).trim();
-        const filePath = line.substring(3).trim();
+        const fileStatus = line.substring(0, 2);
+        const filePath = line.slice(3).trim();
         return { status: fileStatus, path: filePath };
       });
 
@@ -112,18 +114,21 @@ export function createDiscardChangesHandler() {
         for (const file of allFiles) {
           if (!filesToDiscard.has(file.path)) continue;
 
-          if (file.status === '?') {
+          // file.status is the raw two-character XY git porcelain status (no trim)
+          // X = index/staging status, Y = worktree status
+          const xy = file.status.substring(0, 2);
+          const indexStatus = xy.charAt(0);
+          const workTreeStatus = xy.charAt(1);
+
+          if (indexStatus === '?' && workTreeStatus === '?') {
             untrackedFiles.push(file.path);
           } else {
-            // Check if the file has staged changes (first character of status)
-            const indexStatus = statusLines
-              .find((l) => l.substring(3).trim() === file.path)
-              ?.charAt(0);
-            if (indexStatus && indexStatus !== ' ' && indexStatus !== '?') {
+            // Check if the file has staged changes (index status X)
+            if (indexStatus !== ' ' && indexStatus !== '?') {
               stagedFiles.push(file.path);
             }
-            // Check for working tree changes (tracked files)
-            if (file.status === 'M' || file.status === 'D' || file.status === 'A') {
+            // Check for working tree changes (worktree status Y): handles MM, AM, MD, etc.
+            if (workTreeStatus === 'M' || workTreeStatus === 'D' || workTreeStatus === 'A') {
               trackedModified.push(file.path);
             }
           }

@@ -64,7 +64,52 @@ export function createZaiRoutes(
   router.post('/configure', async (req: Request, res: Response) => {
     try {
       const { apiToken, apiHost } = req.body;
-      const result = await usageService.configure({ apiToken, apiHost }, settingsService);
+
+      // Validate apiToken: must be present and a string
+      if (apiToken === undefined || apiToken === null || typeof apiToken !== 'string') {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid request: apiToken is required and must be a string',
+        });
+        return;
+      }
+
+      // Validate apiHost if provided: must be a string and a well-formed URL
+      if (apiHost !== undefined && apiHost !== null) {
+        if (typeof apiHost !== 'string') {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid request: apiHost must be a string',
+          });
+          return;
+        }
+        // Validate that apiHost is a well-formed URL
+        try {
+          const parsedUrl = new URL(apiHost);
+          if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            res.status(400).json({
+              success: false,
+              error: 'Invalid request: apiHost must be a valid HTTP or HTTPS URL',
+            });
+            return;
+          }
+        } catch {
+          res.status(400).json({
+            success: false,
+            error: 'Invalid request: apiHost must be a well-formed URL',
+          });
+          return;
+        }
+      }
+
+      // Pass only the sanitized values to the service
+      const sanitizedToken = apiToken.trim();
+      const sanitizedHost = typeof apiHost === 'string' ? apiHost.trim() : undefined;
+
+      const result = await usageService.configure(
+        { apiToken: sanitizedToken, apiHost: sanitizedHost },
+        settingsService
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

@@ -15,6 +15,7 @@ import {
   GitFork,
   ExternalLink,
   Copy,
+  Repeat,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,7 @@ export interface RowActionHandlers {
   onSpawnTask?: () => void;
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
+  onDuplicateAsChildMultiple?: () => void;
 }
 
 export interface RowActionsProps {
@@ -443,6 +445,13 @@ export const RowActions = memo(function RowActions({
                         label="Duplicate as Child"
                         onClick={withClose(handlers.onDuplicateAsChild)}
                       />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
                     </DropdownMenuSubContent>
                   )}
                 </DropdownMenuSub>
@@ -565,6 +574,13 @@ export const RowActions = memo(function RowActions({
                           label="Duplicate as Child"
                           onClick={withClose(handlers.onDuplicateAsChild)}
                         />
+                        {handlers.onDuplicateAsChildMultiple && (
+                          <MenuItem
+                            icon={Repeat}
+                            label="Duplicate as Child ×N"
+                            onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                          />
+                        )}
                       </DropdownMenuSubContent>
                     )}
                   </DropdownMenuSub>
@@ -636,6 +652,13 @@ export const RowActions = memo(function RowActions({
                         label="Duplicate as Child"
                         onClick={withClose(handlers.onDuplicateAsChild)}
                       />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
                     </DropdownMenuSubContent>
                   )}
                 </DropdownMenuSub>
@@ -712,6 +735,13 @@ export const RowActions = memo(function RowActions({
                         label="Duplicate as Child"
                         onClick={withClose(handlers.onDuplicateAsChild)}
                       />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
                     </DropdownMenuSubContent>
                   )}
                 </DropdownMenuSub>
@@ -764,6 +794,13 @@ export const RowActions = memo(function RowActions({
                         label="Duplicate as Child"
                         onClick={withClose(handlers.onDuplicateAsChild)}
                       />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
                     </DropdownMenuSubContent>
                   )}
                 </DropdownMenuSub>
@@ -804,6 +841,7 @@ export function createRowActionHandlers(
     spawnTask?: (id: string) => void;
     duplicate?: (id: string) => void;
     duplicateAsChild?: (id: string) => void;
+    duplicateAsChildMultiple?: (id: string) => void;
   }
 ): RowActionHandlers {
   return {
@@ -823,6 +861,9 @@ export function createRowActionHandlers(
     onDuplicate: actions.duplicate ? () => actions.duplicate!(featureId) : undefined,
     onDuplicateAsChild: actions.duplicateAsChild
       ? () => actions.duplicateAsChild!(featureId)
+      : undefined,
+    onDuplicateAsChildMultiple: actions.duplicateAsChildMultiple
+      ? () => actions.duplicateAsChildMultiple!(featureId)
       : undefined,
   };
 }

@@ -1383,6 +1383,12 @@ export interface ProjectSettings {
   defaultDeleteBranchWithWorktree?: boolean;
   /** Auto-dismiss init script indicator after completion (default: true) */
   autoDismissInitScriptIndicator?: boolean;
+  /**
+   * List of file/directory paths (relative to project root) to copy into new worktrees.
+   * Useful for files not tracked by git, like .env, local config files, etc.
+   * Each entry is a relative path from the project root (e.g., ".env", ".env.local", "config/local.json").
+   */
+  worktreeCopyFiles?: string[];
 
   // Session Tracking
   /** Last chat session selected in this project */

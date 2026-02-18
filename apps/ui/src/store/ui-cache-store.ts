@@ -22,6 +22,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useAppStore } from '@/store/app-store';
 
 interface UICacheState {
   /** ID of the currently selected project */
@@ -82,13 +83,27 @@ export function syncUICache(appState: {
   worktreePanelCollapsed?: boolean;
   collapsedNavSections?: Record<string, boolean>;
 }): void {
-  useUICacheStore.getState().updateFromAppStore({
-    cachedProjectId: appState.currentProject?.id ?? null,
-    cachedSidebarOpen: appState.sidebarOpen ?? true,
-    cachedSidebarStyle: appState.sidebarStyle ?? 'unified',
-    cachedWorktreePanelCollapsed: appState.worktreePanelCollapsed ?? false,
-    cachedCollapsedNavSections: appState.collapsedNavSections ?? {},
-  });
+  const update: Partial<UICacheState> = {};
+
+  if ('currentProject' in appState) {
+    update.cachedProjectId = appState.currentProject?.id ?? null;
+  }
+  if ('sidebarOpen' in appState) {
+    update.cachedSidebarOpen = appState.sidebarOpen;
+  }
+  if ('sidebarStyle' in appState) {
+    update.cachedSidebarStyle = appState.sidebarStyle;
+  }
+  if ('worktreePanelCollapsed' in appState) {
+    update.cachedWorktreePanelCollapsed = appState.worktreePanelCollapsed;
+  }
+  if ('collapsedNavSections' in appState) {
+    update.cachedCollapsedNavSections = appState.collapsedNavSections;
+  }
+
+  if (Object.keys(update).length > 0) {
+    useUICacheStore.getState().updateFromAppStore(update);
+  }
 }
 
 /**
@@ -100,7 +115,7 @@ export function syncUICache(appState: {
  * This is reconciled later when hydrateStoreFromSettings() overwrites
  * the app store with authoritative server data.
  *
- * @param appStoreSetState - The setState function from the app store (avoids circular import)
+ * @param appStoreSetState - The setState function from the app store
  */
 export function restoreFromUICache(
   appStoreSetState: (state: Record<string, unknown>) => void
@@ -112,12 +127,29 @@ export function restoreFromUICache(
     return false;
   }
 
-  appStoreSetState({
+  // Attempt to resolve the cached project ID to a full project object.
+  // At early startup the projects array may be empty (server data not yet loaded),
+  // but if projects are already in the store (e.g. optimistic hydration has run)
+  // this will restore the project context immediately so tab-discard recovery
+  // does not lose the selected project when cached settings are missing.
+  const existingProjects = useAppStore.getState().projects;
+  const cachedProject = existingProjects.find((p) => p.id === cache.cachedProjectId) ?? null;
+
+  const stateUpdate: Record<string, unknown> = {
     sidebarOpen: cache.cachedSidebarOpen,
     sidebarStyle: cache.cachedSidebarStyle,
     worktreePanelCollapsed: cache.cachedWorktreePanelCollapsed,
     collapsedNavSections: cache.cachedCollapsedNavSections,
-  });
+  };
+
+  // Restore the project context when the project object is available.
+  // When projects are not yet loaded (empty array), currentProject remains
+  // null and will be properly set later by hydrateStoreFromSettings().
+  if (cachedProject !== null) {
+    stateUpdate.currentProject = cachedProject;
+  }
+
+  appStoreSetState(stateUpdate);
 
   return true;
 }

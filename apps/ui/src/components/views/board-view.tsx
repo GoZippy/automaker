@@ -49,12 +49,13 @@ import {
   ArchiveAllVerifiedDialog,
   DeleteCompletedFeatureDialog,
   DependencyLinkDialog,
+  DuplicateCountDialog,
   EditFeatureDialog,
   FollowUpDialog,
   PlanApprovalDialog,
-  PullResolveConflictsDialog,
+  MergeRebaseDialog,
 } from './board-view/dialogs';
-import type { DependencyLinkType } from './board-view/dialogs';
+import type { DependencyLinkType, PullStrategy } from './board-view/dialogs';
 import { PipelineSettingsDialog } from './board-view/dialogs/pipeline-settings-dialog';
 import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
 import { DeleteWorktreeDialog } from './board-view/dialogs/delete-worktree-dialog';
@@ -170,13 +171,16 @@ export function BoardView() {
   // State for spawn task mode
   const [spawnParentFeature, setSpawnParentFeature] = useState<Feature | null>(null);
 
+  // State for duplicate as child multiple times dialog
+  const [duplicateMultipleFeature, setDuplicateMultipleFeature] = useState<Feature | null>(null);
+
   // Worktree dialog states
   const [showCreateWorktreeDialog, setShowCreateWorktreeDialog] = useState(false);
   const [showDeleteWorktreeDialog, setShowDeleteWorktreeDialog] = useState(false);
   const [showCommitWorktreeDialog, setShowCommitWorktreeDialog] = useState(false);
   const [showCreatePRDialog, setShowCreatePRDialog] = useState(false);
   const [showCreateBranchDialog, setShowCreateBranchDialog] = useState(false);
-  const [showPullResolveConflictsDialog, setShowPullResolveConflictsDialog] = useState(false);
+  const [showMergeRebaseDialog, setShowMergeRebaseDialog] = useState(false);
   const [selectedWorktreeForAction, setSelectedWorktreeForAction] = useState<WorktreeInfo | null>(
     null
   );
@@ -596,6 +600,7 @@ export function BoardView() {
     handleStartNextFeatures,
     handleArchiveAllVerified,
     handleDuplicateFeature,
+    handleDuplicateAsChildMultiple,
   } = useBoardActions({
     currentProject,
     features: hookFeatures,
@@ -917,17 +922,25 @@ export function BoardView() {
   // Handler for resolving conflicts - opens dialog to select remote branch, then creates a feature
   const handleResolveConflicts = useCallback((worktree: WorktreeInfo) => {
     setSelectedWorktreeForAction(worktree);
-    setShowPullResolveConflictsDialog(true);
+    setShowMergeRebaseDialog(true);
   }, []);
 
-  // Handler called when user confirms the pull & resolve conflicts dialog
+  // Handler called when user confirms the merge & rebase dialog
   const handleConfirmResolveConflicts = useCallback(
-    async (worktree: WorktreeInfo, remoteBranch: string) => {
-      const description = `Pull latest from ${remoteBranch} and resolve conflicts. Merge ${remoteBranch} into the current branch (${worktree.branch}), resolving any merge conflicts that arise. After resolving conflicts, ensure the code compiles and tests pass.`;
+    async (worktree: WorktreeInfo, remoteBranch: string, strategy: PullStrategy) => {
+      const isRebase = strategy === 'rebase';
+
+      const description = isRebase
+        ? `Fetch the latest changes from ${remoteBranch} and rebase the current branch (${worktree.branch}) onto ${remoteBranch}. Use "git fetch" followed by "git rebase ${remoteBranch}" to replay commits on top of the remote branch for a linear history. If rebase conflicts arise, resolve them one commit at a time using "git rebase --continue" after fixing each conflict. After completing the rebase, ensure the code compiles and tests pass.`
+        : `Pull latest from ${remoteBranch} and resolve conflicts. Merge ${remoteBranch} into the current branch (${worktree.branch}), resolving any merge conflicts that arise. After resolving conflicts, ensure the code compiles and tests pass.`;
+
+      const title = isRebase
+        ? `Rebase & Resolve Conflicts: ${worktree.branch} onto ${remoteBranch}`
+        : `Resolve Merge Conflicts: ${remoteBranch} → ${worktree.branch}`;
 
       // Create the feature
       const featureData = {
-        title: `Resolve Merge Conflicts: ${remoteBranch} → ${worktree.branch}`,
+        title,
         category: 'Maintenance',
         description,
         images: [],
@@ -1562,6 +1575,7 @@ export function BoardView() {
                 },
                 onDuplicate: (feature) => handleDuplicateFeature(feature, false),
                 onDuplicateAsChild: (feature) => handleDuplicateFeature(feature, true),
+                onDuplicateAsChildMultiple: (feature) => setDuplicateMultipleFeature(feature),
               }}
               runningAutoTasks={runningAutoTasksAllWorktrees}
               pipelineConfig={pipelineConfig}
@@ -1603,6 +1617,7 @@ export function BoardView() {
               }}
               onDuplicate={(feature) => handleDuplicateFeature(feature, false)}
               onDuplicateAsChild={(feature) => handleDuplicateFeature(feature, true)}
+              onDuplicateAsChildMultiple={(feature) => setDuplicateMultipleFeature(feature)}
               featuresWithContext={featuresWithContext}
               runningAutoTasks={runningAutoTasksAllWorktrees}
               onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}
@@ -1752,6 +1767,21 @@ export function BoardView() {
         branchName={outputFeature?.branchName}
       />
 
+      {/* Duplicate as Child Multiple Times Dialog */}
+      <DuplicateCountDialog
+        open={duplicateMultipleFeature !== null}
+        onOpenChange={(open) => {
+          if (!open) setDuplicateMultipleFeature(null);
+        }}
+        onConfirm={async (count) => {
+          if (duplicateMultipleFeature) {
+            await handleDuplicateAsChildMultiple(duplicateMultipleFeature, count);
+            setDuplicateMultipleFeature(null);
+          }
+        }}
+        featureTitle={duplicateMultipleFeature?.title || duplicateMultipleFeature?.description}
+      />
+
       {/* Archive All Verified Dialog */}
       <ArchiveAllVerifiedDialog
         open={showArchiveAllVerifiedDialog}
@@ -1899,10 +1929,10 @@ export function BoardView() {
         }}
       />
 
-      {/* Pull & Resolve Conflicts Dialog */}
-      <PullResolveConflictsDialog
-        open={showPullResolveConflictsDialog}
-        onOpenChange={setShowPullResolveConflictsDialog}
+      {/* Merge & Rebase Dialog */}
+      <MergeRebaseDialog
+        open={showMergeRebaseDialog}
+        onOpenChange={setShowMergeRebaseDialog}
         worktree={selectedWorktreeForAction}
         onConfirm={handleConfirmResolveConflicts}
       />

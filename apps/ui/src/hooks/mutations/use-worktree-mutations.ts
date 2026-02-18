@@ -126,10 +126,18 @@ export function usePushWorktree() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ worktreePath, force }: { worktreePath: string; force?: boolean }) => {
+    mutationFn: async ({
+      worktreePath,
+      force,
+      remote,
+    }: {
+      worktreePath: string;
+      force?: boolean;
+      remote?: string;
+    }) => {
       const api = getElectronAPI();
       if (!api.worktree) throw new Error('Worktree API not available');
-      const result = await api.worktree.push(worktreePath, force);
+      const result = await api.worktree.push(worktreePath, force, remote);
       if (!result.success) {
         throw new Error(result.error || 'Failed to push changes');
       }
@@ -156,10 +164,10 @@ export function usePullWorktree() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (worktreePath: string) => {
+    mutationFn: async ({ worktreePath, remote }: { worktreePath: string; remote?: string }) => {
       const api = getElectronAPI();
       if (!api.worktree) throw new Error('Worktree API not available');
-      const result = await api.worktree.pull(worktreePath);
+      const result = await api.worktree.pull(worktreePath, remote);
       if (!result.success) {
         throw new Error(result.error || 'Failed to pull changes');
       }
@@ -284,17 +292,6 @@ export function useMergeWorktree(projectPath: string) {
 }
 
 /**
- * Result from the switch branch API call
- */
-interface SwitchBranchResult {
-  previousBranch: string;
-  currentBranch: string;
-  message: string;
-  hasConflicts?: boolean;
-  stashedChanges?: boolean;
-}
-
-/**
  * Switch to a different branch
  *
  * Automatically stashes local changes before switching and reapplies them after.
@@ -316,14 +313,17 @@ export function useSwitchBranch(options?: {
     }: {
       worktreePath: string;
       branchName: string;
-    }): Promise<SwitchBranchResult> => {
+    }) => {
       const api = getElectronAPI();
       if (!api.worktree) throw new Error('Worktree API not available');
       const result = await api.worktree.switchBranch(worktreePath, branchName);
       if (!result.success) {
         throw new Error(result.error || 'Failed to switch branch');
       }
-      return result.result as SwitchBranchResult;
+      if (!result.result) {
+        throw new Error('Switch branch returned no result');
+      }
+      return result.result;
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['worktrees'] });
@@ -382,6 +382,36 @@ export function useCheckoutBranch() {
     },
     onError: (error: Error) => {
       toast.error('Failed to checkout branch', {
+        description: error.message,
+      });
+    },
+  });
+}
+
+/**
+ * Generate a PR title and description from branch diff
+ *
+ * @returns Mutation for generating a PR description
+ */
+export function useGeneratePRDescription() {
+  return useMutation({
+    mutationFn: async ({
+      worktreePath,
+      baseBranch,
+    }: {
+      worktreePath: string;
+      baseBranch?: string;
+    }) => {
+      const api = getElectronAPI();
+      if (!api.worktree) throw new Error('Worktree API not available');
+      const result = await api.worktree.generatePRDescription(worktreePath, baseBranch);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to generate PR description');
+      }
+      return { title: result.title ?? '', body: result.body ?? '' };
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to generate PR description', {
         description: error.message,
       });
     },

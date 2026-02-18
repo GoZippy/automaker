@@ -6,11 +6,12 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { getErrorMessage, logWorktreeError } from '../common.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 interface BranchInfo {
   name: string;
@@ -131,15 +132,17 @@ export function createListBranchesHandler() {
       let hasRemoteBranch = false;
       try {
         // First check if there's a remote tracking branch
-        const { stdout: upstreamOutput } = await execAsync(
-          `git rev-parse --abbrev-ref ${currentBranch}@{upstream}`,
+        const { stdout: upstreamOutput } = await execFileAsync(
+          'git',
+          ['rev-parse', '--abbrev-ref', `${currentBranch}@{upstream}`],
           { cwd: worktreePath }
         );
 
         if (upstreamOutput.trim()) {
           hasRemoteBranch = true;
-          const { stdout: aheadBehindOutput } = await execAsync(
-            `git rev-list --left-right --count ${currentBranch}@{upstream}...HEAD`,
+          const { stdout: aheadBehindOutput } = await execFileAsync(
+            'git',
+            ['rev-list', '--left-right', '--count', `${currentBranch}@{upstream}...HEAD`],
             { cwd: worktreePath }
           );
           const [behind, ahead] = aheadBehindOutput.trim().split(/\s+/).map(Number);
@@ -150,8 +153,9 @@ export function createListBranchesHandler() {
         // No upstream branch set - check if the branch exists on any remote
         try {
           // Check if there's a matching branch on origin (most common remote)
-          const { stdout: remoteBranchOutput } = await execAsync(
-            `git ls-remote --heads origin ${currentBranch}`,
+          const { stdout: remoteBranchOutput } = await execFileAsync(
+            'git',
+            ['ls-remote', '--heads', 'origin', currentBranch],
             { cwd: worktreePath, timeout: 5000 }
           );
           hasRemoteBranch = remoteBranchOutput.trim().length > 0;

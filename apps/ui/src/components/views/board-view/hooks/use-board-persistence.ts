@@ -180,19 +180,17 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         (existing) => (existing ? existing.filter((f) => f.id !== featureId) : existing)
       );
 
-      try {
-        const api = getElectronAPI();
-        if (!api.features) {
-          // Rollback optimistic deletion since we can't persist
-          if (previousFeatures) {
-            queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
-          }
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.features.all(currentProject.path),
-          });
-          throw new Error('Features API not available');
-        }
+      const api = getElectronAPI();
+      if (!api.features) {
+        // Rollback optimistic deletion since we can't persist
+        queryClient.setQueryData(queryKeys.features.all(currentProject.path), previousFeatures);
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.features.all(currentProject.path),
+        });
+        throw new Error('Features API not available');
+      }
 
+      try {
         await api.features.delete(currentProject.path, featureId);
         // Invalidate to sync with server state
         queryClient.invalidateQueries({
@@ -207,6 +205,7 @@ export function useBoardPersistence({ currentProject }: UseBoardPersistenceProps
         queryClient.invalidateQueries({
           queryKey: queryKeys.features.all(currentProject.path),
         });
+        throw error;
       }
     },
     [currentProject, queryClient]

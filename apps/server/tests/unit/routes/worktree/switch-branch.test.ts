@@ -6,7 +6,7 @@ vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
     ...actual,
-    exec: vi.fn(),
+    execFile: vi.fn(),
   };
 });
 
@@ -18,10 +18,10 @@ vi.mock('util', async (importOriginal) => {
   };
 });
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { createSwitchBranchHandler } from '@/routes/worktree/routes/switch-branch.js';
 
-const mockExec = exec as Mock;
+const mockExecFile = execFile as Mock;
 
 describe('switch-branch route', () => {
   let req: Request;
@@ -40,20 +40,21 @@ describe('switch-branch route', () => {
       branchName: 'feature/test',
     };
 
-    mockExec.mockImplementation(async (command: string) => {
+    mockExecFile.mockImplementation(async (file: string, args: string[]) => {
+      const command = `${file} ${args.join(' ')}`;
       if (command === 'git rev-parse --abbrev-ref HEAD') {
         return { stdout: 'main\n', stderr: '' };
       }
-      if (command === 'git rev-parse --verify "feature/test"') {
+      if (command === 'git rev-parse --verify feature/test') {
         return { stdout: 'abc123\n', stderr: '' };
       }
-      if (command === 'git branch -r --format="%(refname:short)"') {
+      if (command === 'git branch -r --format=%(refname:short)') {
         return { stdout: '', stderr: '' };
       }
       if (command === 'git status --porcelain') {
         return { stdout: '?? .automaker/\n?? notes.txt\n', stderr: '' };
       }
-      if (command === 'git checkout "feature/test"') {
+      if (command === 'git checkout feature/test') {
         return { stdout: '', stderr: '' };
       }
       if (command === 'git fetch --all --quiet') {
@@ -84,7 +85,11 @@ describe('switch-branch route', () => {
         stashedChanges: false,
       },
     });
-    expect(mockExec).toHaveBeenCalledWith('git checkout "feature/test"', { cwd: '/repo/path' });
+    expect(mockExecFile).toHaveBeenCalledWith(
+      'git',
+      ['checkout', 'feature/test'],
+      expect.objectContaining({ cwd: '/repo/path' })
+    );
   });
 
   it('should stash changes and switch when tracked files are modified', async () => {
@@ -93,23 +98,25 @@ describe('switch-branch route', () => {
       branchName: 'feature/test',
     };
 
-    mockExec.mockImplementation(async (command: string) => {
+    let stashListCallCount = 0;
+
+    mockExecFile.mockImplementation(async (file: string, args: string[]) => {
+      const command = `${file} ${args.join(' ')}`;
       if (command === 'git rev-parse --abbrev-ref HEAD') {
         return { stdout: 'main\n', stderr: '' };
       }
-      if (command === 'git rev-parse --verify "feature/test"') {
+      if (command === 'git rev-parse --verify feature/test') {
         return { stdout: 'abc123\n', stderr: '' };
       }
       if (command === 'git status --porcelain') {
         return { stdout: ' M src/index.ts\n?? notes.txt\n', stderr: '' };
       }
-      if (command === 'git branch -r --format="%(refname:short)"') {
+      if (command === 'git branch -r --format=%(refname:short)') {
         return { stdout: '', stderr: '' };
       }
       if (command === 'git stash list') {
-        // Return different counts before and after stash to indicate stash was created
-        if (!mockExec._stashCalled) {
-          mockExec._stashCalled = true;
+        stashListCallCount++;
+        if (stashListCallCount === 1) {
           return { stdout: '', stderr: '' };
         }
         return { stdout: 'stash@{0}: automaker-branch-switch\n', stderr: '' };
@@ -117,7 +124,7 @@ describe('switch-branch route', () => {
       if (command.startsWith('git stash push')) {
         return { stdout: '', stderr: '' };
       }
-      if (command === 'git checkout "feature/test"') {
+      if (command === 'git checkout feature/test') {
         return { stdout: '', stderr: '' };
       }
       if (command === 'git fetch --all --quiet') {

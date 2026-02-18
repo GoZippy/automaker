@@ -23,6 +23,7 @@ import {
   ChevronUp,
   GitFork,
   Copy,
+  Repeat,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { CountUpTimer } from '@/components/ui/count-up-timer';
@@ -33,9 +34,11 @@ import { getProviderIconForModel } from '@/components/ui/provider-icon';
 function DuplicateMenuItems({
   onDuplicate,
   onDuplicateAsChild,
+  onDuplicateAsChildMultiple,
 }: {
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
+  onDuplicateAsChildMultiple?: () => void;
 }) {
   if (!onDuplicate) return null;
 
@@ -55,25 +58,23 @@ function DuplicateMenuItems({
     );
   }
 
-  // When sub-child action is available, render a proper DropdownMenuSub with
-  // DropdownMenuSubTrigger and DropdownMenuSubContent per Radix conventions
+  // Split-button pattern: main click duplicates immediately, disclosure arrow shows submenu
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="text-xs">
-        <Copy className="w-3 h-3 mr-2" />
-        Duplicate
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
+      <div className="flex items-center">
         <DropdownMenuItem
           onClick={(e) => {
             e.stopPropagation();
             onDuplicate();
           }}
-          className="text-xs"
+          className="flex-1 pr-0 rounded-r-none text-xs"
         >
           <Copy className="w-3 h-3 mr-2" />
           Duplicate
         </DropdownMenuItem>
+        <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8 text-xs" />
+      </div>
+      <DropdownMenuSubContent>
         <DropdownMenuItem
           onClick={(e) => {
             e.stopPropagation();
@@ -84,6 +85,18 @@ function DuplicateMenuItems({
           <GitFork className="w-3 h-3 mr-2" />
           Duplicate as Child
         </DropdownMenuItem>
+        {onDuplicateAsChildMultiple && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicateAsChildMultiple();
+            }}
+            className="text-xs"
+          >
+            <Repeat className="w-3 h-3 mr-2" />
+            Duplicate as Child ×N
+          </DropdownMenuItem>
+        )}
       </DropdownMenuSubContent>
     </DropdownMenuSub>
   );
@@ -100,6 +113,7 @@ interface CardHeaderProps {
   onSpawnTask?: () => void;
   onDuplicate?: () => void;
   onDuplicateAsChild?: () => void;
+  onDuplicateAsChildMultiple?: () => void;
   dragHandleListeners?: DraggableSyntheticListeners;
   dragHandleAttributes?: DraggableAttributes;
 }
@@ -115,6 +129,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
   onSpawnTask,
   onDuplicate,
   onDuplicateAsChild,
+  onDuplicateAsChildMultiple,
   dragHandleListeners,
   dragHandleAttributes,
 }: CardHeaderProps) {
@@ -183,6 +198,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
               <DuplicateMenuItems
                 onDuplicate={onDuplicate}
                 onDuplicateAsChild={onDuplicateAsChild}
+                onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
               />
               {/* Model info in dropdown */}
               {(() => {
@@ -251,6 +267,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                   <DuplicateMenuItems
                     onDuplicate={onDuplicate}
                     onDuplicateAsChild={onDuplicateAsChild}
+                    onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
                   />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -343,6 +360,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                   <DuplicateMenuItems
                     onDuplicate={onDuplicate}
                     onDuplicateAsChild={onDuplicateAsChild}
+                    onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
                   />
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -417,6 +435,7 @@ export const CardHeaderSection = memo(function CardHeaderSection({
                 <DuplicateMenuItems
                   onDuplicate={onDuplicate}
                   onDuplicateAsChild={onDuplicateAsChild}
+                  onDuplicateAsChildMultiple={onDuplicateAsChildMultiple}
                 />
                 {/* Model info in dropdown */}
                 {(() => {

@@ -59,6 +59,7 @@ interface WorktreeTabProps {
   onOpenInIntegratedTerminal: (worktree: WorktreeInfo, mode?: 'tab' | 'split') => void;
   onOpenInExternalTerminal: (worktree: WorktreeInfo, terminalId?: string) => void;
   onViewChanges: (worktree: WorktreeInfo) => void;
+  onViewCommits: (worktree: WorktreeInfo) => void;
   onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
@@ -78,6 +79,12 @@ interface WorktreeTabProps {
   onStopTests?: (worktree: WorktreeInfo) => void;
   /** View test logs for this worktree */
   onViewTestLogs?: (worktree: WorktreeInfo) => void;
+  /** Stash changes for this worktree */
+  onStashChanges?: (worktree: WorktreeInfo) => void;
+  /** View stashes for this worktree */
+  onViewStashes?: (worktree: WorktreeInfo) => void;
+  /** Cherry-pick commits from another branch */
+  onCherryPick?: (worktree: WorktreeInfo) => void;
   hasInitScript: boolean;
   /** Whether a test command is configured in project settings */
   hasTestCommand?: boolean;
@@ -122,6 +129,7 @@ export function WorktreeTab({
   onOpenInIntegratedTerminal,
   onOpenInExternalTerminal,
   onViewChanges,
+  onViewCommits,
   onDiscardChanges,
   onCommit,
   onCreatePR,
@@ -138,6 +146,9 @@ export function WorktreeTab({
   onStartTests,
   onStopTests,
   onViewTestLogs,
+  onStashChanges,
+  onViewStashes,
+  onCherryPick,
   hasInitScript,
   hasTestCommand = false,
 }: WorktreeTabProps) {
@@ -418,6 +429,7 @@ export function WorktreeTab({
         isDevServerRunning={isDevServerRunning}
         devServerInfo={devServerInfo}
         gitRepoStatus={gitRepoStatus}
+        isLoadingGitStatus={isLoadingBranches}
         isAutoModeRunning={isAutoModeRunning}
         hasTestCommand={hasTestCommand}
         isStartingTests={isStartingTests}
@@ -431,6 +443,7 @@ export function WorktreeTab({
         onOpenInIntegratedTerminal={onOpenInIntegratedTerminal}
         onOpenInExternalTerminal={onOpenInExternalTerminal}
         onViewChanges={onViewChanges}
+        onViewCommits={onViewCommits}
         onDiscardChanges={onDiscardChanges}
         onCommit={onCommit}
         onCreatePR={onCreatePR}
@@ -447,6 +460,9 @@ export function WorktreeTab({
         onStartTests={onStartTests}
         onStopTests={onStopTests}
         onViewTestLogs={onViewTestLogs}
+        onStashChanges={onStashChanges}
+        onViewStashes={onViewStashes}
+        onCherryPick={onCherryPick}
         hasInitScript={hasInitScript}
       />
     </div>

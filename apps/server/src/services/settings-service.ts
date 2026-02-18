@@ -729,6 +729,7 @@ export class SettingsService {
     anthropic: { configured: boolean; masked: string };
     google: { configured: boolean; masked: string };
     openai: { configured: boolean; masked: string };
+    zai: { configured: boolean; masked: string };
   }> {
     const credentials = await this.getCredentials();
 
@@ -749,6 +750,10 @@ export class SettingsService {
       openai: {
         configured: !!credentials.apiKeys.openai,
         masked: maskKey(credentials.apiKeys.openai),
+      },
+      zai: {
+        configured: !!credentials.apiKeys.zai,
+        masked: maskKey(credentials.apiKeys.zai),
       },
     };
   }

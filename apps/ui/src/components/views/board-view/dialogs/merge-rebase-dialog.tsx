@@ -21,9 +21,11 @@ import {
 } from '@/components/ui/select';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { toast } from 'sonner';
-import { GitMerge, RefreshCw, AlertTriangle } from 'lucide-react';
+import { GitMerge, RefreshCw, AlertTriangle, GitBranch } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import type { WorktreeInfo } from '../worktree-panel/types';
+
+export type PullStrategy = 'merge' | 'rebase';
 
 interface RemoteBranch {
   name: string;
@@ -36,24 +38,29 @@ interface RemoteInfo {
   branches: RemoteBranch[];
 }
 
-const logger = createLogger('PullResolveConflictsDialog');
+const logger = createLogger('MergeRebaseDialog');
 
-interface PullResolveConflictsDialogProps {
+interface MergeRebaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
-  onConfirm: (worktree: WorktreeInfo, remoteBranch: string) => void | Promise<void>;
+  onConfirm: (
+    worktree: WorktreeInfo,
+    remoteBranch: string,
+    strategy: PullStrategy
+  ) => void | Promise<void>;
 }
 
-export function PullResolveConflictsDialog({
+export function MergeRebaseDialog({
   open,
   onOpenChange,
   worktree,
   onConfirm,
-}: PullResolveConflictsDialogProps) {
+}: MergeRebaseDialogProps) {
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
   const [selectedRemote, setSelectedRemote] = useState<string>('');
   const [selectedBranch, setSelectedBranch] = useState<string>('');
+  const [selectedStrategy, setSelectedStrategy] = useState<PullStrategy>('merge');
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +77,7 @@ export function PullResolveConflictsDialog({
     if (!open) {
       setSelectedRemote('');
       setSelectedBranch('');
+      setSelectedStrategy('merge');
       setError(null);
     }
   }, [open]);
@@ -161,7 +169,7 @@ export function PullResolveConflictsDialog({
 
   const handleConfirm = () => {
     if (!worktree || !selectedBranch) return;
-    onConfirm(worktree, selectedBranch);
+    onConfirm(worktree, selectedBranch, selectedStrategy);
     onOpenChange(false);
   };
 
@@ -174,10 +182,10 @@ export function PullResolveConflictsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GitMerge className="w-5 h-5 text-purple-500" />
-            Pull & Resolve Conflicts
+            Merge & Rebase
           </DialogTitle>
           <DialogDescription>
-            Select a remote branch to pull from and resolve conflicts with{' '}
+            Select a remote branch to merge or rebase with{' '}
             <span className="font-mono text-foreground">
               {worktree?.branch || 'current branch'}
             </span>
@@ -225,13 +233,16 @@ export function PullResolveConflictsDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {remotes.map((remote) => (
-                    <SelectItem key={remote.name} value={remote.name}>
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">{remote.name}</span>
+                    <SelectItem
+                      key={remote.name}
+                      value={remote.name}
+                      description={
                         <span className="text-xs text-muted-foreground truncate max-w-[300px]">
                           {remote.url}
                         </span>
-                      </div>
+                      }
+                    >
+                      <span className="font-medium">{remote.name}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -264,13 +275,62 @@ export function PullResolveConflictsDialog({
               )}
             </div>
 
+            <div className="grid gap-2">
+              <Label htmlFor="strategy-select">Strategy</Label>
+              <Select
+                value={selectedStrategy}
+                onValueChange={(value) => setSelectedStrategy(value as PullStrategy)}
+              >
+                <SelectTrigger id="strategy-select">
+                  <SelectValue placeholder="Select a strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    value="merge"
+                    description={
+                      <span className="text-xs text-muted-foreground">
+                        Creates a merge commit preserving history
+                      </span>
+                    }
+                  >
+                    <span className="flex items-center gap-2">
+                      <GitMerge className="w-3.5 h-3.5 text-purple-500" />
+                      <span className="font-medium">Merge</span>
+                    </span>
+                  </SelectItem>
+                  <SelectItem
+                    value="rebase"
+                    description={
+                      <span className="text-xs text-muted-foreground">
+                        Replays commits on top for linear history
+                      </span>
+                    }
+                  >
+                    <span className="flex items-center gap-2">
+                      <GitBranch className="w-3.5 h-3.5 text-blue-500" />
+                      <span className="font-medium">Rebase</span>
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {selectedBranch && (
               <div className="mt-2 p-3 rounded-md bg-muted/50 border border-border">
                 <p className="text-sm text-muted-foreground">
-                  This will create a feature task to pull from{' '}
-                  <span className="font-mono text-foreground">{selectedBranch}</span> into{' '}
-                  <span className="font-mono text-foreground">{worktree?.branch}</span> and resolve
-                  any merge conflicts.
+                  This will create a feature task to{' '}
+                  {selectedStrategy === 'rebase' ? (
+                    <>
+                      rebase <span className="font-mono text-foreground">{worktree?.branch}</span>{' '}
+                      onto <span className="font-mono text-foreground">{selectedBranch}</span>
+                    </>
+                  ) : (
+                    <>
+                      merge <span className="font-mono text-foreground">{selectedBranch}</span> into{' '}
+                      <span className="font-mono text-foreground">{worktree?.branch}</span>
+                    </>
+                  )}{' '}
+                  and resolve any conflicts.
                 </p>
               </div>
             )}
@@ -287,7 +347,7 @@ export function PullResolveConflictsDialog({
             className="bg-purple-600 hover:bg-purple-700 text-white"
           >
             <GitMerge className="w-4 h-4 mr-2" />
-            Pull & Resolve
+            Merge & Rebase
           </Button>
         </DialogFooter>
       </DialogContent>

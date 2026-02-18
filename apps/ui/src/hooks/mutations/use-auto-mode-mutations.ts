@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { toast } from 'sonner';
+import type { Feature } from '@/store/app-store';
 
 /**
  * Start running a feature in auto mode
@@ -159,9 +160,26 @@ export function useVerifyFeature(projectPath: string) {
       if (!result.success) {
         throw new Error(result.error || 'Failed to verify feature');
       }
-      return result;
+      return { ...result, featureId };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // If verification passed, optimistically update React Query cache
+      // to move the feature to 'verified' status immediately
+      if (data.passes) {
+        const previousFeatures = queryClient.getQueryData<Feature[]>(
+          queryKeys.features.all(projectPath)
+        );
+        if (previousFeatures) {
+          queryClient.setQueryData<Feature[]>(
+            queryKeys.features.all(projectPath),
+            previousFeatures.map((f) =>
+              f.id === data.featureId
+                ? { ...f, status: 'verified' as const, justFinishedAt: undefined }
+                : f
+            )
+          );
+        }
+      }
       queryClient.invalidateQueries({ queryKey: queryKeys.features.all(projectPath) });
     },
     onError: (error: Error) => {

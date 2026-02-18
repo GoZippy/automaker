@@ -58,6 +58,9 @@ export function createApplyHandler() {
             if (feature.dependencies?.includes(change.featureId)) {
               const newDeps = feature.dependencies.filter((d) => d !== change.featureId);
               await featureLoader.update(projectPath, feature.id, { dependencies: newDeps });
+              // Mutate the in-memory feature object so subsequent deletions use the updated
+              // dependency list and don't reintroduce already-removed dependency IDs.
+              feature.dependencies = newDeps;
               logger.info(
                 `[BacklogPlan] Removed dependency ${change.featureId} from ${feature.id}`
               );

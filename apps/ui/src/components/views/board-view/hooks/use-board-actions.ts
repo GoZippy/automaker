@@ -660,9 +660,28 @@ export function useBoardActions({
   const handleVerifyFeature = useCallback(
     async (feature: Feature) => {
       if (!currentProject) return;
-      verifyFeatureMutation.mutate(feature.id);
+      try {
+        const result = await verifyFeatureMutation.mutateAsync(feature.id);
+        if (result.passes) {
+          // Immediately move card to verified column (optimistic update)
+          moveFeature(feature.id, 'verified');
+          persistFeatureUpdate(feature.id, {
+            status: 'verified',
+            justFinishedAt: undefined,
+          });
+          toast.success('Verification passed', {
+            description: `Verified: ${truncateDescription(feature.description)}`,
+          });
+        } else {
+          toast.error('Verification failed', {
+            description: `Tests did not pass for: ${truncateDescription(feature.description)}`,
+          });
+        }
+      } catch {
+        // Error toast is already shown by the mutation's onError handler
+      }
     },
-    [currentProject, verifyFeatureMutation]
+    [currentProject, verifyFeatureMutation, moveFeature, persistFeatureUpdate]
   );
 
   const handleResumeFeature = useCallback(
@@ -1176,6 +1195,49 @@ export function useBoardActions({
     [handleAddFeature]
   );
 
+  const handleDuplicateAsChildMultiple = useCallback(
+    async (feature: Feature, count: number) => {
+      // Create a chain of duplicates, each a child of the previous, so they execute sequentially
+      let parentFeature = feature;
+
+      for (let i = 0; i < count; i++) {
+        const {
+          id: _id,
+          status: _status,
+          startedAt: _startedAt,
+          error: _error,
+          summary: _summary,
+          spec: _spec,
+          passes: _passes,
+          planSpec: _planSpec,
+          descriptionHistory: _descriptionHistory,
+          titleGenerating: _titleGenerating,
+          ...featureData
+        } = parentFeature;
+
+        const duplicatedFeatureData = {
+          ...featureData,
+          // Each duplicate depends on the previous one in the chain
+          dependencies: [parentFeature.id],
+        };
+
+        await handleAddFeature(duplicatedFeatureData);
+
+        // Get the newly created feature (last added feature) to use as parent for next iteration
+        const currentFeatures = useAppStore.getState().features;
+        const newestFeature = currentFeatures[currentFeatures.length - 1];
+        if (newestFeature) {
+          parentFeature = newestFeature;
+        }
+      }
+
+      toast.success(`Created ${count} chained duplicates`, {
+        description: `Created ${count} sequential copies of: ${truncateDescription(feature.description || feature.title || '')}`,
+      });
+    },
+    [handleAddFeature]
+  );
+
   return {
     handleAddFeature,
     handleUpdateFeature,
@@ -1197,5 +1259,6 @@ export function useBoardActions({
     handleStartNextFeatures,
     handleArchiveAllVerified,
     handleDuplicateFeature,
+    handleDuplicateAsChildMultiple,
   };
 }

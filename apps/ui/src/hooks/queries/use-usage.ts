@@ -144,8 +144,10 @@ export function useGeminiUsage(enabled = true) {
         throw new Error('Gemini API bridge unavailable');
       }
       const result = await api.gemini.getUsage();
-      // Server always returns a response with 'authenticated' field, even on error
-      // So we can safely cast to GeminiUsage
+      // Check if result is an error-only response (no 'authenticated' field means it's the error variant)
+      if (!('authenticated' in result) && 'error' in result) {
+        throw new Error(result.message || result.error);
+      }
       return result as GeminiUsage;
     },
     enabled,

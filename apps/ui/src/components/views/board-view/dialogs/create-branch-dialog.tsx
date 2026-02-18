@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import {
   Dialog,
@@ -11,9 +11,20 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
 import { toast } from 'sonner';
-import { GitBranchPlus } from 'lucide-react';
+import { GitBranchPlus, RefreshCw } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 
 interface WorktreeInfo {
@@ -22,6 +33,12 @@ interface WorktreeInfo {
   isMain: boolean;
   hasChanges?: boolean;
   changedFilesCount?: number;
+}
+
+interface BranchInfo {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
 }
 
 const logger = createLogger('CreateBranchDialog');
@@ -40,16 +57,45 @@ export function CreateBranchDialog({
   onCreated,
 }: CreateBranchDialogProps) {
   const [branchName, setBranchName] = useState('');
+  const [baseBranch, setBaseBranch] = useState('');
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset state when dialog opens/closes
+  const fetchBranches = useCallback(async () => {
+    if (!worktree) return;
+
+    setIsLoadingBranches(true);
+
+    try {
+      const api = getHttpApiClient();
+      const result = await api.worktree.listBranches(worktree.path, true);
+
+      if (result.success && result.result) {
+        setBranches(result.result.branches);
+        // Default to current branch
+        if (result.result.currentBranch) {
+          setBaseBranch(result.result.currentBranch);
+        }
+      }
+    } catch (err) {
+      logger.error('Failed to fetch branches:', err);
+    } finally {
+      setIsLoadingBranches(false);
+    }
+  }, [worktree]);
+
+  // Reset state and fetch branches when dialog opens
   useEffect(() => {
     if (open) {
       setBranchName('');
+      setBaseBranch('');
       setError(null);
+      setBranches([]);
+      fetchBranches();
     }
-  }, [open]);
+  }, [open, fetchBranches]);
 
   const handleCreate = async () => {
     if (!worktree || !branchName.trim()) return;
@@ -71,7 +117,13 @@ export function CreateBranchDialog({
         return;
       }
 
-      const result = await api.worktree.checkoutBranch(worktree.path, branchName.trim());
+      // Pass baseBranch if user selected one different from the current branch
+      const selectedBase = baseBranch || undefined;
+      const result = await api.worktree.checkoutBranch(
+        worktree.path,
+        branchName.trim(),
+        selectedBase
+      );
 
       if (result.success && result.result) {
         toast.success(result.result.message);
@@ -88,6 +140,10 @@ export function CreateBranchDialog({
     }
   };
 
+  // Separate local and remote branches
+  const localBranches = branches.filter((b) => !b.isRemote);
+  const remoteBranches = branches.filter((b) => b.isRemote);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
@@ -96,12 +152,7 @@ export function CreateBranchDialog({
             <GitBranchPlus className="w-5 h-5" />
             Create New Branch
           </DialogTitle>
-          <DialogDescription>
-            Create a new branch from{' '}
-            <span className="font-mono text-foreground">
-              {worktree?.branch || 'current branch'}
-            </span>
-          </DialogDescription>
+          <DialogDescription>Create a new branch from a base branch</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
@@ -123,8 +174,74 @@ export function CreateBranchDialog({
               disabled={isCreating}
               autoFocus
             />
-            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="base-branch">Base Branch</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={fetchBranches}
+                disabled={isLoadingBranches || isCreating}
+                className="h-6 px-2 text-xs"
+              >
+                {isLoadingBranches ? (
+                  <Spinner size="xs" className="mr-1" />
+                ) : (
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                )}
+                Refresh
+              </Button>
+            </div>
+            {isLoadingBranches && branches.length === 0 ? (
+              <div className="flex items-center justify-center py-3 border rounded-md border-input">
+                <Spinner size="sm" className="mr-2" />
+                <span className="text-sm text-muted-foreground">Loading branches...</span>
+              </div>
+            ) : (
+              <Select value={baseBranch} onValueChange={setBaseBranch} disabled={isCreating}>
+                <SelectTrigger id="base-branch">
+                  <SelectValue placeholder="Select base branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {localBranches.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Local Branches</SelectLabel>
+                      {localBranches.map((branch) => (
+                        <SelectItem key={branch.name} value={branch.name}>
+                          <span className={branch.isCurrent ? 'font-medium' : ''}>
+                            {branch.name}
+                            {branch.isCurrent ? ' (current)' : ''}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {remoteBranches.length > 0 && (
+                    <>
+                      {localBranches.length > 0 && <SelectSeparator />}
+                      <SelectGroup>
+                        <SelectLabel>Remote Branches</SelectLabel>
+                        {remoteBranches.map((branch) => (
+                          <SelectItem key={branch.name} value={branch.name}>
+                            {branch.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </>
+                  )}
+                  {localBranches.length === 0 && remoteBranches.length === 0 && (
+                    <SelectItem value="HEAD" disabled>
+                      No branches found
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>

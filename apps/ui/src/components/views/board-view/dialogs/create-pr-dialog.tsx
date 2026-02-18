@@ -13,11 +13,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { BranchAutocomplete } from '@/components/ui/branch-autocomplete';
-import { GitPullRequest, ExternalLink } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { GitPullRequest, ExternalLink, Sparkles, RefreshCw } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
 import { toast } from 'sonner';
 import { useWorktreeBranches } from '@/hooks/queries';
+
+interface RemoteInfo {
+  name: string;
+  url: string;
+}
 
 interface WorktreeInfo {
   path: string;
@@ -58,6 +71,14 @@ export function CreatePRDialog({
   // Track whether an operation completed that warrants a refresh
   const operationCompletedRef = useRef(false);
 
+  // Remote selection state
+  const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
+  const [selectedRemote, setSelectedRemote] = useState<string>('');
+  const [isLoadingRemotes, setIsLoadingRemotes] = useState(false);
+
+  // Generate description state
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+
   // Use React Query for branch fetching - only enabled when dialog is open
   const { data: branchesData, isLoading: isLoadingBranches } = useWorktreeBranches(
     open ? worktree?.path : undefined,
@@ -70,6 +91,44 @@ export function CreatePRDialog({
     return branchesData.branches.map((b) => b.name).filter((name) => name !== worktree?.branch);
   }, [branchesData?.branches, worktree?.branch]);
 
+  // Fetch remotes when dialog opens
+  const fetchRemotes = useCallback(async () => {
+    if (!worktree) return;
+
+    setIsLoadingRemotes(true);
+
+    try {
+      const api = getHttpApiClient();
+      const result = await api.worktree.listRemotes(worktree.path);
+
+      if (result.success && result.result) {
+        const remoteInfos: RemoteInfo[] = result.result.remotes.map(
+          (r: { name: string; url: string }) => ({
+            name: r.name,
+            url: r.url,
+          })
+        );
+        setRemotes(remoteInfos);
+
+        // Auto-select 'origin' if available, otherwise first remote
+        if (remoteInfos.length > 0) {
+          const defaultRemote = remoteInfos.find((r) => r.name === 'origin') || remoteInfos[0];
+          setSelectedRemote(defaultRemote.name);
+        }
+      }
+    } catch {
+      // Silently fail - remotes selector will just not show
+    } finally {
+      setIsLoadingRemotes(false);
+    }
+  }, [worktree]);
+
+  useEffect(() => {
+    if (open && worktree) {
+      fetchRemotes();
+    }
+  }, [open, worktree, fetchRemotes]);
+
   // Common state reset function to avoid duplication
   const resetState = useCallback(() => {
     setTitle('');
@@ -81,6 +140,9 @@ export function CreatePRDialog({
     setPrUrl(null);
     setBrowserUrl(null);
     setShowBrowserFallback(false);
+    setRemotes([]);
+    setSelectedRemote('');
+    setIsGeneratingDescription(false);
     operationCompletedRef.current = false;
   }, [defaultBaseBranch]);
 
@@ -89,6 +151,37 @@ export function CreatePRDialog({
     // Reset all state on both open and close
     resetState();
   }, [open, worktree?.path, resetState]);
+
+  const handleGenerateDescription = async () => {
+    if (!worktree) return;
+
+    setIsGeneratingDescription(true);
+
+    try {
+      const api = getHttpApiClient();
+      const result = await api.worktree.generatePRDescription(worktree.path, baseBranch);
+
+      if (result.success) {
+        if (result.title) {
+          setTitle(result.title);
+        }
+        if (result.body) {
+          setBody(result.body);
+        }
+        toast.success('PR description generated');
+      } else {
+        toast.error('Failed to generate description', {
+          description: result.error || 'Unknown error',
+        });
+      }
+    } catch (err) {
+      toast.error('Failed to generate description', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      });
+    } finally {
+      setIsGeneratingDescription(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!worktree) return;
@@ -109,6 +202,7 @@ export function CreatePRDialog({
         prBody: body || `Changes from branch ${worktree.branch}`,
         baseBranch,
         draft: isDraft,
+        remote: selectedRemote || undefined,
       });
 
       if (result.success && result.result) {
@@ -329,7 +423,33 @@ export function CreatePRDialog({
               )}
 
               <div className="grid gap-2">
-                <Label htmlFor="pr-title">PR Title</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="pr-title">PR Title</Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleGenerateDescription}
+                    disabled={isGeneratingDescription || isLoading}
+                    className="h-6 px-2 text-xs"
+                    title={
+                      worktree.hasChanges
+                        ? 'Generate title and description from commits and uncommitted changes'
+                        : 'Generate title and description from commits'
+                    }
+                  >
+                    {isGeneratingDescription ? (
+                      <>
+                        <Spinner size="xs" className="mr-1" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        Generate with AI
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <Input
                   id="pr-title"
                   placeholder={worktree.branch}
@@ -350,6 +470,49 @@ export function CreatePRDialog({
               </div>
 
               <div className="flex flex-col gap-4">
+                {/* Remote selector - only show if multiple remotes are available */}
+                {remotes.length > 1 && (
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="remote-select">Push to Remote</Label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchRemotes}
+                        disabled={isLoadingRemotes}
+                        className="h-6 px-2 text-xs"
+                      >
+                        {isLoadingRemotes ? (
+                          <Spinner size="xs" className="mr-1" />
+                        ) : (
+                          <RefreshCw className="w-3 h-3 mr-1" />
+                        )}
+                        Refresh
+                      </Button>
+                    </div>
+                    <Select value={selectedRemote} onValueChange={setSelectedRemote}>
+                      <SelectTrigger id="remote-select">
+                        <SelectValue placeholder="Select a remote" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {remotes.map((remote) => (
+                          <SelectItem
+                            key={remote.name}
+                            value={remote.name}
+                            description={
+                              <span className="text-xs text-muted-foreground truncate max-w-[300px]">
+                                {remote.url}
+                              </span>
+                            }
+                          >
+                            <span className="font-medium">{remote.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="grid gap-2">
                   <Label htmlFor="base-branch">Base Branch</Label>
                   <BranchAutocomplete

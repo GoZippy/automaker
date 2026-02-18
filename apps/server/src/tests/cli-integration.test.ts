@@ -64,7 +64,7 @@ describe('CLI Detection Framework', () => {
     });
 
     it('should handle unsupported platform', () => {
-      const instructions = getInstallInstructions('claude', 'unknown-platform' as any);
+      const instructions = getInstallInstructions('claude', 'unknown-platform' as NodeJS.Platform);
       expect(instructions).toContain('No installation instructions available');
     });
   });
@@ -339,15 +339,17 @@ describe('Performance Tests', () => {
 // Edge Cases
 describe('Edge Cases', () => {
   it('should handle empty CLI names', async () => {
-    await expect(detectCli('' as any)).rejects.toThrow();
+    await expect(detectCli('' as unknown as Parameters<typeof detectCli>[0])).rejects.toThrow();
   });
 
   it('should handle null CLI names', async () => {
-    await expect(detectCli(null as any)).rejects.toThrow();
+    await expect(detectCli(null as unknown as Parameters<typeof detectCli>[0])).rejects.toThrow();
   });
 
   it('should handle undefined CLI names', async () => {
-    await expect(detectCli(undefined as any)).rejects.toThrow();
+    await expect(
+      detectCli(undefined as unknown as Parameters<typeof detectCli>[0])
+    ).rejects.toThrow();
   });
 
   it('should handle malformed error objects', () => {

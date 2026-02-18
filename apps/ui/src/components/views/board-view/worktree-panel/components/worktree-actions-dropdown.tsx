@@ -34,9 +34,13 @@ import {
   Undo2,
   Zap,
   FlaskConical,
+  History,
+  Archive,
+  Cherry,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { Spinner } from '@/components/ui/spinner';
 import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus, TestSessionInfo } from '../types';
 import { TooltipWrapper } from './tooltip-wrapper';
 import { useAvailableEditors, useEffectiveDefaultEditor } from '../hooks/use-available-editors';
@@ -60,6 +64,8 @@ interface WorktreeActionsDropdownProps {
   isDevServerRunning: boolean;
   devServerInfo?: DevServerInfo;
   gitRepoStatus: GitRepoStatus;
+  /** When true, git repo status is still being loaded */
+  isLoadingGitStatus?: boolean;
   /** When true, renders as a standalone button (not attached to another element) */
   standalone?: boolean;
   /** Whether auto mode is running for this worktree */
@@ -80,6 +86,7 @@ interface WorktreeActionsDropdownProps {
   onOpenInIntegratedTerminal: (worktree: WorktreeInfo, mode?: 'tab' | 'split') => void;
   onOpenInExternalTerminal: (worktree: WorktreeInfo, terminalId?: string) => void;
   onViewChanges: (worktree: WorktreeInfo) => void;
+  onViewCommits: (worktree: WorktreeInfo) => void;
   onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
@@ -99,6 +106,12 @@ interface WorktreeActionsDropdownProps {
   onStopTests?: (worktree: WorktreeInfo) => void;
   /** View test logs for this worktree */
   onViewTestLogs?: (worktree: WorktreeInfo) => void;
+  /** Stash changes for this worktree */
+  onStashChanges?: (worktree: WorktreeInfo) => void;
+  /** View stashes for this worktree */
+  onViewStashes?: (worktree: WorktreeInfo) => void;
+  /** Cherry-pick commits from another branch */
+  onCherryPick?: (worktree: WorktreeInfo) => void;
   hasInitScript: boolean;
 }
 
@@ -114,6 +127,7 @@ export function WorktreeActionsDropdown({
   isDevServerRunning,
   devServerInfo,
   gitRepoStatus,
+  isLoadingGitStatus = false,
   standalone = false,
   isAutoModeRunning = false,
   hasTestCommand = false,
@@ -128,6 +142,7 @@ export function WorktreeActionsDropdown({
   onOpenInIntegratedTerminal,
   onOpenInExternalTerminal,
   onViewChanges,
+  onViewCommits,
   onDiscardChanges,
   onCommit,
   onCreatePR,
@@ -144,6 +159,9 @@ export function WorktreeActionsDropdown({
   onStartTests,
   onStopTests,
   onViewTestLogs,
+  onStashChanges,
+  onViewStashes,
+  onCherryPick,
   hasInitScript,
 }: WorktreeActionsDropdownProps) {
   // Get available editors for the "Open In" submenu
@@ -203,8 +221,18 @@ export function WorktreeActionsDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        {/* Warning label when git operations are not available */}
-        {!canPerformGitOps && (
+        {/* Loading indicator while git status is being determined */}
+        {isLoadingGitStatus && (
+          <>
+            <DropdownMenuLabel className="text-xs flex items-center gap-2 text-muted-foreground">
+              <Spinner size="xs" variant="muted" />
+              Checking git status...
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {/* Warning label when git operations are not available (only show once loaded) */}
+        {!isLoadingGitStatus && !canPerformGitOps && (
           <>
             <DropdownMenuLabel className="text-xs flex items-center gap-2 text-amber-600 dark:text-amber-400">
               <AlertCircle className="w-3.5 h-3.5" />
@@ -387,10 +415,90 @@ export function WorktreeActionsDropdown({
             )}
           >
             <GitMerge className="w-3.5 h-3.5 mr-2" />
-            Pull & Resolve Conflicts
+            Merge & Rebase
             {!canPerformGitOps && <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />}
           </DropdownMenuItem>
         </TooltipWrapper>
+        <TooltipWrapper showTooltip={!!gitOpsDisabledReason} tooltipContent={gitOpsDisabledReason}>
+          <DropdownMenuItem
+            onClick={() => canPerformGitOps && onViewCommits(worktree)}
+            disabled={!canPerformGitOps}
+            className={cn('text-xs', !canPerformGitOps && 'opacity-50 cursor-not-allowed')}
+          >
+            <History className="w-3.5 h-3.5 mr-2" />
+            View Commits
+            {!canPerformGitOps && <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />}
+          </DropdownMenuItem>
+        </TooltipWrapper>
+        {/* Cherry-pick commits from another branch */}
+        {onCherryPick && (
+          <TooltipWrapper
+            showTooltip={!!gitOpsDisabledReason}
+            tooltipContent={gitOpsDisabledReason}
+          >
+            <DropdownMenuItem
+              onClick={() => canPerformGitOps && onCherryPick(worktree)}
+              disabled={!canPerformGitOps}
+              className={cn('text-xs', !canPerformGitOps && 'opacity-50 cursor-not-allowed')}
+            >
+              <Cherry className="w-3.5 h-3.5 mr-2" />
+              Cherry Pick
+              {!canPerformGitOps && (
+                <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />
+              )}
+            </DropdownMenuItem>
+          </TooltipWrapper>
+        )}
+        {/* Stash operations - combined submenu */}
+        {(onStashChanges || onViewStashes) && (
+          <TooltipWrapper
+            showTooltip={!gitRepoStatus.isGitRepo}
+            tooltipContent="Not a git repository"
+          >
+            <DropdownMenuSub>
+              <div className="flex items-center">
+                {/* Main clickable area - stash changes (primary action) */}
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!gitRepoStatus.isGitRepo) return;
+                    if (worktree.hasChanges && onStashChanges) {
+                      onStashChanges(worktree);
+                    } else if (onViewStashes) {
+                      onViewStashes(worktree);
+                    }
+                  }}
+                  disabled={!gitRepoStatus.isGitRepo}
+                  className={cn(
+                    'text-xs flex-1 pr-0 rounded-r-none',
+                    !gitRepoStatus.isGitRepo && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  <Archive className="w-3.5 h-3.5 mr-2" />
+                  {worktree.hasChanges && onStashChanges ? 'Stash Changes' : 'Stashes'}
+                  {!gitRepoStatus.isGitRepo && (
+                    <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />
+                  )}
+                </DropdownMenuItem>
+                {/* Chevron trigger for submenu with stash options */}
+                <DropdownMenuSubTrigger
+                  className={cn(
+                    'text-xs px-1 rounded-l-none border-l border-border/30 h-8',
+                    !gitRepoStatus.isGitRepo && 'opacity-50 cursor-not-allowed'
+                  )}
+                  disabled={!gitRepoStatus.isGitRepo}
+                />
+              </div>
+              <DropdownMenuSubContent>
+                {onViewStashes && (
+                  <DropdownMenuItem onClick={() => onViewStashes(worktree)} className="text-xs">
+                    <Eye className="w-3.5 h-3.5 mr-2" />
+                    View Stashes
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </TooltipWrapper>
+        )}
         <DropdownMenuSeparator />
         {/* Open in editor - split button: click main area for default, chevron for other options */}
         {effectiveDefaultEditor && (

@@ -306,13 +306,16 @@ export function PushToRemoteDialog({
           </SelectTrigger>
           <SelectContent>
             {remotes.map((remote) => (
-              <SelectItem key={remote.name} value={remote.name}>
-                <div className="flex flex-col items-start">
-                  <span className="font-medium">{remote.name}</span>
+              <SelectItem
+                key={remote.name}
+                value={remote.name}
+                description={
                   <span className="text-xs text-muted-foreground truncate max-w-[300px]">
                     {remote.url}
                   </span>
-                </div>
+                }
+              >
+                <span className="font-medium">{remote.name}</span>
               </SelectItem>
             ))}
           </SelectContent>

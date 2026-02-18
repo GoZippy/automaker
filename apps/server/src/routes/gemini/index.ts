@@ -1,17 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { GeminiProvider } from '../../providers/gemini-provider.js';
-import { getGeminiUsageService } from '../../services/gemini-usage-service.js';
+import { GeminiUsageService } from '../../services/gemini-usage-service.js';
 import { createLogger } from '@automaker/utils';
+import type { EventEmitter } from '../../lib/events.js';
 
 const logger = createLogger('Gemini');
 
-export function createGeminiRoutes(): Router {
+export function createGeminiRoutes(
+  usageService: GeminiUsageService,
+  _events: EventEmitter
+): Router {
   const router = Router();
 
   // Get current usage/quota data from Google Cloud API
   router.get('/usage', async (_req: Request, res: Response) => {
     try {
-      const usageService = getGeminiUsageService();
       const usageData = await usageService.fetchUsageData();
 
       res.json(usageData);
