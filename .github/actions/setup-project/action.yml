@@ -25,16 +25,23 @@ runs:
         cache: 'npm'
         cache-dependency-path: package-lock.json
 
-    - name: Check for SSH URLs in lockfile
-      if: inputs.check-lockfile == 'true'
-      shell: bash
-      run: npm run lint:lockfile
-
     - name: Configure Git for HTTPS
       shell: bash
       # Convert SSH URLs to HTTPS for git dependencies (e.g., @electron/node-gyp)
       # This is needed because SSH authentication isn't available in CI
       run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+    - name: Auto-fix SSH URLs in lockfile
+      if: inputs.check-lockfile == 'true'
+      shell: bash
+      # Auto-fix any git+ssh:// URLs in package-lock.json before linting
+      # This handles cases where npm reintroduces SSH URLs for git dependencies
+      run: node scripts/fix-lockfile-urls.mjs
+
+    - name: Check for SSH URLs in lockfile
+      if: inputs.check-lockfile == 'true'
+      shell: bash
+      run: npm run lint:lockfile
 
     - name: Install dependencies
       shell: bash

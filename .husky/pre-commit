@@ -38,6 +38,18 @@ else
   export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/usr/bin"
 fi
 
+# Auto-fix git+ssh:// URLs in package-lock.json if it's being committed
+# This prevents CI failures from SSH URLs that npm introduces for git dependencies
+if git diff --cached --name-only | grep -q "^package-lock.json$"; then
+  if command -v node >/dev/null 2>&1; then
+    if grep -q "git+ssh://" package-lock.json 2>/dev/null; then
+      echo "Fixing git+ssh:// URLs in package-lock.json..."
+      node scripts/fix-lockfile-urls.mjs
+      git add package-lock.json
+    fi
+  fi
+fi
+
 # Run lint-staged - works with or without nvm
 # Prefer npx, fallback to npm exec, both work with system-installed Node.js
 if command -v npx >/dev/null 2>&1; then
