@@ -45,6 +45,7 @@ runs:
       run: npm install --ignore-scripts --force
 
     - name: Install Linux native bindings
+      if: runner.os == 'Linux'
       shell: bash
       # Workaround for npm optional dependencies bug (npm/cli#4828)
       # Explicitly install Linux bindings needed for build tools
