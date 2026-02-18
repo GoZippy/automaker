@@ -517,7 +517,7 @@ export function useBoardActions({
       }
 
       removeFeature(featureId);
-      persistFeatureDelete(featureId);
+      await persistFeatureDelete(featureId);
     },
     [features, runningAutoTasks, autoMode, removeFeature, persistFeatureDelete]
   );
@@ -1090,6 +1090,38 @@ export function useBoardActions({
     });
   }, [features, runningAutoTasks, autoMode, updateFeature, persistFeatureUpdate]);
 
+  const handleDuplicateFeature = useCallback(
+    async (feature: Feature, asChild: boolean = false) => {
+      // Copy all feature data, stripping id, status (handled by create), and runtime/state fields
+      const {
+        id: _id,
+        status: _status,
+        startedAt: _startedAt,
+        error: _error,
+        summary: _summary,
+        spec: _spec,
+        passes: _passes,
+        planSpec: _planSpec,
+        descriptionHistory: _descriptionHistory,
+        titleGenerating: _titleGenerating,
+        ...featureData
+      } = feature;
+      const duplicatedFeatureData = {
+        ...featureData,
+        // If duplicating as child, set source as dependency; otherwise keep existing
+        ...(asChild && { dependencies: [feature.id] }),
+      };
+
+      // Reuse the existing handleAddFeature logic
+      await handleAddFeature(duplicatedFeatureData);
+
+      toast.success(asChild ? 'Duplicated as child' : 'Feature duplicated', {
+        description: `Created copy of: ${truncateDescription(feature.description || feature.title || '')}`,
+      });
+    },
+    [handleAddFeature]
+  );
+
   return {
     handleAddFeature,
     handleUpdateFeature,
@@ -1110,5 +1142,6 @@ export function useBoardActions({
     handleForceStopFeature,
     handleStartNextFeatures,
     handleArchiveAllVerified,
+    handleDuplicateFeature,
   };
 }
