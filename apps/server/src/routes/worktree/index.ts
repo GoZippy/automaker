@@ -80,7 +80,7 @@ export function createWorktreeRoutes(
     '/merge',
     validatePathParams('projectPath'),
     requireValidProject,
-    createMergeHandler()
+    createMergeHandler(events)
   );
   router.post(
     '/create',
@@ -126,7 +126,12 @@ export function createWorktreeRoutes(
     requireValidWorktree,
     createListBranchesHandler()
   );
-  router.post('/switch-branch', requireValidWorktree, createSwitchBranchHandler(events));
+  router.post(
+    '/switch-branch',
+    validatePathParams('worktreePath'),
+    requireValidWorktree,
+    createSwitchBranchHandler(events)
+  );
   router.post('/open-in-editor', validatePathParams('worktreePath'), createOpenInEditorHandler());
   router.post(
     '/open-in-terminal',
@@ -230,7 +235,7 @@ export function createWorktreeRoutes(
     '/stash-apply',
     validatePathParams('worktreePath'),
     requireGitRepoOnly,
-    createStashApplyHandler()
+    createStashApplyHandler(events)
   );
   router.post(
     '/stash-drop',

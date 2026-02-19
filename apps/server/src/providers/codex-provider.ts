@@ -876,7 +876,7 @@ export class CodexProvider extends BaseProvider {
           if (errorLower.includes('rate limit')) {
             enhancedError = `${errorText}\n\nTip: You're being rate limited. Try reducing concurrent tasks or waiting a few minutes before retrying.`;
           } else if (errorLower.includes('authentication') || errorLower.includes('unauthorized')) {
-            enhancedError = `${errorText}\n\nTip: Check that your OPENAI_API_KEY is set correctly or run 'codex auth login' to authenticate.`;
+            enhancedError = `${errorText}\n\nTip: Check that your OPENAI_API_KEY is set correctly or run 'codex login' to authenticate.`;
           } else if (
             errorLower.includes('does not exist') ||
             errorLower.includes('do not have access') ||
@@ -1058,7 +1058,6 @@ export class CodexProvider extends BaseProvider {
   async detectInstallation(): Promise<InstallationStatus> {
     const cliPath = await findCodexCliPath();
     const hasApiKey = Boolean(await resolveOpenAiApiKey());
-    await getCodexAuthIndicators();
     const installed = !!cliPath;
 
     let version = '';

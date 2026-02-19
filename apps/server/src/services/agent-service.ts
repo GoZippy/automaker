@@ -106,37 +106,115 @@ export class AgentService {
     sessionId: string;
     workingDirectory?: string;
   }) {
-    if (!this.sessions.has(sessionId)) {
-      const messages = await this.loadSession(sessionId);
-      const metadata = await this.loadMetadata();
-      const sessionMetadata = metadata[sessionId];
-
-      // Determine the effective working directory
+    // ensureSession handles loading from disk if not in memory.
+    // For startConversation, we always want to create a session even if
+    // metadata doesn't exist yet (new session), so we fall back to creating one.
+    let session = await this.ensureSession(sessionId, workingDirectory);
+    if (!session) {
+      // Session doesn't exist on disk either — create a fresh in-memory session.
       const effectiveWorkingDirectory = workingDirectory || process.cwd();
       const resolvedWorkingDirectory = path.resolve(effectiveWorkingDirectory);
-
-      // Validate that the working directory is allowed using centralized validation
       validateWorkingDirectory(resolvedWorkingDirectory);
 
-      // Load persisted queue
-      const promptQueue = await this.loadQueueState(sessionId);
-
-      this.sessions.set(sessionId, {
-        messages,
+      session = {
+        messages: [],
         isRunning: false,
         abortController: null,
         workingDirectory: resolvedWorkingDirectory,
-        sdkSessionId: sessionMetadata?.sdkSessionId, // Load persisted SDK session ID
-        promptQueue,
-      });
+        promptQueue: [],
+      };
+      this.sessions.set(sessionId, session);
     }
 
-    const session = this.sessions.get(sessionId)!;
     return {
       success: true,
       messages: session.messages,
       sessionId,
     };
+  }
+
+  /**
+   * Ensure a session is loaded into memory.
+   *
+   * Sessions may exist on disk (in metadata and session files) but not be
+   * present in the in-memory Map — for example after a server restart, or
+   * when a client calls sendMessage before explicitly calling startConversation.
+   *
+   * This helper transparently loads the session from disk when it is missing
+   * from memory, eliminating "session not found" errors for sessions that
+   * were previously created but not yet initialized in memory.
+   *
+   * If both metadata and session files are missing, the session truly doesn't
+   * exist. A detailed diagnostic log is emitted so developers can track down
+   * how the invalid session ID was generated.
+   *
+   * @returns The in-memory Session object, or null if the session doesn't exist at all
+   */
+  private async ensureSession(
+    sessionId: string,
+    workingDirectory?: string
+  ): Promise<Session | null> {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    // Try to load from disk — the session may have been created earlier
+    // (e.g. via createSession) but never initialized in memory.
+    let metadata: Record<string, SessionMetadata>;
+    let messages: Message[];
+    try {
+      [metadata, messages] = await Promise.all([this.loadMetadata(), this.loadSession(sessionId)]);
+    } catch (error) {
+      // Disk read failure should not be treated as "session not found" —
+      // it's a transient I/O problem. Log and return null so callers can
+      // surface an appropriate error message.
+      this.logger.error(
+        `Failed to load session ${sessionId} from disk (I/O error — NOT a missing session):`,
+        error
+      );
+      return null;
+    }
+
+    const sessionMetadata = metadata[sessionId];
+
+    // If there's no metadata AND no persisted messages, the session truly doesn't exist.
+    // Log diagnostic info to help track down how we ended up with an invalid session ID.
+    if (!sessionMetadata && messages.length === 0) {
+      this.logger.warn(
+        `Session "${sessionId}" not found: no metadata and no persisted messages. ` +
+          `This can happen when a session ID references a deleted/expired session, ` +
+          `or when the server restarted and the session was never persisted to disk. ` +
+          `Available session IDs in metadata: [${Object.keys(metadata).slice(0, 10).join(', ')}${Object.keys(metadata).length > 10 ? '...' : ''}]`
+      );
+      return null;
+    }
+
+    const effectiveWorkingDirectory =
+      workingDirectory || sessionMetadata?.workingDirectory || process.cwd();
+    const resolvedWorkingDirectory = path.resolve(effectiveWorkingDirectory);
+
+    // Validate that the working directory is allowed using centralized validation
+    validateWorkingDirectory(resolvedWorkingDirectory);
+
+    // Load persisted queue
+    const promptQueue = await this.loadQueueState(sessionId);
+
+    const session: Session = {
+      messages,
+      isRunning: false,
+      abortController: null,
+      workingDirectory: resolvedWorkingDirectory,
+      sdkSessionId: sessionMetadata?.sdkSessionId,
+      promptQueue,
+    };
+
+    this.sessions.set(sessionId, session);
+    this.logger.info(
+      `Auto-initialized session ${sessionId} from disk ` +
+        `(${messages.length} messages, sdkSessionId: ${sessionMetadata?.sdkSessionId ? 'present' : 'none'})`
+    );
+    return session;
   }
 
   /**
@@ -159,10 +237,18 @@ export class AgentService {
     thinkingLevel?: ThinkingLevel;
     reasoningEffort?: ReasoningEffort;
   }) {
-    const session = this.sessions.get(sessionId);
+    const session = await this.ensureSession(sessionId, workingDirectory);
     if (!session) {
-      this.logger.error('ERROR: Session not found:', sessionId);
-      throw new Error(`Session ${sessionId} not found`);
+      this.logger.error(
+        `Session not found: ${sessionId}. ` +
+          `The session may have been deleted, never created, or lost after a server restart. ` +
+          `In-memory sessions: ${this.sessions.size}, requested ID: ${sessionId}`
+      );
+      throw new Error(
+        `Session ${sessionId} not found. ` +
+          `The session may have been deleted or expired. ` +
+          `Please create a new session and try again.`
+      );
     }
 
     if (session.isRunning) {
@@ -439,8 +525,13 @@ export class AgentService {
       const toolUses: Array<{ name: string; input: unknown }> = [];
 
       for await (const msg of stream) {
-        // Capture SDK session ID from any message and persist it
-        if (msg.session_id && !session.sdkSessionId) {
+        // Capture SDK session ID from any message and persist it.
+        // Update when:
+        //  - No session ID set yet (first message in a new session)
+        //  - The provider returned a *different* session ID (e.g., after a
+        //    "Session not found" recovery where the provider started a fresh
+        //    session — the stale ID must be replaced with the new one)
+        if (msg.session_id && msg.session_id !== session.sdkSessionId) {
           session.sdkSessionId = msg.session_id;
           // Persist the SDK session ID to ensure conversation continuity across server restarts
           await this.updateSession(sessionId, { sdkSessionId: msg.session_id });
@@ -503,11 +594,42 @@ export class AgentService {
           // streamed error messages instead of throwing. Handle these here so the
           // Agent Runner UX matches the Claude/Cursor behavior without changing
           // their provider implementations.
-          const rawErrorText =
+
+          // Clean error text: strip ANSI escape codes and the redundant "Error: "
+          // prefix that CLI providers (especially OpenCode) add to stderr output.
+          // The OpenCode provider strips these in normalizeEvent/executeQuery, but
+          // we also strip here as a defense-in-depth measure.
+          //
+          // Without stripping the "Error: " prefix, the wrapping at line ~647
+          // (`content: \`Error: ${enhancedText}\``) produces double-prefixed text:
+          // "Error: Error: Session not found" — confusing for the user.
+          const rawMsgError =
             (typeof msg.error === 'string' && msg.error.trim()) ||
             'Unexpected error from provider during agent execution.';
+          let rawErrorText = rawMsgError.replace(/\x1b\[[0-9;]*m/g, '').trim() || rawMsgError;
+          // Remove the CLI's "Error: " prefix to prevent double-wrapping
+          rawErrorText = rawErrorText.replace(/^Error:\s*/i, '').trim() || rawErrorText;
 
           const errorInfo = classifyError(new Error(rawErrorText));
+
+          // Detect provider-side session errors and proactively clear the stale
+          // sdkSessionId so the next attempt starts a fresh provider session.
+          // This handles providers that don't have built-in session recovery
+          // (unlike OpenCode which auto-retries without the session flag).
+          const errorLower = rawErrorText.toLowerCase();
+          if (
+            session.sdkSessionId &&
+            (errorLower.includes('session not found') ||
+              errorLower.includes('session expired') ||
+              errorLower.includes('invalid session') ||
+              errorLower.includes('no such session'))
+          ) {
+            this.logger.info(
+              `Clearing stale sdkSessionId for session ${sessionId} after provider session error`
+            );
+            session.sdkSessionId = undefined;
+            await this.clearSdkSessionId(sessionId);
+          }
 
           // Keep the provider-supplied text intact (Codex already includes helpful tips),
           // only add a small rate-limit hint when we can detect it.
@@ -569,13 +691,36 @@ export class AgentService {
 
       this.logger.error('Error:', error);
 
+      // Strip ANSI escape codes and the "Error: " prefix from thrown error
+      // messages so the UI receives clean text without double-prefixing.
+      let rawThrownMsg = ((error as Error).message || '').replace(/\x1b\[[0-9;]*m/g, '').trim();
+      rawThrownMsg = rawThrownMsg.replace(/^Error:\s*/i, '').trim() || rawThrownMsg;
+      const thrownErrorMsg = rawThrownMsg.toLowerCase();
+
+      // Check if the thrown error is a provider-side session error.
+      // Clear the stale sdkSessionId so the next retry starts fresh.
+      if (
+        session.sdkSessionId &&
+        (thrownErrorMsg.includes('session not found') ||
+          thrownErrorMsg.includes('session expired') ||
+          thrownErrorMsg.includes('invalid session') ||
+          thrownErrorMsg.includes('no such session'))
+      ) {
+        this.logger.info(
+          `Clearing stale sdkSessionId for session ${sessionId} after thrown session error`
+        );
+        session.sdkSessionId = undefined;
+        await this.clearSdkSessionId(sessionId);
+      }
+
       session.isRunning = false;
       session.abortController = null;
 
+      const cleanErrorMsg = rawThrownMsg || (error as Error).message;
       const errorMessage: Message = {
         id: this.generateId(),
         role: 'assistant',
-        content: `Error: ${(error as Error).message}`,
+        content: `Error: ${cleanErrorMsg}`,
         timestamp: new Date().toISOString(),
         isError: true,
       };
@@ -585,7 +730,7 @@ export class AgentService {
 
       this.emitAgentEvent(sessionId, {
         type: 'error',
-        error: (error as Error).message,
+        error: cleanErrorMsg,
         message: errorMessage,
       });
 
@@ -596,8 +741,8 @@ export class AgentService {
   /**
    * Get conversation history
    */
-  getHistory(sessionId: string) {
-    const session = this.sessions.get(sessionId);
+  async getHistory(sessionId: string) {
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -613,7 +758,7 @@ export class AgentService {
    * Stop current agent execution
    */
   async stopExecution(sessionId: string) {
-    const session = this.sessions.get(sessionId);
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -635,8 +780,15 @@ export class AgentService {
     if (session) {
       session.messages = [];
       session.isRunning = false;
+      session.sdkSessionId = undefined; // Clear stale provider session ID to prevent "Session not found" errors
       await this.saveSession(sessionId, []);
     }
+
+    // Clear the sdkSessionId from persisted metadata so it doesn't get
+    // reloaded by ensureSession() after a server restart.
+    // This prevents "Session not found" errors when the provider-side session
+    // no longer exists (e.g., OpenCode CLI sessions expire on disk).
+    await this.clearSdkSessionId(sessionId);
 
     return { success: true };
   }
@@ -794,6 +946,23 @@ export class AgentService {
     return true;
   }
 
+  /**
+   * Clear the sdkSessionId from persisted metadata.
+   *
+   * This removes the provider-side session ID so that the next message
+   * starts a fresh provider session instead of trying to resume a stale one.
+   * Prevents "Session not found" errors from CLI providers like OpenCode
+   * when the provider-side session has been deleted or expired.
+   */
+  async clearSdkSessionId(sessionId: string): Promise<void> {
+    const metadata = await this.loadMetadata();
+    if (metadata[sessionId] && metadata[sessionId].sdkSessionId) {
+      delete metadata[sessionId].sdkSessionId;
+      metadata[sessionId].updatedAt = new Date().toISOString();
+      await this.saveMetadata(metadata);
+    }
+  }
+
   // Queue management methods
 
   /**
@@ -808,7 +977,7 @@ export class AgentService {
       thinkingLevel?: ThinkingLevel;
     }
   ): Promise<{ success: boolean; queuedPrompt?: QueuedPrompt; error?: string }> {
-    const session = this.sessions.get(sessionId);
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -837,8 +1006,10 @@ export class AgentService {
   /**
    * Get the current queue for a session
    */
-  getQueue(sessionId: string): { success: boolean; queue?: QueuedPrompt[]; error?: string } {
-    const session = this.sessions.get(sessionId);
+  async getQueue(
+    sessionId: string
+  ): Promise<{ success: boolean; queue?: QueuedPrompt[]; error?: string }> {
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -852,7 +1023,7 @@ export class AgentService {
     sessionId: string,
     promptId: string
   ): Promise<{ success: boolean; error?: string }> {
-    const session = this.sessions.get(sessionId);
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -877,7 +1048,7 @@ export class AgentService {
    * Clear all prompts from the queue
    */
   async clearQueue(sessionId: string): Promise<{ success: boolean; error?: string }> {
-    const session = this.sessions.get(sessionId);
+    const session = await this.ensureSession(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
     }
@@ -960,8 +1131,22 @@ export class AgentService {
     }
   }
 
+  /**
+   * Emit an event to the agent stream (private, used internally).
+   */
   private emitAgentEvent(sessionId: string, data: Record<string, unknown>): void {
     this.events.emit('agent:stream', { sessionId, ...data });
+  }
+
+  /**
+   * Emit an error event for a session.
+   *
+   * Public method so that route handlers can surface errors to the UI
+   * even when sendMessage() throws before it can emit its own error event
+   * (e.g., when the session is not found and no in-memory session exists).
+   */
+  emitSessionError(sessionId: string, error: string): void {
+    this.events.emit('agent:stream', { sessionId, type: 'error', error });
   }
 
   private async getSystemPrompt(): Promise<string> {

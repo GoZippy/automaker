@@ -33,8 +33,8 @@ export function TruncatedFilePath({ path, className }: TruncatedFilePathProps) {
 
   return (
     <span className={cn('flex min-w-0', className)} title={path}>
-      <span className="truncate flex-shrink">{dirPart}</span>
-      <span className="flex-shrink-0 whitespace-nowrap">{filePart}</span>
+      <span className="truncate shrink">{dirPart}</span>
+      <span className="shrink-0 whitespace-nowrap">{filePart}</span>
     </span>
   );
 }

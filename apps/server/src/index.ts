@@ -665,8 +665,15 @@ terminalWss.on('connection', (ws: WebSocket, req: import('http').IncomingMessage
   // Check if session exists
   const session = terminalService.getSession(sessionId);
   if (!session) {
-    logger.info(`Session ${sessionId} not found`);
-    ws.close(4004, 'Session not found');
+    logger.warn(
+      `Terminal session ${sessionId} not found. ` +
+        `The session may have exited, been deleted, or was never created. ` +
+        `Active terminal sessions: ${terminalService.getSessionCount()}`
+    );
+    ws.close(
+      4004,
+      'Session not found. The terminal session may have expired or been closed. Please create a new terminal.'
+    );
     return;
   }
 

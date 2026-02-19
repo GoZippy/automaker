@@ -11,10 +11,11 @@
  */
 
 import type { Request, Response } from 'express';
+import type { EventEmitter } from '../../../lib/events.js';
 import { getErrorMessage, logError } from '../common.js';
 import { applyOrPop } from '../../../services/stash-service.js';
 
-export function createStashApplyHandler() {
+export function createStashApplyHandler(events: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { worktreePath, stashIndex, pop } = req.body as {
@@ -50,7 +51,7 @@ export function createStashApplyHandler() {
       }
 
       // Delegate all stash apply/pop logic to the service
-      const result = await applyOrPop(worktreePath, idx, { pop });
+      const result = await applyOrPop(worktreePath, idx, { pop }, events);
 
       if (!result.success) {
         logError(new Error(result.error ?? 'Stash apply failed'), 'Stash apply failed');

@@ -16,7 +16,7 @@ export function createHistoryHandler(agentService: AgentService) {
         return;
       }
 
-      const result = agentService.getHistory(sessionId);
+      const result = await agentService.getHistory(sessionId);
       res.json(result);
     } catch (error) {
       logError(error, 'Get history failed');

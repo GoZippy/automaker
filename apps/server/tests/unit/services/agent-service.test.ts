@@ -123,9 +123,10 @@ describe('agent-service.ts', () => {
       });
 
       expect(result.success).toBe(true);
-      // First call reads session file, metadata file, and queue state file (3 calls)
+      // First call reads metadata file and session file via ensureSession (2 calls)
+      // Since no metadata or messages exist, a fresh session is created without loading queue state.
       // Second call should reuse in-memory session (no additional calls)
-      expect(fs.readFile).toHaveBeenCalledTimes(3);
+      expect(fs.readFile).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -330,14 +331,14 @@ describe('agent-service.ts', () => {
         sessionId: 'session-1',
       });
 
-      const history = service.getHistory('session-1');
+      const history = await service.getHistory('session-1');
 
       expect(history).toBeDefined();
       expect(history?.messages).toEqual([]);
     });
 
-    it('should handle non-existent session', () => {
-      const history = service.getHistory('nonexistent');
+    it('should handle non-existent session', async () => {
+      const history = await service.getHistory('nonexistent');
       expect(history).toBeDefined(); // Returns error object
     });
   });
@@ -356,9 +357,107 @@ describe('agent-service.ts', () => {
 
       await service.clearSession('session-1');
 
-      const history = service.getHistory('session-1');
+      const history = await service.getHistory('session-1');
       expect(history?.messages).toEqual([]);
       expect(fs.writeFile).toHaveBeenCalled();
+    });
+
+    it('should clear sdkSessionId from persisted metadata to prevent stale session errors', async () => {
+      // Setup: Session exists in metadata with an sdkSessionId (simulating
+      // a session that previously communicated with a CLI provider like OpenCode)
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          sdkSessionId: 'stale-opencode-session-id',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+
+      // Start the session (loads from disk metadata)
+      await service.startConversation({
+        sessionId: 'session-1',
+        workingDirectory: '/test/dir',
+      });
+
+      // Clear the session
+      await service.clearSession('session-1');
+
+      // Verify that the LAST writeFile call to sessions-metadata.json
+      // (from clearSdkSessionId) has sdkSessionId removed.
+      // Earlier writes may still include it (e.g., from updateSessionTimestamp).
+      const writeFileCalls = vi.mocked(fs.writeFile).mock.calls;
+      const metadataWriteCalls = writeFileCalls.filter(
+        (call) =>
+          typeof call[0] === 'string' && (call[0] as string).includes('sessions-metadata.json')
+      );
+
+      expect(metadataWriteCalls.length).toBeGreaterThan(0);
+      const lastMetadataWriteCall = metadataWriteCalls[metadataWriteCalls.length - 1];
+      const savedMetadata = JSON.parse(lastMetadataWriteCall[1] as string);
+      expect(savedMetadata['session-1'].sdkSessionId).toBeUndefined();
+    });
+  });
+
+  describe('clearSdkSessionId', () => {
+    it('should remove sdkSessionId from persisted metadata', async () => {
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          sdkSessionId: 'old-provider-session-id',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('session-1');
+
+      const writeFileCalls = vi.mocked(fs.writeFile).mock.calls;
+      expect(writeFileCalls.length).toBeGreaterThan(0);
+
+      const savedMetadata = JSON.parse(writeFileCalls[0][1] as string);
+      expect(savedMetadata['session-1'].sdkSessionId).toBeUndefined();
+      expect(savedMetadata['session-1'].updatedAt).not.toBe('2024-01-01T00:00:00Z');
+    });
+
+    it('should do nothing if session has no sdkSessionId', async () => {
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('session-1');
+
+      // writeFile should not have been called since there's no sdkSessionId to clear
+      expect(fs.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('should do nothing if session does not exist in metadata', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('{}');
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('nonexistent');
+
+      expect(fs.writeFile).not.toHaveBeenCalled();
     });
   });
 
@@ -654,15 +753,15 @@ describe('agent-service.ts', () => {
 
     it('should return queue for session', async () => {
       await service.addToQueue('session-1', { message: 'Test prompt' });
-      const result = service.getQueue('session-1');
+      const result = await service.getQueue('session-1');
 
       expect(result.success).toBe(true);
       expect(result.queue).toBeDefined();
       expect(result.queue?.length).toBe(1);
     });
 
-    it('should return error for non-existent session', () => {
-      const result = service.getQueue('nonexistent');
+    it('should return error for non-existent session', async () => {
+      const result = await service.getQueue('nonexistent');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Session not found');
@@ -686,7 +785,7 @@ describe('agent-service.ts', () => {
     });
 
     it('should remove prompt from queue', async () => {
-      const queueResult = service.getQueue('session-1');
+      const queueResult = await service.getQueue('session-1');
       const promptId = queueResult.queue![0].id;
 
       const result = await service.removeFromQueue('session-1', promptId);
@@ -731,7 +830,7 @@ describe('agent-service.ts', () => {
       const result = await service.clearQueue('session-1');
 
       expect(result.success).toBe(true);
-      const queueResult = service.getQueue('session-1');
+      const queueResult = await service.getQueue('session-1');
       expect(queueResult.queue?.length).toBe(0);
       expect(mockEvents.emit).toHaveBeenCalled();
     });

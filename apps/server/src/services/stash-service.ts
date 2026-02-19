@@ -15,7 +15,7 @@
  */
 
 import { createLogger } from '@automaker/utils';
-import { createEventEmitter } from '../lib/events.js';
+import type { EventEmitter } from '../lib/events.js';
 import { execGitCommand } from '../lib/git.js';
 import { getErrorMessage, logError } from '../routes/worktree/common.js';
 
@@ -130,16 +130,16 @@ function isConflictOutput(output: string): boolean {
 export async function applyOrPop(
   worktreePath: string,
   stashIndex: number,
-  options?: StashApplyOptions
+  options?: StashApplyOptions,
+  events?: EventEmitter
 ): Promise<StashApplyResult> {
-  const emitter = createEventEmitter();
   const operation: 'apply' | 'pop' = options?.pop ? 'pop' : 'apply';
   const stashRef = `stash@{${stashIndex}}`;
 
   logger.info(`[StashService] ${operation} ${stashRef} in ${worktreePath}`);
 
   // 1. Emit start event
-  emitter.emit('stash:start', { worktreePath, stashIndex, stashRef, operation });
+  events?.emit('stash:start', { worktreePath, stashIndex, stashRef, operation });
 
   try {
     // 2. Run git stash apply / pop
@@ -155,7 +155,7 @@ export async function applyOrPop(
       const combinedOutput = `${errStdout}\n${errStderr}`;
 
       // 3. Emit progress with raw output
-      emitter.emit('stash:progress', {
+      events?.emit('stash:progress', {
         worktreePath,
         stashIndex,
         operation,
@@ -166,7 +166,7 @@ export async function applyOrPop(
       if (isConflictOutput(combinedOutput)) {
         const conflictFiles = await getConflictedFiles(worktreePath);
 
-        emitter.emit('stash:conflicts', {
+        events?.emit('stash:conflicts', {
           worktreePath,
           stashIndex,
           operation,
@@ -183,7 +183,7 @@ export async function applyOrPop(
           message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} with conflicts. Please resolve the conflicts.`,
         };
 
-        emitter.emit('stash:success', {
+        events?.emit('stash:success', {
           worktreePath,
           stashIndex,
           operation,
@@ -202,12 +202,12 @@ export async function applyOrPop(
     //    exit 0 even when conflicts occur during apply)
     const combinedOutput = stdout;
 
-    emitter.emit('stash:progress', { worktreePath, stashIndex, operation, output: combinedOutput });
+    events?.emit('stash:progress', { worktreePath, stashIndex, operation, output: combinedOutput });
 
     if (isConflictOutput(combinedOutput)) {
       const conflictFiles = await getConflictedFiles(worktreePath);
 
-      emitter.emit('stash:conflicts', {
+      events?.emit('stash:conflicts', {
         worktreePath,
         stashIndex,
         operation,
@@ -224,7 +224,7 @@ export async function applyOrPop(
         message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} with conflicts. Please resolve the conflicts.`,
       };
 
-      emitter.emit('stash:success', {
+      events?.emit('stash:success', {
         worktreePath,
         stashIndex,
         operation,
@@ -245,7 +245,7 @@ export async function applyOrPop(
       message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} successfully`,
     };
 
-    emitter.emit('stash:success', {
+    events?.emit('stash:success', {
       worktreePath,
       stashIndex,
       operation,
@@ -258,7 +258,7 @@ export async function applyOrPop(
 
     logError(error, `Stash ${operation} failed`);
 
-    emitter.emit('stash:failure', {
+    events?.emit('stash:failure', {
       worktreePath,
       stashIndex,
       operation,

@@ -178,6 +178,10 @@ function parseDiff(diffText: string): ParsedFileDiff[] {
     }
 
     if (currentHunk) {
+      // Skip trailing empty line produced by split('\n') to avoid phantom context line
+      if (line === '' && i === lines.length - 1) {
+        continue;
+      }
       if (line.startsWith('+')) {
         currentHunk.lines.push({
           type: 'addition',

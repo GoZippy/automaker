@@ -284,6 +284,7 @@ export function StashChangesDialog({
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [isLoadingDiffs, setIsLoadingDiffs] = useState(false);
+  const [loadDiffsError, setLoadDiffsError] = useState<string | null>(null);
 
   // Parse diffs
   const parsedDiffs = useMemo(() => parseDiff(diffContent), [diffContent]);
@@ -297,42 +298,47 @@ export function StashChangesDialog({
     return map;
   }, [parsedDiffs]);
 
-  // Load diffs when dialog opens
-  useEffect(() => {
-    if (open && worktree) {
+  const loadDiffs = useCallback(
+    async (cancelled: { current: boolean }) => {
       setIsLoadingDiffs(true);
+      setLoadDiffsError(null);
       setFiles([]);
       setDiffContent('');
       setSelectedFiles(new Set());
       setExpandedFile(null);
-
-      let cancelled = false;
-
-      const loadDiffs = async () => {
-        try {
-          const api = getHttpApiClient();
-          const result = await api.git.getDiffs(worktree.path);
-          if (result.success) {
-            const fileList = result.files ?? [];
-            if (!cancelled) setFiles(fileList);
-            if (!cancelled) setDiffContent(result.diff ?? '');
-            // Select all files by default
-            if (!cancelled) setSelectedFiles(new Set(fileList.map((f: FileStatus) => f.path)));
-          }
-        } catch (err) {
-          console.warn('Failed to load diffs for stash dialog:', err);
-        } finally {
-          if (!cancelled) setIsLoadingDiffs(false);
+      try {
+        const api = getHttpApiClient();
+        const result = await api.git.getDiffs(worktree!.path);
+        if (result.success) {
+          const fileList = result.files ?? [];
+          if (!cancelled.current) setFiles(fileList);
+          if (!cancelled.current) setDiffContent(result.diff ?? '');
+          // Select all files by default
+          if (!cancelled.current)
+            setSelectedFiles(new Set(fileList.map((f: FileStatus) => f.path)));
         }
-      };
+      } catch (err) {
+        console.warn('Failed to load diffs for stash dialog:', err);
+        if (!cancelled.current) {
+          setLoadDiffsError(err instanceof Error ? err.message : 'Failed to load changes');
+        }
+      } finally {
+        if (!cancelled.current) setIsLoadingDiffs(false);
+      }
+    },
+    [worktree]
+  );
 
-      loadDiffs();
-
+  // Load diffs when dialog opens
+  useEffect(() => {
+    if (open && worktree) {
+      const cancelled = { current: false };
+      loadDiffs(cancelled);
       return () => {
-        cancelled = true;
+        cancelled.current = true;
       };
     }
-  }, [open, worktree]);
+  }, [open, worktree, loadDiffs]);
 
   const handleToggleFile = useCallback((filePath: string) => {
     setSelectedFiles((prev) => {
@@ -465,6 +471,20 @@ export function StashChangesDialog({
               <div className="flex items-center justify-center py-6 text-muted-foreground border border-border rounded-lg">
                 <Spinner size="sm" className="mr-2" />
                 <span className="text-sm">Loading changes...</span>
+              </div>
+            ) : loadDiffsError ? (
+              <div className="flex flex-col items-center justify-center py-6 gap-2 border border-border rounded-lg">
+                <span className="text-sm text-destructive">Failed to load changes</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const cancelled = { current: false };
+                    loadDiffs(cancelled);
+                  }}
+                >
+                  Retry
+                </Button>
               </div>
             ) : files.length === 0 ? (
               <div className="flex items-center justify-center py-6 text-muted-foreground border border-border rounded-lg">

@@ -53,7 +53,15 @@ export function createSendHandler(agentService: AgentService) {
           thinkingLevel,
         })
         .catch((error) => {
-          logger.error('Background error in sendMessage():', error);
+          const errorMsg = (error as Error).message || 'Unknown error';
+          logger.error(`Background error in sendMessage() for session ${sessionId}:`, errorMsg);
+
+          // Emit error via WebSocket so the UI is notified even though
+          // the HTTP response already returned 200. This is critical for
+          // session-not-found errors where sendMessage() throws before it
+          // can emit its own error event (no in-memory session to emit from).
+          agentService.emitSessionError(sessionId, errorMsg);
+
           logError(error, 'Send message failed (background)');
         });
 

@@ -1151,6 +1151,9 @@ export function useBoardActions({
         if (result.success) {
           // Refresh features from server to sync React Query cache
           loadFeatures();
+          toast.success('All verified features archived', {
+            description: `Archived ${verifiedFeatures.length} feature(s).`,
+          });
         } else {
           logger.error('Bulk archive failed:', result);
           // Reload features to sync state with server
@@ -1162,10 +1165,6 @@ export function useBoardActions({
       // Reload features to sync state with server on error
       loadFeatures();
     }
-
-    toast.success('All verified features archived', {
-      description: `Archived ${verifiedFeatures.length} feature(s).`,
-    });
   }, [features, runningAutoTasks, autoMode, updateFeature, currentProject, loadFeatures]);
 
   const handleDuplicateFeature = useCallback(

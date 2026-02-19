@@ -41,10 +41,10 @@ type PullPhase =
   | 'error'; // Something went wrong
 
 interface PullResult {
-  branch: string;
+  branch?: string;
   remote?: string;
-  pulled: boolean;
-  message: string;
+  pulled?: boolean;
+  message?: string;
   hasLocalChanges?: boolean;
   localChangedFiles?: string[];
   hasConflicts?: boolean;
@@ -52,6 +52,7 @@ interface PullResult {
   conflictFiles?: string[];
   stashed?: boolean;
   stashRestored?: boolean;
+  stashRecoveryFailed?: boolean;
 }
 
 interface GitPullDialogProps {
@@ -167,9 +168,10 @@ export function GitPullDialog({
     if (!worktree || !pullResult || !onCreateConflictResolutionFeature) return;
 
     const effectiveRemote = pullResult.remote || remote;
+    const branch = pullResult.branch ?? worktree.branch;
     const conflictInfo: MergeConflictInfo = {
-      sourceBranch: effectiveRemote ? `${effectiveRemote}/${pullResult.branch}` : pullResult.branch,
-      targetBranch: pullResult.branch,
+      sourceBranch: `${effectiveRemote || 'origin'}/${branch}`,
+      targetBranch: branch,
       targetWorktreePath: worktree.path,
       conflictFiles: pullResult.conflictFiles || [],
       operationType: 'merge',
@@ -307,14 +309,16 @@ export function GitPullDialog({
                     </div>
                   )}
 
-                  {pullResult?.stashed && !pullResult?.stashRestored && (
-                    <div className="flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/20">
-                      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                      <span className="text-amber-600 dark:text-amber-400 text-sm">
-                        {pullResult.message}
-                      </span>
-                    </div>
-                  )}
+                  {pullResult?.stashed &&
+                    (!pullResult?.stashRestored || pullResult?.stashRecoveryFailed) && (
+                      <div className="flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/20">
+                        <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                        <span className="text-amber-600 dark:text-amber-400 text-sm">
+                          {pullResult?.message ??
+                            'Stash could not be restored. Your changes remain in the stash.'}
+                        </span>
+                      </div>
+                    )}
                 </div>
               </DialogDescription>
             </DialogHeader>

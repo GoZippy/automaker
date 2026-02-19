@@ -9,9 +9,10 @@
 
 import type { Request, Response } from 'express';
 import { getErrorMessage, logError } from '../common.js';
+import type { EventEmitter } from '../../../lib/events.js';
 import { performMerge } from '../../../services/merge-service.js';
 
-export function createMergeHandler() {
+export function createMergeHandler(events: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, branchName, worktreePath, targetBranch, options } = req.body as {
@@ -34,7 +35,14 @@ export function createMergeHandler() {
       const mergeTo = targetBranch || 'main';
 
       // Delegate all merge logic to the service
-      const result = await performMerge(projectPath, branchName, worktreePath, mergeTo, options);
+      const result = await performMerge(
+        projectPath,
+        branchName,
+        worktreePath,
+        mergeTo,
+        options,
+        events
+      );
 
       if (!result.success) {
         if (result.hasConflicts) {

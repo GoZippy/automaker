@@ -73,7 +73,8 @@ async function hasAnyChanges(cwd: string): Promise<boolean> {
 
 /**
  * Stash all local changes (including untracked files)
- * Returns true if a stash was created, false if there was nothing to stash
+ * Returns true if a stash was created, false if there was nothing to stash.
+ * Throws on unexpected errors so callers abort rather than proceeding silently.
  */
 async function stashChanges(cwd: string, message: string): Promise<boolean> {
   try {
@@ -95,8 +96,26 @@ async function stashChanges(cwd: string, message: string): Promise<boolean> {
       .filter((l) => l.trim()).length;
 
     return countAfter > countBefore;
-  } catch {
-    return false;
+  } catch (error) {
+    const errorMsg = getErrorMessage(error);
+
+    // "Nothing to stash" is benign – no work was lost, just return false
+    if (
+      errorMsg.toLowerCase().includes('no local changes to save') ||
+      errorMsg.toLowerCase().includes('nothing to stash')
+    ) {
+      logger.debug('stashChanges: nothing to stash', { cwd, message, error: errorMsg });
+      return false;
+    }
+
+    // Unexpected error – log full details and re-throw so the caller aborts
+    // rather than proceeding with an un-stashed working tree
+    logger.error('stashChanges: unexpected error during stash', {
+      cwd,
+      message,
+      error: errorMsg,
+    });
+    throw new Error(`Failed to stash changes in ${cwd}: ${errorMsg}`);
   }
 }
 
@@ -284,7 +303,20 @@ export async function performSwitchBranch(
       action: 'push',
     });
     const stashMessage = `automaker-branch-switch: ${previousBranch} → ${targetBranch}`;
-    didStash = await stashChanges(worktreePath, stashMessage);
+    try {
+      didStash = await stashChanges(worktreePath, stashMessage);
+    } catch (stashError) {
+      const stashErrorMsg = getErrorMessage(stashError);
+      events?.emit('switch:error', {
+        worktreePath,
+        branchName,
+        error: `Failed to stash local changes: ${stashErrorMsg}`,
+      });
+      return {
+        success: false,
+        error: `Failed to stash local changes before switching branches: ${stashErrorMsg}`,
+      };
+    }
   }
 
   try {

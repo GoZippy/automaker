@@ -193,6 +193,28 @@ export interface OpenCodeToolErrorEvent extends OpenCodeBaseEvent {
 }
 
 /**
+ * Tool use event - The actual format emitted by OpenCode CLI when a tool is invoked.
+ * Contains the tool name, call ID, and the complete state (input, output, status).
+ * Note: OpenCode CLI emits 'tool_use' (not 'tool_call') as the event type.
+ */
+export interface OpenCodeToolUseEvent extends OpenCodeBaseEvent {
+  type: 'tool_use';
+  part: OpenCodePart & {
+    type: 'tool';
+    callID?: string;
+    tool?: string;
+    state?: {
+      status?: string;
+      input?: unknown;
+      output?: string;
+      title?: string;
+      metadata?: unknown;
+      time?: { start: number; end: number };
+    };
+  };
+}
+
+/**
  * Union type of all OpenCode stream events
  */
 export type OpenCodeStreamEvent =
@@ -200,6 +222,7 @@ export type OpenCodeStreamEvent =
   | OpenCodeStepStartEvent
   | OpenCodeStepFinishEvent
   | OpenCodeToolCallEvent
+  | OpenCodeToolUseEvent
   | OpenCodeToolResultEvent
   | OpenCodeErrorEvent
   | OpenCodeToolErrorEvent;
@@ -311,8 +334,8 @@ export class OpencodeProvider extends CliProvider {
    * Arguments built:
    * - 'run' subcommand for executing queries
    * - '--format', 'json' for JSONL streaming output
-   * - '-c', '<cwd>' for working directory (using opencode's -c flag)
    * - '--model', '<model>' for model selection (if specified)
+   * - '--session', '<id>' for continuing an existing session (if sdkSessionId is set)
    *
    * The prompt is passed via stdin (piped) to avoid shell escaping issues.
    * OpenCode CLI automatically reads from stdin when input is piped.
@@ -325,6 +348,14 @@ export class OpencodeProvider extends CliProvider {
 
     // Add JSON output format for JSONL parsing (not 'stream-json')
     args.push('--format', 'json');
+
+    // Handle session resumption for conversation continuity.
+    // The opencode CLI supports `--session <id>` to continue an existing session.
+    // The sdkSessionId is captured from the sessionID field in previous stream events
+    // and persisted by AgentService for use in follow-up messages.
+    if (options.sdkSessionId) {
+      args.push('--session', options.sdkSessionId);
+    }
 
     // Handle model selection
     // Convert canonical prefix format (opencode-xxx) to CLI slash format (opencode/xxx)
@@ -399,14 +430,197 @@ export class OpencodeProvider extends CliProvider {
   }
 
   /**
+   * Check if an error message indicates a session-not-found condition.
+   *
+   * Centralizes the pattern matching for session errors to avoid duplication.
+   * Strips ANSI escape codes first since opencode CLI uses colored stderr output
+   * (e.g. "\x1b[91m\x1b[1mError: \x1b[0mSession not found").
+   *
+   * IMPORTANT: Patterns must be specific enough to avoid false positives.
+   * Generic patterns like "notfounderror" or "resource not found" match
+   * non-session errors (e.g. "ProviderModelNotFoundError") which would
+   * trigger unnecessary retries that fail identically, producing confusing
+   * error messages like "OpenCode session could not be created".
+   *
+   * @param errorText - Raw error text (may contain ANSI codes)
+   * @returns true if the error indicates the session was not found
+   */
+  private static isSessionNotFoundError(errorText: string): boolean {
+    const cleaned = OpencodeProvider.stripAnsiCodes(errorText).toLowerCase();
+
+    // Explicit session-related phrases — high confidence
+    if (
+      cleaned.includes('session not found') ||
+      cleaned.includes('session does not exist') ||
+      cleaned.includes('invalid session') ||
+      cleaned.includes('session expired') ||
+      cleaned.includes('no such session')
+    ) {
+      return true;
+    }
+
+    // Generic "NotFoundError" / "resource not found" are only session errors
+    // when the message also references a session path or session ID.
+    // Without this guard, errors like "ProviderModelNotFoundError" or
+    // "Resource not found: /path/to/config.json" would false-positive.
+    if (cleaned.includes('notfounderror') || cleaned.includes('resource not found')) {
+      return cleaned.includes('/session/') || cleaned.includes('session');
+    }
+
+    return false;
+  }
+
+  /**
+   * Strip ANSI escape codes from a string.
+   *
+   * The OpenCode CLI uses colored stderr output (e.g. "\x1b[91m\x1b[1mError: \x1b[0m").
+   * These escape codes render as garbled text like "[91m[1mError: [0m" in the UI
+   * when passed through as-is. This utility removes them so error messages are
+   * clean and human-readable.
+   */
+  private static stripAnsiCodes(text: string): string {
+    return text.replace(/\x1b\[[0-9;]*m/g, '');
+  }
+
+  /**
+   * Clean a CLI error message for display.
+   *
+   * Strips ANSI escape codes AND removes the redundant "Error: " prefix that
+   * the OpenCode CLI prepends to error messages in its colored stderr output
+   * (e.g. "\x1b[91m\x1b[1mError: \x1b[0mSession not found" → "Session not found").
+   *
+   * Without this, consumers that wrap the message in their own "Error: " prefix
+   * (like AgentService or AgentExecutor) produce garbled double-prefixed output:
+   * "Error: Error: Session not found".
+   */
+  private static cleanErrorMessage(text: string): string {
+    let cleaned = OpencodeProvider.stripAnsiCodes(text).trim();
+    // Remove leading "Error: " prefix (case-insensitive) if present.
+    // The CLI formats errors as: \x1b[91m\x1b[1mError: \x1b[0m<actual message>
+    // After ANSI stripping this becomes: "Error: <actual message>"
+    cleaned = cleaned.replace(/^Error:\s*/i, '').trim();
+    return cleaned || text;
+  }
+
+  /**
+   * Execute a query with automatic session resumption fallback.
+   *
+   * When a sdkSessionId is provided, the CLI receives `--session <id>`.
+   * If the session no longer exists on disk the CLI will fail with a
+   * "NotFoundError" / "Resource not found" / "Session not found" error.
+   *
+   * The opencode CLI writes this to **stderr** and exits non-zero.
+   * `spawnJSONLProcess` collects stderr and **yields** it as
+   * `{ type: 'error', error: <stderrText> }` — it is NOT thrown.
+   * After `normalizeEvent`, the error becomes a yielded `ProviderMessage`
+   * with `type: 'error'`.  A simple try/catch therefore cannot intercept it.
+   *
+   * This override iterates the parent stream, intercepts yielded error
+   * messages that match the session-not-found pattern, and retries the
+   * entire query WITHOUT the `--session` flag so a fresh session is started.
+   *
+   * Session-not-found retry is ONLY attempted when `sdkSessionId` is set.
+   * Without the `--session` flag the CLI always creates a fresh session, so
+   * retrying without it would be identical to the first attempt and would
+   * fail the same way — producing a confusing "session could not be created"
+   * message for what is actually a different error (model not found, auth
+   * failure, etc.).
+   *
+   * All error messages (session or not) are cleaned of ANSI codes and the
+   * CLI's redundant "Error: " prefix before being yielded to consumers.
+   *
+   * After a successful retry, the consumer (AgentService) will receive a new
+   * session_id from the fresh stream events, which it persists to metadata —
+   * replacing the stale sdkSessionId and preventing repeated failures.
+   */
+  async *executeQuery(options: ExecuteOptions): AsyncGenerator<ProviderMessage> {
+    // When no sdkSessionId is set, there is nothing to "retry without" — just
+    // stream normally and clean error messages as they pass through.
+    if (!options.sdkSessionId) {
+      for await (const msg of super.executeQuery(options)) {
+        // Clean error messages so consumers don't get ANSI or double "Error:" prefix
+        if (msg.type === 'error' && msg.error && typeof msg.error === 'string') {
+          msg.error = OpencodeProvider.cleanErrorMessage(msg.error);
+        }
+        yield msg;
+      }
+      return;
+    }
+
+    // sdkSessionId IS set — the CLI will receive `--session <id>`.
+    // If that session no longer exists, intercept the error and retry fresh.
+    const buffered: ProviderMessage[] = [];
+    let sessionError = false;
+
+    try {
+      for await (const msg of super.executeQuery(options)) {
+        if (msg.type === 'error') {
+          const errorText = msg.error || '';
+          if (OpencodeProvider.isSessionNotFoundError(errorText)) {
+            sessionError = true;
+            opencodeLogger.info(
+              `OpenCode session error detected (session "${options.sdkSessionId}") ` +
+                `— retrying without --session to start fresh`
+            );
+            break; // stop consuming the failed stream
+          }
+
+          // Non-session error — clean and buffer
+          if (msg.error && typeof msg.error === 'string') {
+            msg.error = OpencodeProvider.cleanErrorMessage(msg.error);
+          }
+        }
+
+        buffered.push(msg);
+      }
+    } catch (error) {
+      // Also handle thrown exceptions (e.g. from mapError in cli-provider)
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (OpencodeProvider.isSessionNotFoundError(errMsg)) {
+        sessionError = true;
+        opencodeLogger.info(
+          `OpenCode session error detected (thrown, session "${options.sdkSessionId}") ` +
+            `— retrying without --session to start fresh`
+        );
+      } else {
+        throw error;
+      }
+    }
+
+    if (sessionError) {
+      // Retry the entire query without the stale session ID.
+      const retryOptions = { ...options, sdkSessionId: undefined };
+      opencodeLogger.info('Retrying OpenCode query without --session flag...');
+
+      // Stream the retry directly to the consumer.
+      // If the retry also fails, it's a genuine error (not session-related)
+      // and should be surfaced as-is rather than masked with a misleading
+      // "session could not be created" message.
+      for await (const retryMsg of super.executeQuery(retryOptions)) {
+        if (retryMsg.type === 'error' && retryMsg.error && typeof retryMsg.error === 'string') {
+          retryMsg.error = OpencodeProvider.cleanErrorMessage(retryMsg.error);
+        }
+        yield retryMsg;
+      }
+    } else {
+      // No session error — flush buffered messages to the consumer
+      for (const msg of buffered) {
+        yield msg;
+      }
+    }
+  }
+
+  /**
    * Normalize a raw CLI event to ProviderMessage format
    *
    * Maps OpenCode event types to the standard ProviderMessage structure:
    * - text -> type: 'assistant', content with type: 'text'
    * - step_start -> null (informational, no message needed)
-   * - step_finish with reason 'stop' -> type: 'result', subtype: 'success'
+   * - step_finish with reason 'stop'/'end_turn' -> type: 'result', subtype: 'success'
+   * - step_finish with reason 'tool-calls' -> null (intermediate step, not final)
    * - step_finish with error -> type: 'error'
-   * - tool_call -> type: 'assistant', content with type: 'tool_use'
+   * - tool_use -> type: 'assistant', content with type: 'tool_use' (OpenCode CLI format)
+   * - tool_call -> type: 'assistant', content with type: 'tool_use' (legacy format)
    * - tool_result -> type: 'assistant', content with type: 'tool_result'
    * - error -> type: 'error'
    *
@@ -472,7 +686,14 @@ export class OpencodeProvider extends CliProvider {
           };
         }
 
-        // Successful completion (reason: 'stop' or 'end_turn')
+        // Intermediate step completion (reason: 'tool-calls') — the agent loop
+        // is continuing because the model requested tool calls. Skip these so
+        // consumers don't mistake them for final results.
+        if (finishEvent.part?.reason === 'tool-calls') {
+          return null;
+        }
+
+        // Final completion (reason: 'stop' or 'end_turn')
         return {
           type: 'result',
           subtype: 'success',
@@ -491,6 +712,53 @@ export class OpencodeProvider extends CliProvider {
           type: 'error',
           session_id: toolErrorEvent.sessionID,
           error: errorMessage,
+        };
+      }
+
+      // OpenCode CLI emits 'tool_use' events (not 'tool_call') when the model invokes a tool.
+      // The event format includes the tool name, call ID, and state with input/output.
+      // Handle both 'tool_use' (actual CLI format) and 'tool_call' (legacy/alternative) for robustness.
+      case 'tool_use': {
+        const toolUseEvent = openCodeEvent as OpenCodeBaseEvent;
+        const part = toolUseEvent.part as OpenCodePart & {
+          callID?: string;
+          tool?: string;
+          state?: {
+            status?: string;
+            input?: unknown;
+            output?: string;
+          };
+        };
+
+        // Generate a tool use ID if not provided
+        const toolUseId = part?.callID || part?.call_id || generateToolUseId();
+        const toolName = part?.tool || part?.name || 'unknown';
+
+        const content: ContentBlock[] = [
+          {
+            type: 'tool_use',
+            name: toolName,
+            tool_use_id: toolUseId,
+            input: part?.state?.input || part?.args,
+          },
+        ];
+
+        // If the tool has already completed (state.status === 'completed'), also emit the result
+        if (part?.state?.status === 'completed' && part?.state?.output) {
+          content.push({
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: part.state.output,
+          });
+        }
+
+        return {
+          type: 'assistant',
+          session_id: toolUseEvent.sessionID,
+          message: {
+            role: 'assistant',
+            content,
+          },
         };
       }
 
@@ -559,6 +827,13 @@ export class OpencodeProvider extends CliProvider {
         } else if (errorEvent.part?.error) {
           errorMessage = errorEvent.part.error;
         }
+
+        // Clean error messages: strip ANSI escape codes AND the redundant "Error: "
+        // prefix the CLI adds. The OpenCode CLI outputs colored stderr like:
+        //   \x1b[91m\x1b[1mError: \x1b[0mSession not found
+        // Without cleaning, consumers that wrap in their own "Error: " prefix
+        // produce "Error: Error: Session not found".
+        errorMessage = OpencodeProvider.cleanErrorMessage(errorMessage);
 
         return {
           type: 'error',

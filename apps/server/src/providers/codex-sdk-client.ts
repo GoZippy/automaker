@@ -179,7 +179,9 @@ export async function* executeCodexSdkQuery(
     let combinedMessage = buildSdkErrorMessage(errorInfo.message, userMessage);
 
     // Enhance error messages with actionable tips for common Codex issues
-    const errorLower = errorInfo.message.toLowerCase();
+    // Normalize inputs to avoid crashes from nullish values
+    const errorLower = (errorInfo?.message ?? '').toLowerCase();
+    const modelLabel = options?.model ?? '<unknown model>';
 
     if (
       errorLower.includes('does not exist') ||
@@ -188,7 +190,7 @@ export async function* executeCodexSdkQuery(
     ) {
       // Model not found - provide helpful guidance
       combinedMessage +=
-        `\n\nTip: The model '${options.model}' may not be available on your OpenAI plan. ` +
+        `\n\nTip: The model '${modelLabel}' may not be available on your OpenAI plan. ` +
         `Some models (like gpt-5.3-codex) require a ChatGPT Pro/Plus subscription and OAuth login via 'codex login'. ` +
         `Try using a different model (e.g., gpt-5.1 or gpt-5.2), or authenticate with 'codex login' instead of an API key.`;
     } else if (

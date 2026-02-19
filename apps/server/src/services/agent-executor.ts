@@ -255,7 +255,15 @@ export class AgentExecutor {
             }
           }
         } else if (msg.type === 'error') {
-          throw new Error(msg.error || 'Unknown error');
+          // Clean the error: strip ANSI codes and the redundant "Error: " prefix
+          // that CLI providers add. Without this, wrapping in new Error() produces
+          // "Error: Error: Session not found" (double-prefixed).
+          const cleanedError =
+            (msg.error || 'Unknown error')
+              .replace(/\x1b\[[0-9;]*m/g, '')
+              .replace(/^Error:\s*/i, '')
+              .trim() || 'Unknown error';
+          throw new Error(cleanedError);
         } else if (msg.type === 'result' && msg.subtype === 'success') scheduleWrite();
       }
       await writeToFile();
@@ -390,9 +398,15 @@ export class AgentExecutor {
                 input: b.input,
               });
           }
-        } else if (msg.type === 'error')
-          throw new Error(msg.error || `Error during task ${task.id}`);
-        else if (msg.type === 'result' && msg.subtype === 'success') {
+        } else if (msg.type === 'error') {
+          // Clean the error: strip ANSI codes and redundant "Error: " prefix
+          const cleanedError =
+            (msg.error || `Error during task ${task.id}`)
+              .replace(/\x1b\[[0-9;]*m/g, '')
+              .replace(/^Error:\s*/i, '')
+              .trim() || `Error during task ${task.id}`;
+          throw new Error(cleanedError);
+        } else if (msg.type === 'result' && msg.subtype === 'success') {
           taskOutput += msg.result || '';
           responseText += msg.result || '';
         }
@@ -556,7 +570,14 @@ export class AgentExecutor {
                     content: b.text,
                   });
                 }
-            if (msg.type === 'error') throw new Error(msg.error || 'Error during plan revision');
+            if (msg.type === 'error') {
+              const cleanedError =
+                (msg.error || 'Error during plan revision')
+                  .replace(/\x1b\[[0-9;]*m/g, '')
+                  .replace(/^Error:\s*/i, '')
+                  .trim() || 'Error during plan revision';
+              throw new Error(cleanedError);
+            }
             if (msg.type === 'result' && msg.subtype === 'success') revText += msg.result || '';
           }
           const mi = revText.indexOf('[SPEC_GENERATED]');
@@ -674,9 +695,15 @@ export class AgentExecutor {
               input: b.input,
             });
         }
-      else if (msg.type === 'error')
-        throw new Error(msg.error || 'Unknown error during implementation');
-      else if (msg.type === 'result' && msg.subtype === 'success') responseText += msg.result || '';
+      else if (msg.type === 'error') {
+        const cleanedError =
+          (msg.error || 'Unknown error during implementation')
+            .replace(/\x1b\[[0-9;]*m/g, '')
+            .replace(/^Error:\s*/i, '')
+            .trim() || 'Unknown error during implementation';
+        throw new Error(cleanedError);
+      } else if (msg.type === 'result' && msg.subtype === 'success')
+        responseText += msg.result || '';
     }
     return { responseText };
   }

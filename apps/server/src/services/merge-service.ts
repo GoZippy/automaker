@@ -5,7 +5,7 @@
  */
 
 import { createLogger } from '@automaker/utils';
-import { createEventEmitter } from '../lib/events.js';
+import { type EventEmitter } from '../lib/events.js';
 import { execGitCommand } from '../lib/git.js';
 const logger = createLogger('MergeService');
 
@@ -52,10 +52,9 @@ export async function performMerge(
   branchName: string,
   worktreePath: string,
   targetBranch: string = 'main',
-  options?: MergeOptions
+  options?: MergeOptions,
+  emitter?: EventEmitter
 ): Promise<MergeServiceResult> {
-  const emitter = createEventEmitter();
-
   if (!projectPath || !branchName || !worktreePath) {
     return {
       success: false,
@@ -100,7 +99,7 @@ export async function performMerge(
   }
 
   // Emit merge:start after validating inputs
-  emitter.emit('merge:start', { branchName, targetBranch: mergeTo, worktreePath });
+  emitter?.emit('merge:start', { branchName, targetBranch: mergeTo, worktreePath });
 
   // Merge the feature branch into the target branch (using safe array-based commands)
   const mergeMessage = options?.message || `Merge ${branchName} into ${mergeTo}`;
@@ -134,7 +133,7 @@ export async function performMerge(
       }
 
       // Emit merge:conflict event with conflict details
-      emitter.emit('merge:conflict', { branchName, targetBranch: mergeTo, conflictFiles });
+      emitter?.emit('merge:conflict', { branchName, targetBranch: mergeTo, conflictFiles });
 
       return {
         success: false,
@@ -145,7 +144,7 @@ export async function performMerge(
     }
 
     // Emit merge:error for non-conflict errors before re-throwing
-    emitter.emit('merge:error', {
+    emitter?.emit('merge:error', {
       branchName,
       targetBranch: mergeTo,
       error: err.message || String(mergeError),
@@ -196,7 +195,7 @@ export async function performMerge(
   }
 
   // Emit merge:success with merged branch, target branch, and deletion info
-  emitter.emit('merge:success', {
+  emitter?.emit('merge:success', {
     mergedBranch: branchName,
     targetBranch: mergeTo,
     deleted: options?.deleteWorktreeAndBranch ? { worktreeDeleted, branchDeleted } : undefined,

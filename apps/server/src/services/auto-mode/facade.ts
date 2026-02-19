@@ -388,7 +388,7 @@ export class AutoModeServiceFacade {
                 .replace(/\{\{taskName\}\}/g, task.description)
                 .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
                 .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
-                .replace(/\{\{taskDescription\}\}/g, task.description || task.description);
+                .replace(/\{\{taskDescription\}\}/g, task.description || `Task ${task.id}`);
               if (feedback) {
                 taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
               }
@@ -575,12 +575,17 @@ export class AutoModeServiceFacade {
     useWorktrees = false,
     _calledInternally = false
   ): Promise<void> {
-    return this.recoveryService.resumeFeature(
-      this.projectPath,
-      featureId,
-      useWorktrees,
-      _calledInternally
-    );
+    try {
+      return await this.recoveryService.resumeFeature(
+        this.projectPath,
+        featureId,
+        useWorktrees,
+        _calledInternally
+      );
+    } catch (error) {
+      this.handleFacadeError(error, 'resumeFeature', featureId);
+      throw error;
+    }
   }
 
   /**
