@@ -239,9 +239,9 @@ export class ClaudeProvider extends BaseProvider {
     if (Array.isArray(prompt)) {
       // Multi-part prompt (with images)
       promptPayload = (async function* () {
-        const multiPartPrompt = {
+        const multiPartPrompt: SDKUserMessage = {
           type: 'user' as const,
-          session_id: sdkSessionId || undefined,
+          session_id: sdkSessionId || '',
           message: {
             role: 'user' as const,
             content: prompt,
