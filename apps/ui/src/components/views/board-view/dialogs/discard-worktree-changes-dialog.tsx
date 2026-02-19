@@ -102,7 +102,26 @@ const getStatusBadgeColor = (status: string) => {
   }
 };
 
-// parseDiff is imported from @/lib/diff-utils
+const bgClass = {
+  context: 'bg-transparent',
+  addition: 'bg-green-500/10',
+  deletion: 'bg-red-500/10',
+  header: 'bg-blue-500/10',
+};
+
+const textClass = {
+  context: 'text-foreground-secondary',
+  addition: 'text-green-400',
+  deletion: 'text-red-400',
+  header: 'text-blue-400',
+};
+
+const prefix = {
+  context: ' ',
+  addition: '+',
+  deletion: '-',
+  header: '',
+};
 
 function DiffLine({
   type,
@@ -113,27 +132,6 @@ function DiffLine({
   content: string;
   lineNumber?: { old?: number; new?: number };
 }) {
-  const bgClass = {
-    context: 'bg-transparent',
-    addition: 'bg-green-500/10',
-    deletion: 'bg-red-500/10',
-    header: 'bg-blue-500/10',
-  };
-
-  const textClass = {
-    context: 'text-foreground-secondary',
-    addition: 'text-green-400',
-    deletion: 'text-red-400',
-    header: 'text-blue-400',
-  };
-
-  const prefix = {
-    context: ' ',
-    addition: '+',
-    deletion: '-',
-    header: '',
-  };
-
   if (type === 'header') {
     return (
       <div className={cn('px-2 py-1 font-mono text-xs', bgClass[type], textClass[type])}>
@@ -332,6 +330,7 @@ export function DiscardWorktreeChangesDialog({
               </Label>
               {files.length > 0 && (
                 <button
+                  type="button"
                   onClick={handleToggleAll}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -368,6 +367,8 @@ export function DiscardWorktreeChangesDialog({
                       )
                     : 0;
 
+                  const fileButtonId = `file-btn-${file.path.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
                   return (
                     <div key={file.path} className="border-b border-border last:border-b-0">
                       <div
@@ -381,11 +382,15 @@ export function DiscardWorktreeChangesDialog({
                           checked={isChecked}
                           onCheckedChange={() => handleToggleFile(file.path)}
                           className="flex-shrink-0"
+                          aria-labelledby={fileButtonId}
                         />
 
                         {/* Clickable file row to show diff */}
                         <button
+                          id={fileButtonId}
+                          type="button"
                           onClick={() => handleFileClick(file.path)}
+                          aria-expanded={isExpanded}
                           className="flex items-center gap-2 flex-1 min-w-0 text-left"
                         >
                           {isExpanded ? (

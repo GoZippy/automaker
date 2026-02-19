@@ -6,6 +6,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useSetupStore } from '@/store/setup-store';
 import { useCodexUsage } from '@/hooks/queries';
+import { getExpectedCodexPacePercentage, getPaceStatusLabel } from '@/store/utils/usage-utils';
 
 // Error codes for distinguishing failure modes
 const ERROR_CODES = {
@@ -100,13 +101,28 @@ export function CodexUsagePopover() {
     return { color: 'text-green-500', icon: CheckCircle, bg: 'bg-green-500' };
   };
 
-  // Helper component for the progress bar
-  const ProgressBar = ({ percentage, colorClass }: { percentage: number; colorClass: string }) => (
-    <div className="h-2 w-full bg-secondary/50 rounded-full overflow-hidden">
+  // Helper component for the progress bar with optional pace indicator
+  const ProgressBar = ({
+    percentage,
+    colorClass,
+    pacePercentage,
+  }: {
+    percentage: number;
+    colorClass: string;
+    pacePercentage?: number | null;
+  }) => (
+    <div className="relative h-2 w-full bg-secondary/50 rounded-full overflow-hidden">
       <div
         className={cn('h-full transition-all duration-500', colorClass)}
         style={{ width: `${Math.min(percentage, 100)}%` }}
       />
+      {pacePercentage != null && pacePercentage > 0 && pacePercentage < 100 && (
+        <div
+          className="absolute top-0 h-full w-0.5 bg-foreground/60"
+          style={{ left: `${pacePercentage}%` }}
+          title={`Expected: ${Math.round(pacePercentage)}%`}
+        />
+      )}
     </div>
   );
 
@@ -117,6 +133,7 @@ export function CodexUsagePopover() {
     resetText,
     isPrimary = false,
     stale = false,
+    pacePercentage,
   }: {
     title: string;
     subtitle: string;
@@ -124,6 +141,7 @@ export function CodexUsagePopover() {
     resetText?: string;
     isPrimary?: boolean;
     stale?: boolean;
+    pacePercentage?: number | null;
   }) => {
     const isValidPercentage =
       typeof percentage === 'number' && !isNaN(percentage) && isFinite(percentage);
@@ -131,6 +149,10 @@ export function CodexUsagePopover() {
 
     const status = getStatusInfo(safePercentage);
     const StatusIcon = status.icon;
+    const paceLabel =
+      isValidPercentage && pacePercentage != null
+        ? getPaceStatusLabel(safePercentage, pacePercentage)
+        : null;
 
     return (
       <div
@@ -165,15 +187,28 @@ export function CodexUsagePopover() {
         <ProgressBar
           percentage={safePercentage}
           colorClass={isValidPercentage ? status.bg : 'bg-muted-foreground/30'}
+          pacePercentage={pacePercentage}
         />
-        {resetText && (
-          <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-between">
+          {paceLabel ? (
+            <p
+              className={cn(
+                'text-[10px] font-medium',
+                safePercentage > (pacePercentage ?? 0) ? 'text-orange-500' : 'text-green-500'
+              )}
+            >
+              {paceLabel}
+            </p>
+          ) : (
+            <div />
+          )}
+          {resetText && (
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               <Clock className="w-3 h-3" />
               {resetText}
             </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   };
@@ -289,6 +324,10 @@ export function CodexUsagePopover() {
                   resetText={formatResetTime(codexUsage.rateLimits.primary.resetsAt)}
                   isPrimary={true}
                   stale={isStale}
+                  pacePercentage={getExpectedCodexPacePercentage(
+                    codexUsage.rateLimits.primary.resetsAt,
+                    codexUsage.rateLimits.primary.windowDurationMins
+                  )}
                 />
               )}
 
@@ -302,6 +341,10 @@ export function CodexUsagePopover() {
                   percentage={codexUsage.rateLimits.secondary.usedPercent}
                   resetText={formatResetTime(codexUsage.rateLimits.secondary.resetsAt)}
                   stale={isStale}
+                  pacePercentage={getExpectedCodexPacePercentage(
+                    codexUsage.rateLimits.secondary.resetsAt,
+                    codexUsage.rateLimits.secondary.windowDurationMins
+                  )}
                 />
               )}
 

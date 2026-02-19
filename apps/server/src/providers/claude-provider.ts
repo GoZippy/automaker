@@ -8,8 +8,7 @@
 import { query, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BaseProvider } from './base-provider.js';
 import { classifyError, getUserFriendlyErrorMessage, createLogger } from '@automaker/utils';
-
-const logger = createLogger('ClaudeProvider');
+import { getClaudeAuthIndicators } from '@automaker/platform';
 import {
   getThinkingTokenBudget,
   validateBareModelId,
@@ -17,6 +16,14 @@ import {
   type ClaudeCompatibleProvider,
   type Credentials,
 } from '@automaker/types';
+import type {
+  ExecuteOptions,
+  ProviderMessage,
+  InstallationStatus,
+  ModelDefinition,
+} from './types.js';
+
+const logger = createLogger('ClaudeProvider');
 
 /**
  * ProviderConfig - Union type for provider configuration
@@ -25,12 +32,6 @@ import {
  * Both share the same connection settings structure.
  */
 type ProviderConfig = ClaudeApiProfile | ClaudeCompatibleProvider;
-import type {
-  ExecuteOptions,
-  ProviderMessage,
-  InstallationStatus,
-  ModelDefinition,
-} from './types.js';
 
 // System vars are always passed from process.env regardless of profile
 const SYSTEM_ENV_VARS = ['PATH', 'HOME', 'SHELL', 'TERM', 'USER', 'LANG', 'LC_ALL'];
@@ -240,7 +241,7 @@ export class ClaudeProvider extends BaseProvider {
       promptPayload = (async function* () {
         const multiPartPrompt = {
           type: 'user' as const,
-          session_id: '',
+          session_id: sdkSessionId || undefined,
           message: {
             role: 'user' as const,
             content: prompt,
@@ -313,13 +314,37 @@ export class ClaudeProvider extends BaseProvider {
    */
   async detectInstallation(): Promise<InstallationStatus> {
     // Claude SDK is always available since it's a dependency
-    const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+    // Check all four supported auth methods, mirroring the logic in buildEnv():
+    // 1. ANTHROPIC_API_KEY environment variable
+    // 2. ANTHROPIC_AUTH_TOKEN environment variable
+    // 3. credentials?.apiKeys?.anthropic (credentials file, checked via platform indicators)
+    // 4. Claude Max CLI OAuth (SDK handles this automatically; detected via getClaudeAuthIndicators)
+    const hasEnvApiKey = !!process.env.ANTHROPIC_API_KEY;
+    const hasEnvAuthToken = !!process.env.ANTHROPIC_AUTH_TOKEN;
+
+    // Check credentials file and CLI OAuth indicators (same sources used by buildEnv)
+    let hasCredentialsApiKey = false;
+    let hasCliOAuth = false;
+    try {
+      const indicators = await getClaudeAuthIndicators();
+      hasCredentialsApiKey = !!indicators.credentials?.hasApiKey;
+      hasCliOAuth = !!(
+        indicators.credentials?.hasOAuthToken ||
+        indicators.hasStatsCacheWithActivity ||
+        (indicators.hasSettingsFile && indicators.hasProjectsSessions)
+      );
+    } catch {
+      // If we can't check indicators, fall back to env vars only
+    }
+
+    const hasApiKey = hasEnvApiKey || hasCredentialsApiKey;
+    const authenticated = hasEnvApiKey || hasEnvAuthToken || hasCredentialsApiKey || hasCliOAuth;
 
     const status: InstallationStatus = {
       installed: true,
       method: 'sdk',
       hasApiKey,
-      authenticated: hasApiKey,
+      authenticated,
     };
 
     return status;

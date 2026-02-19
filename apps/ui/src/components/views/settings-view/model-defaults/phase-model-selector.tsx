@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { useIsMobile } from '@/hooks/use-media-query';
+import { useOpencodeModels } from '@/hooks/queries';
 import type {
   ModelAlias,
   CursorModelId,
@@ -180,13 +181,15 @@ export function PhaseModelSelector({
     codexModels,
     codexModelsLoading,
     fetchCodexModels,
-    dynamicOpencodeModels,
     enabledDynamicModelIds,
-    opencodeModelsLoading,
-    fetchOpencodeModels,
     disabledProviders,
     claudeCompatibleProviders,
   } = useAppStore();
+
+  // Use React Query for OpenCode models so that changes made in the settings tab
+  // (which also uses React Query) are immediately reflected here via the shared cache,
+  // without requiring a page refresh.
+  const { data: dynamicOpencodeModels = [] } = useOpencodeModels();
 
   // Detect mobile devices to use inline expansion instead of nested popovers
   const isMobile = useIsMobile();
@@ -211,14 +214,9 @@ export function PhaseModelSelector({
     }
   }, [codexModels.length, codexModelsLoading, fetchCodexModels]);
 
-  // Fetch OpenCode models on mount
-  useEffect(() => {
-    if (dynamicOpencodeModels.length === 0 && !opencodeModelsLoading) {
-      fetchOpencodeModels().catch(() => {
-        // Silently fail - user will see only static OpenCode models
-      });
-    }
-  }, [dynamicOpencodeModels.length, opencodeModelsLoading, fetchOpencodeModels]);
+  // OpenCode dynamic models are now fetched via React Query (useOpencodeModels above),
+  // which shares a cache with the settings tab. This ensures that newly enabled models
+  // appear in the selector immediately after the settings tab fetches/invalidates the data.
 
   // Close expanded group when trigger scrolls out of view
   useEffect(() => {

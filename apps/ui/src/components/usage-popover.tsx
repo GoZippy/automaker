@@ -8,7 +8,11 @@ import { cn } from '@/lib/utils';
 import { useSetupStore } from '@/store/setup-store';
 import { AnthropicIcon, OpenAIIcon, ZaiIcon, GeminiIcon } from '@/components/ui/provider-icon';
 import { useClaudeUsage, useCodexUsage, useZaiUsage, useGeminiUsage } from '@/hooks/queries';
-import { getExpectedWeeklyPacePercentage, getPaceStatusLabel } from '@/store/utils/usage-utils';
+import {
+  getExpectedWeeklyPacePercentage,
+  getExpectedCodexPacePercentage,
+  getPaceStatusLabel,
+} from '@/store/utils/usage-utils';
 
 // Error codes for distinguishing failure modes
 const ERROR_CODES = {
@@ -683,6 +687,10 @@ export function UsagePopover() {
                       resetText={formatCodexResetTime(codexUsage.rateLimits.primary.resetsAt)}
                       isPrimary={true}
                       stale={isCodexStale}
+                      pacePercentage={getExpectedCodexPacePercentage(
+                        codexUsage.rateLimits.primary.resetsAt,
+                        codexUsage.rateLimits.primary.windowDurationMins
+                      )}
                     />
                   )}
 
@@ -699,6 +707,10 @@ export function UsagePopover() {
                       percentage={codexUsage.rateLimits.secondary.usedPercent}
                       resetText={formatCodexResetTime(codexUsage.rateLimits.secondary.resetsAt)}
                       stale={isCodexStale}
+                      pacePercentage={getExpectedCodexPacePercentage(
+                        codexUsage.rateLimits.secondary.resetsAt,
+                        codexUsage.rateLimits.secondary.windowDurationMins
+                      )}
                     />
                   )}
 

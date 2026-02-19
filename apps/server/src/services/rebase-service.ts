@@ -8,6 +8,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { createLogger } from '@automaker/utils';
+import { getConflictFiles } from '@automaker/git-utils';
 import { execGitCommand, getCurrentBranch } from '../lib/git.js';
 
 const logger = createLogger('RebaseService');
@@ -184,26 +185,5 @@ export async function abortRebase(worktreePath: string): Promise<boolean> {
   } catch (err) {
     logger.warn('Failed to abort rebase after conflict', err instanceof Error ? err.message : err);
     return false;
-  }
-}
-
-/**
- * Get the list of files with unresolved conflicts.
- *
- * @param worktreePath - Path to the git worktree
- * @returns Array of file paths with conflicts
- */
-export async function getConflictFiles(worktreePath: string): Promise<string[]> {
-  try {
-    const diffOutput = await execGitCommand(
-      ['diff', '--name-only', '--diff-filter=U'],
-      worktreePath
-    );
-    return diffOutput
-      .trim()
-      .split('\n')
-      .filter((f) => f.trim().length > 0);
-  } catch {
-    return [];
   }
 }

@@ -182,23 +182,18 @@ export class AutoModeServiceFacade {
       return facadeInstance;
     };
 
-    // PipelineOrchestrator - runAgentFn is a stub; routes use AutoModeService directly
-    const pipelineOrchestrator = new PipelineOrchestrator(
-      eventBus,
-      featureStateManager,
-      agentExecutor,
-      testRunnerService,
-      worktreeResolver,
-      concurrencyManager,
-      settingsService,
-      // Callbacks
-      (pPath, featureId, status) =>
-        featureStateManager.updateFeatureStatus(pPath, featureId, status),
-      loadContextFiles,
-      buildFeaturePrompt,
-      (pPath, featureId, useWorktrees, _isAutoMode, _model, opts) =>
-        getFacade().executeFeature(featureId, useWorktrees, false, undefined, opts),
-      // runAgentFn - delegates to AgentExecutor
+    /**
+     * Shared agent-run helper used by both PipelineOrchestrator and ExecutionService.
+     *
+     * Resolves the model string, looks up the custom provider/credentials via
+     * getProviderByModelId, then delegates to agentExecutor.execute with the
+     * full payload.  The opts parameter uses an index-signature union so it
+     * accepts both the typed ExecutionService opts object and the looser
+     * Record<string, unknown> used by PipelineOrchestrator without requiring
+     * type casts at the call sites.
+     */
+    const createRunAgentFn =
+      () =>
       async (
         workDir: string,
         featureId: string,
@@ -207,8 +202,17 @@ export class AutoModeServiceFacade {
         pPath: string,
         imagePaths?: string[],
         model?: string,
-        opts?: Record<string, unknown>
-      ) => {
+        opts?: {
+          planningMode?: PlanningMode;
+          requirePlanApproval?: boolean;
+          previousContent?: string;
+          systemPrompt?: string;
+          autoLoadClaudeMd?: boolean;
+          thinkingLevel?: ThinkingLevel;
+          branchName?: string | null;
+          [key: string]: unknown;
+        }
+      ): Promise<void> => {
         const resolvedModel = resolveModelString(model, 'claude-sonnet-4-6');
         const provider = ProviderFactory.getProviderForModel(resolvedModel);
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
@@ -218,7 +222,7 @@ export class AutoModeServiceFacade {
           | import('@automaker/types').ClaudeCompatibleProvider
           | undefined;
         let credentials: import('@automaker/types').Credentials | undefined;
-        if (resolvedModel && settingsService) {
+        if (settingsService) {
           const providerResult = await getProviderByModelId(
             resolvedModel,
             settingsService,
@@ -270,7 +274,25 @@ export class AutoModeServiceFacade {
             },
           }
         );
-      }
+      };
+
+    // PipelineOrchestrator - runAgentFn delegates to AgentExecutor via shared helper
+    const pipelineOrchestrator = new PipelineOrchestrator(
+      eventBus,
+      featureStateManager,
+      agentExecutor,
+      testRunnerService,
+      worktreeResolver,
+      concurrencyManager,
+      settingsService,
+      // Callbacks
+      (pPath, featureId, status) =>
+        featureStateManager.updateFeatureStatus(pPath, featureId, status),
+      loadContextFiles,
+      buildFeaturePrompt,
+      (pPath, featureId, useWorktrees, _isAutoMode, _model, opts) =>
+        getFacade().executeFeature(featureId, useWorktrees, false, undefined, opts),
+      createRunAgentFn()
     );
 
     // AutoLoopCoordinator - ALWAYS create new with proper execution callbacks
@@ -312,92 +334,13 @@ export class AutoModeServiceFacade {
       async (pPath) => featureLoader.getAll(pPath)
     );
 
-    // ExecutionService - runAgentFn calls AgentExecutor.execute
+    // ExecutionService - runAgentFn delegates to AgentExecutor via shared helper
     const executionService = new ExecutionService(
       eventBus,
       concurrencyManager,
       worktreeResolver,
       settingsService,
-      // runAgentFn - delegates to AgentExecutor
-      async (
-        workDir: string,
-        featureId: string,
-        prompt: string,
-        abortController: AbortController,
-        pPath: string,
-        imagePaths?: string[],
-        model?: string,
-        opts?: {
-          projectPath?: string;
-          planningMode?: PlanningMode;
-          requirePlanApproval?: boolean;
-          systemPrompt?: string;
-          autoLoadClaudeMd?: boolean;
-          thinkingLevel?: ThinkingLevel;
-          branchName?: string | null;
-        }
-      ) => {
-        const resolvedModel = resolveModelString(model, 'claude-sonnet-4-6');
-        const provider = ProviderFactory.getProviderForModel(resolvedModel);
-        const effectiveBareModel = stripProviderPrefix(resolvedModel);
-
-        // Resolve custom provider (GLM, MiniMax, etc.) for baseUrl and credentials
-        let claudeCompatibleProvider:
-          | import('@automaker/types').ClaudeCompatibleProvider
-          | undefined;
-        let credentials: import('@automaker/types').Credentials | undefined;
-        if (resolvedModel && settingsService) {
-          const providerResult = await getProviderByModelId(
-            resolvedModel,
-            settingsService,
-            '[AutoModeFacade]'
-          );
-          if (providerResult.provider) {
-            claudeCompatibleProvider = providerResult.provider;
-            credentials = providerResult.credentials;
-          }
-        }
-
-        await agentExecutor.execute(
-          {
-            workDir,
-            featureId,
-            prompt,
-            projectPath: pPath,
-            abortController,
-            imagePaths,
-            model: resolvedModel,
-            planningMode: opts?.planningMode,
-            requirePlanApproval: opts?.requirePlanApproval,
-            systemPrompt: opts?.systemPrompt,
-            autoLoadClaudeMd: opts?.autoLoadClaudeMd,
-            thinkingLevel: opts?.thinkingLevel,
-            branchName: opts?.branchName,
-            provider,
-            effectiveBareModel,
-            credentials,
-            claudeCompatibleProvider,
-          },
-          {
-            waitForApproval: (fId, projPath) => planApprovalService.waitForApproval(fId, projPath),
-            saveFeatureSummary: (projPath, fId, summary) =>
-              featureStateManager.saveFeatureSummary(projPath, fId, summary),
-            updateFeatureSummary: (projPath, fId, summary) =>
-              featureStateManager.saveFeatureSummary(projPath, fId, summary),
-            buildTaskPrompt: (task, allTasks, taskIndex, planContent, template, feedback) => {
-              let taskPrompt = template
-                .replace(/\{\{taskName\}\}/g, task.description || `Task ${task.id}`)
-                .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
-                .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
-                .replace(/\{\{taskDescription\}\}/g, task.description || `Task ${task.id}`);
-              if (feedback) {
-                taskPrompt = taskPrompt.replace(/\{\{userFeedback\}\}/g, feedback);
-              }
-              return taskPrompt;
-            },
-          }
-        );
-      },
+      createRunAgentFn(),
       (context) => pipelineOrchestrator.executePipeline(context),
       (pPath, featureId, status) =>
         featureStateManager.updateFeatureStatus(pPath, featureId, status),

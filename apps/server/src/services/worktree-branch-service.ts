@@ -129,26 +129,52 @@ async function popStash(
   }
 }
 
+/** Timeout for git fetch operations (30 seconds) */
+const FETCH_TIMEOUT_MS = 30_000;
+
 /**
- * Fetch latest from all remotes (silently, with timeout)
+ * Fetch latest from all remotes (silently, with timeout).
+ *
+ * A process-level timeout is enforced via an AbortController so that a
+ * slow or unresponsive remote does not block the branch-switch flow
+ * indefinitely.  Timeout errors are logged and treated as non-fatal
+ * (the same as network-unavailable errors) so the rest of the workflow
+ * continues normally.
  */
 async function fetchRemotes(cwd: string): Promise<void> {
+  const controller = new AbortController();
+  const timerId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
   try {
-    await execGitCommand(['fetch', '--all', '--quiet'], cwd);
-  } catch {
-    // Ignore fetch errors - we may be offline
+    await execGitCommand(['fetch', '--all', '--quiet'], cwd, undefined, controller);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Process aborted') {
+      // Fetch timed out - log and continue; callers should not be blocked by a slow remote
+      logger.warn(
+        `fetchRemotes timed out after ${FETCH_TIMEOUT_MS}ms - continuing without latest remote refs`
+      );
+    }
+    // Ignore all fetch errors (timeout or otherwise) - we may be offline or the
+    // remote may be temporarily unavailable.  The branch switch itself has
+    // already succeeded at this point.
+  } finally {
+    clearTimeout(timerId);
   }
 }
 
 /**
- * Parse a remote branch name like "origin/feature-branch" into its parts
+ * Parse a remote branch name like "origin/feature-branch" into its parts.
+ * Splits on the first slash so the remote is the segment before the first '/'
+ * and the branch is everything after it (preserving any subsequent slashes).
+ * For example, "origin/feature/my-branch" → { remote: "origin", branch: "feature/my-branch" }.
+ * Returns null if the input contains no slash.
  */
 function parseRemoteBranch(branchName: string): { remote: string; branch: string } | null {
-  const lastSlash = branchName.lastIndexOf('/');
-  if (lastSlash === -1) return null;
+  const firstSlash = branchName.indexOf('/');
+  if (firstSlash === -1) return null;
   return {
-    remote: branchName.substring(0, lastSlash),
-    branch: branchName.substring(lastSlash + 1),
+    remote: branchName.substring(0, firstSlash),
+    branch: branchName.substring(firstSlash + 1),
   };
 }
 
@@ -453,6 +479,12 @@ export async function performSwitchBranch(
       }
       // popResult.success === true: stash was cleanly restored, re-throw the checkout error
     }
+    const checkoutErrorMsg = getErrorMessage(checkoutError);
+    events?.emit('switch:error', {
+      worktreePath,
+      branchName,
+      error: checkoutErrorMsg,
+    });
     throw checkoutError;
   }
 }

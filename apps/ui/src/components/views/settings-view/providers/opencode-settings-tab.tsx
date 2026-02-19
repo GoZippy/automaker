@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store/app-store';
@@ -20,6 +20,7 @@ export function OpencodeSettingsTab() {
     toggleOpencodeModel,
     enabledDynamicModelIds,
     toggleDynamicModel,
+    setDynamicOpencodeModels,
   } = useAppStore();
 
   const [isSaving, setIsSaving] = useState(false);
@@ -36,6 +37,16 @@ export function OpencodeSettingsTab() {
   const { data: providersData = [], isFetching: isFetchingProviders } = useOpencodeProviders();
 
   const { data: modelsData = [], isFetching: isFetchingModels } = useOpencodeModels();
+
+  // Sync React Query opencode models data to Zustand store so that the model
+  // selector dropdown (PhaseModelSelector) reflects newly enabled models without
+  // requiring a page refresh. The selector reads from the Zustand store while
+  // this settings tab fetches via React Query — keeping them in sync bridges that gap.
+  useEffect(() => {
+    if (modelsData.length > 0) {
+      setDynamicOpencodeModels(modelsData);
+    }
+  }, [modelsData, setDynamicOpencodeModels]);
 
   // Transform CLI status to the expected format
   const cliStatus = useMemo((): SharedCliStatus | null => {

@@ -17,3 +17,6 @@ export {
   generateDiffsForNonGitDirectory,
   getGitRepositoryDiffs,
 } from './diff.js';
+
+// Export conflict utilities
+export { getConflictFiles } from './conflict.js';

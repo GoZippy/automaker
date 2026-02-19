@@ -2,6 +2,7 @@
  * POST /stage-files endpoint - Stage or unstage files in the main project
  */
 
+import fs from 'fs';
 import path from 'path';
 import type { Request, Response } from 'express';
 import { getErrorMessage, logError } from '../common.js';
@@ -24,12 +25,22 @@ export function createStageFilesHandler() {
         return;
       }
 
-      if (!files || files.length === 0) {
+      if (!Array.isArray(files) || files.length === 0) {
         res.status(400).json({
           success: false,
           error: 'files array required and must not be empty',
         });
         return;
+      }
+
+      for (const file of files) {
+        if (typeof file !== 'string' || file.trim() === '') {
+          res.status(400).json({
+            success: false,
+            error: 'Each element of files must be a non-empty string',
+          });
+          return;
+        }
       }
 
       if (operation !== 'stage' && operation !== 'unstage') {
@@ -40,8 +51,23 @@ export function createStageFilesHandler() {
         return;
       }
 
+      // Resolve the canonical (symlink-dereferenced) project path so that
+      // startsWith(base) reliably prevents symlink traversal attacks.
+      // If projectPath does not exist or is unreadable, realpath rejects and
+      // we return a 400 instead of letting the error propagate as a 500.
+      let canonicalRoot: string;
+      try {
+        canonicalRoot = await fs.promises.realpath(projectPath);
+      } catch {
+        res.status(400).json({
+          success: false,
+          error: `Invalid projectPath (non-existent or unreadable): ${projectPath}`,
+        });
+        return;
+      }
+
       // Validate and sanitize each file path to prevent path traversal attacks
-      const base = path.resolve(projectPath) + path.sep;
+      const base = path.resolve(canonicalRoot) + path.sep;
       const sanitizedFiles: string[] = [];
       for (const file of files) {
         // Reject absolute paths
@@ -61,8 +87,8 @@ export function createStageFilesHandler() {
           return;
         }
         // Ensure the resolved path stays within the project directory
-        const resolved = path.resolve(path.join(projectPath, file));
-        if (resolved !== path.resolve(projectPath) && !resolved.startsWith(base)) {
+        const resolved = path.resolve(path.join(canonicalRoot, file));
+        if (resolved !== path.resolve(canonicalRoot) && !resolved.startsWith(base)) {
           res.status(400).json({
             success: false,
             error: `Invalid file path (outside project directory): ${file}`,
@@ -73,9 +99,9 @@ export function createStageFilesHandler() {
       }
 
       if (operation === 'stage') {
-        await execGitCommand(['add', '--', ...sanitizedFiles], projectPath);
+        await execGitCommand(['add', '--', ...sanitizedFiles], canonicalRoot);
       } else {
-        await execGitCommand(['reset', 'HEAD', '--', ...sanitizedFiles], projectPath);
+        await execGitCommand(['reset', 'HEAD', '--', ...sanitizedFiles], canonicalRoot);
       }
 
       res.json({

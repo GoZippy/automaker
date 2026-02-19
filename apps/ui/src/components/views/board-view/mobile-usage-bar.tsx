@@ -5,7 +5,11 @@ import { Spinner } from '@/components/ui/spinner';
 import { getElectronAPI } from '@/lib/electron';
 import { useAppStore } from '@/store/app-store';
 import { AnthropicIcon, OpenAIIcon, ZaiIcon, GeminiIcon } from '@/components/ui/provider-icon';
-import { getExpectedWeeklyPacePercentage, getPaceStatusLabel } from '@/store/utils/usage-utils';
+import {
+  getExpectedWeeklyPacePercentage,
+  getExpectedCodexPacePercentage,
+  getPaceStatusLabel,
+} from '@/store/utils/usage-utils';
 
 interface MobileUsageBarProps {
   showClaudeUsage: boolean;
@@ -345,6 +349,10 @@ export function MobileUsageBar({
                   label={getCodexWindowLabel(codexUsage.rateLimits.primary.windowDurationMins)}
                   percentage={codexUsage.rateLimits.primary.usedPercent}
                   isStale={isCodexStale}
+                  pacePercentage={getExpectedCodexPacePercentage(
+                    codexUsage.rateLimits.primary.resetsAt,
+                    codexUsage.rateLimits.primary.windowDurationMins
+                  )}
                 />
               )}
               {codexUsage.rateLimits.secondary && (
@@ -352,6 +360,10 @@ export function MobileUsageBar({
                   label={getCodexWindowLabel(codexUsage.rateLimits.secondary.windowDurationMins)}
                   percentage={codexUsage.rateLimits.secondary.usedPercent}
                   isStale={isCodexStale}
+                  pacePercentage={getExpectedCodexPacePercentage(
+                    codexUsage.rateLimits.secondary.resetsAt,
+                    codexUsage.rateLimits.secondary.windowDurationMins
+                  )}
                 />
               )}
             </>

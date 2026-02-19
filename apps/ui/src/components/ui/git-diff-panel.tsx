@@ -524,234 +524,153 @@ export function GitDiffPanel({
     setExpandedFiles(new Set());
   };
 
-  // Stage/unstage a single file
-  const handleStageFile = useCallback(
-    async (filePath: string) => {
+  // Shared helper that encapsulates all staging/unstaging logic
+  const executeStagingAction = useCallback(
+    async (
+      action: 'stage' | 'unstage',
+      paths: string[],
+      successMessage: string,
+      failurePrefix: string,
+      onStart: () => void,
+      onFinally: () => void
+    ) => {
       if (!worktreePath && !projectPath) return;
-      if (enableStaging && useWorktrees && !worktreePath) {
-        toast.error('Failed to stage file', {
-          description: 'worktreePath required when useWorktrees is enabled',
-        });
-        return;
-      }
-      setStagingInProgress((prev) => new Set(prev).add(filePath));
+      onStart();
       try {
         const api = getElectronAPI();
         let result: { success: boolean; error?: string } | undefined;
 
         if (useWorktrees && worktreePath) {
           if (!api.worktree?.stageFiles) {
-            toast.error('Failed to stage file', {
+            toast.error(failurePrefix, {
               description: 'Worktree stage API not available',
             });
             return;
           }
-          result = await api.worktree.stageFiles(worktreePath, [filePath], 'stage');
+          result = await api.worktree.stageFiles(worktreePath, paths, action);
         } else if (!useWorktrees) {
           if (!api.git?.stageFiles) {
-            toast.error('Failed to stage file', { description: 'Git stage API not available' });
+            toast.error(failurePrefix, { description: 'Git stage API not available' });
             return;
           }
-          result = await api.git.stageFiles(projectPath, [filePath], 'stage');
+          result = await api.git.stageFiles(projectPath, paths, action);
         }
 
         if (!result) {
-          toast.error('Failed to stage file', { description: 'Stage API not available' });
+          toast.error(failurePrefix, { description: 'Stage API not available' });
           return;
         }
 
         if (!result.success) {
-          toast.error('Failed to stage file', { description: result.error });
+          toast.error(failurePrefix, { description: result.error });
           return;
         }
 
         // Refetch diffs to reflect the new staging state
         await loadDiffs();
-        toast.success('File staged', { description: filePath });
+        toast.success(successMessage, paths.length === 1 ? { description: paths[0] } : undefined);
       } catch (err) {
-        toast.error('Failed to stage file', {
+        toast.error(failurePrefix, {
           description: err instanceof Error ? err.message : 'Unknown error',
         });
       } finally {
-        setStagingInProgress((prev) => {
-          const next = new Set(prev);
-          next.delete(filePath);
-          return next;
-        });
+        onFinally();
       }
     },
-    [worktreePath, projectPath, useWorktrees, enableStaging, loadDiffs]
+    [worktreePath, projectPath, useWorktrees, loadDiffs]
+  );
+
+  // Stage/unstage a single file
+  const handleStageFile = useCallback(
+    async (filePath: string) => {
+      if (enableStaging && useWorktrees && !worktreePath) {
+        toast.error('Failed to stage file', {
+          description: 'worktreePath required when useWorktrees is enabled',
+        });
+        return;
+      }
+      await executeStagingAction(
+        'stage',
+        [filePath],
+        'File staged',
+        'Failed to stage file',
+        () => setStagingInProgress((prev) => new Set(prev).add(filePath)),
+        () =>
+          setStagingInProgress((prev) => {
+            const next = new Set(prev);
+            next.delete(filePath);
+            return next;
+          })
+      );
+    },
+    [worktreePath, useWorktrees, enableStaging, executeStagingAction]
   );
 
   // Unstage a single file
   const handleUnstageFile = useCallback(
     async (filePath: string) => {
-      if (!worktreePath && !projectPath) return;
       if (enableStaging && useWorktrees && !worktreePath) {
         toast.error('Failed to unstage file', {
           description: 'worktreePath required when useWorktrees is enabled',
         });
         return;
       }
-      setStagingInProgress((prev) => new Set(prev).add(filePath));
-      try {
-        const api = getElectronAPI();
-        let result: { success: boolean; error?: string } | undefined;
-
-        if (useWorktrees && worktreePath) {
-          if (!api.worktree?.stageFiles) {
-            toast.error('Failed to unstage file', {
-              description: 'Worktree stage API not available',
-            });
-            return;
-          }
-          result = await api.worktree.stageFiles(worktreePath, [filePath], 'unstage');
-        } else if (!useWorktrees) {
-          if (!api.git?.stageFiles) {
-            toast.error('Failed to unstage file', { description: 'Git stage API not available' });
-            return;
-          }
-          result = await api.git.stageFiles(projectPath, [filePath], 'unstage');
-        }
-
-        if (!result) {
-          toast.error('Failed to unstage file', { description: 'Stage API not available' });
-          return;
-        }
-
-        if (!result.success) {
-          toast.error('Failed to unstage file', { description: result.error });
-          return;
-        }
-
-        // Refetch diffs to reflect the new staging state
-        await loadDiffs();
-        toast.success('File unstaged', { description: filePath });
-      } catch (err) {
-        toast.error('Failed to unstage file', {
-          description: err instanceof Error ? err.message : 'Unknown error',
-        });
-      } finally {
-        setStagingInProgress((prev) => {
-          const next = new Set(prev);
-          next.delete(filePath);
-          return next;
-        });
-      }
+      await executeStagingAction(
+        'unstage',
+        [filePath],
+        'File unstaged',
+        'Failed to unstage file',
+        () => setStagingInProgress((prev) => new Set(prev).add(filePath)),
+        () =>
+          setStagingInProgress((prev) => {
+            const next = new Set(prev);
+            next.delete(filePath);
+            return next;
+          })
+      );
     },
-    [worktreePath, projectPath, useWorktrees, enableStaging, loadDiffs]
+    [worktreePath, useWorktrees, enableStaging, executeStagingAction]
   );
 
   const handleStageAll = useCallback(async () => {
-    if (!worktreePath && !projectPath) return;
     const allPaths = files.map((f) => f.path);
     if (allPaths.length === 0) return;
-    setStagingInProgress(new Set(allPaths));
-    try {
-      const api = getElectronAPI();
-      let result: { success: boolean; error?: string } | undefined;
-
-      if (useWorktrees && worktreePath) {
-        if (!api.worktree?.stageFiles) {
-          toast.error('Failed to stage all files', {
-            description: 'Worktree stage API not available',
-          });
-          return;
-        }
-        result = await api.worktree.stageFiles(worktreePath, allPaths, 'stage');
-      } else if (!useWorktrees) {
-        if (!api.git?.stageFiles) {
-          toast.error('Failed to stage all files', { description: 'Git stage API not available' });
-          return;
-        }
-        result = await api.git.stageFiles(projectPath, allPaths, 'stage');
-      }
-
-      if (!result) {
-        toast.error('Failed to stage all files', { description: 'Stage API not available' });
-        return;
-      }
-
-      if (!result.success) {
-        toast.error('Failed to stage all files', { description: result.error });
-        return;
-      }
-
-      await loadDiffs();
-      toast.success('All files staged');
-    } catch (err) {
-      toast.error('Failed to stage all files', {
-        description: err instanceof Error ? err.message : 'Unknown error',
-      });
-    } finally {
-      setStagingInProgress(new Set());
-    }
-  }, [worktreePath, projectPath, useWorktrees, files, loadDiffs]);
+    await executeStagingAction(
+      'stage',
+      allPaths,
+      'All files staged',
+      'Failed to stage all files',
+      () => setStagingInProgress(new Set(allPaths)),
+      () => setStagingInProgress(new Set())
+    );
+  }, [worktreePath, projectPath, useWorktrees, files, executeStagingAction]);
 
   const handleUnstageAll = useCallback(async () => {
-    if (!worktreePath && !projectPath) return;
     const allPaths = files.map((f) => f.path);
     if (allPaths.length === 0) return;
-    setStagingInProgress(new Set(allPaths));
-    try {
-      const api = getElectronAPI();
-      let result: { success: boolean; error?: string } | undefined;
-
-      if (useWorktrees && worktreePath) {
-        if (!api.worktree?.stageFiles) {
-          toast.error('Failed to unstage all files', {
-            description: 'Worktree stage API not available',
-          });
-          return;
-        }
-        result = await api.worktree.stageFiles(worktreePath, allPaths, 'unstage');
-      } else if (!useWorktrees) {
-        if (!api.git?.stageFiles) {
-          toast.error('Failed to unstage all files', {
-            description: 'Git stage API not available',
-          });
-          return;
-        }
-        result = await api.git.stageFiles(projectPath, allPaths, 'unstage');
-      }
-
-      if (!result) {
-        toast.error('Failed to unstage all files', { description: 'Stage API not available' });
-        return;
-      }
-
-      if (!result.success) {
-        toast.error('Failed to unstage all files', { description: result.error });
-        return;
-      }
-
-      await loadDiffs();
-      toast.success('All files unstaged');
-    } catch (err) {
-      toast.error('Failed to unstage all files', {
-        description: err instanceof Error ? err.message : 'Unknown error',
-      });
-    } finally {
-      setStagingInProgress(new Set());
-    }
-  }, [worktreePath, projectPath, useWorktrees, files, loadDiffs]);
+    await executeStagingAction(
+      'unstage',
+      allPaths,
+      'All files unstaged',
+      'Failed to unstage all files',
+      () => setStagingInProgress(new Set(allPaths)),
+      () => setStagingInProgress(new Set())
+    );
+  }, [worktreePath, projectPath, useWorktrees, files, executeStagingAction]);
 
   // Compute staging summary
   const stagingSummary = useMemo(() => {
     if (!enableStaging) return null;
     let staged = 0;
+    let partial = 0;
     let unstaged = 0;
     for (const file of files) {
       const state = getStagingState(file);
       if (state === 'staged') staged++;
       else if (state === 'unstaged') unstaged++;
-      else {
-        // partial counts as both
-        staged++;
-        unstaged++;
-      }
+      else partial++;
     }
-    return { staged, unstaged, total: files.length };
+    return { staged, partial, unstaged, total: files.length };
   }, [enableStaging, files]);
 
   // Total stats
@@ -884,7 +803,10 @@ export function GitDiffPanel({
                           size="sm"
                           onClick={handleStageAll}
                           className="text-xs h-7"
-                          disabled={stagingInProgress.size > 0 || stagingSummary.unstaged === 0}
+                          disabled={
+                            stagingInProgress.size > 0 ||
+                            (stagingSummary.unstaged === 0 && stagingSummary.partial === 0)
+                          }
                         >
                           <Plus className="w-3 h-3 mr-1" />
                           Stage All
@@ -894,7 +816,10 @@ export function GitDiffPanel({
                           size="sm"
                           onClick={handleUnstageAll}
                           className="text-xs h-7"
-                          disabled={stagingInProgress.size > 0 || stagingSummary.staged === 0}
+                          disabled={
+                            stagingInProgress.size > 0 ||
+                            (stagingSummary.staged === 0 && stagingSummary.partial === 0)
+                          }
                         >
                           <Minus className="w-3 h-3 mr-1" />
                           Unstage All
@@ -942,7 +867,9 @@ export function GitDiffPanel({
                   )}
                   {enableStaging && stagingSummary && (
                     <span className="text-muted-foreground">
-                      ({stagingSummary.staged} staged, {stagingSummary.unstaged} unstaged)
+                      {stagingSummary.partial > 0
+                        ? `(${stagingSummary.staged} staged, ${stagingSummary.partial} partial, ${stagingSummary.unstaged} unstaged)`
+                        : `(${stagingSummary.staged} staged, ${stagingSummary.unstaged} unstaged)`}
                     </span>
                   )}
                 </div>

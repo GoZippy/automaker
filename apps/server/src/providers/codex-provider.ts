@@ -884,8 +884,9 @@ export class CodexProvider extends BaseProvider {
           ) {
             enhancedError =
               `${errorText}\n\nTip: The model '${options.model}' may not be available on your OpenAI plan. ` +
-              `Some models (like gpt-5.3-codex) require a ChatGPT Pro/Plus subscription and OAuth login via 'codex login'. ` +
-              `Try using a different model (e.g., gpt-5.1 or gpt-5.2), or authenticate with 'codex login' instead of an API key.`;
+              `Available models include: ${CODEX_MODELS.map((m) => m.id).join(', ')}. ` +
+              `Some models require a ChatGPT Pro/Plus subscription—authenticate with 'codex login' instead of an API key. ` +
+              `For the current list of compatible models, visit https://platform.openai.com/docs/models.`;
           } else if (
             errorLower.includes('stream disconnected') ||
             errorLower.includes('stream ended') ||

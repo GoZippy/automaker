@@ -60,6 +60,48 @@ export function getPaceStatusLabel(
 }
 
 /**
+ * Calculate the expected pace percentage for a Codex rate limit window based on how far
+ * through the window we are. This is a generic version of getExpectedWeeklyPacePercentage
+ * that works with any window duration.
+ *
+ * Only returns a value for windows >= 1 day (1440 minutes) since pace tracking isn't
+ * meaningful for short windows.
+ *
+ * @param resetsAt - Unix timestamp in seconds for when the window resets
+ * @param windowDurationMins - Window duration in minutes
+ * @returns The expected usage percentage (0-100), or null if not applicable
+ */
+export function getExpectedCodexPacePercentage(
+  resetsAt: number | undefined | null,
+  windowDurationMins: number | undefined | null
+): number | null {
+  // Only show pace for windows >= 1 day (1440 minutes)
+  if (!resetsAt || !windowDurationMins || windowDurationMins < 1440) return null;
+
+  try {
+    const resetDate = new Date(resetsAt * 1000);
+    if (isNaN(resetDate.getTime())) return null;
+
+    const now = new Date();
+    const windowMs = windowDurationMins * 60 * 1000;
+
+    // The window started windowDurationMins before the reset
+    const windowStartDate = new Date(resetDate.getTime() - windowMs);
+
+    // How far through the window are we?
+    const elapsed = now.getTime() - windowStartDate.getTime();
+    const fractionElapsed = elapsed / windowMs;
+
+    // Clamp to 0-1 range
+    const clamped = Math.max(0, Math.min(1, fractionElapsed));
+
+    return clamped * 100;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check if Claude usage is at its limit (any of: session >= 100%, weekly >= 100%, OR cost >= limit)
  * Returns true if any limit is reached, meaning auto mode should pause feature pickup.
  */

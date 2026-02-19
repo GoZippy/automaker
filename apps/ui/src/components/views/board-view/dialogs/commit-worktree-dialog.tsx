@@ -103,8 +103,6 @@ const getStatusBadgeColor = (status: string) => {
   }
 };
 
-// parseDiff is imported from @/lib/diff-utils
-
 function DiffLine({
   type,
   content,
@@ -236,7 +234,12 @@ export function CommitWorktreeDialog({
             }
           }
         } catch (err) {
-          console.warn('Failed to load diffs for commit dialog:', err);
+          console.error('Failed to load diffs for commit dialog:', err);
+          if (!cancelled) {
+            const errorMsg = err instanceof Error ? err.message : 'Failed to load diffs';
+            setError(errorMsg);
+            toast.error(errorMsg);
+          }
         } finally {
           if (!cancelled) setIsLoadingDiffs(false);
         }

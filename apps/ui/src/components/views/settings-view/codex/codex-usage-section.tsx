@@ -11,6 +11,7 @@ import {
 import { useSetupStore } from '@/store/setup-store';
 import { useCodexUsage } from '@/hooks/queries';
 import type { CodexRateLimitWindow } from '@/store/app-store';
+import { getExpectedCodexPacePercentage, getPaceStatusLabel } from '@/store/utils/usage-utils';
 
 const CODEX_USAGE_TITLE = 'Codex Usage';
 const CODEX_USAGE_SUBTITLE = 'Shows usage limits reported by the Codex CLI.';
@@ -73,6 +74,12 @@ export function CodexUsageSection() {
   }) => {
     const safePercentage = Math.min(Math.max(limitWindow.usedPercent, 0), MAX_PERCENTAGE);
     const resetLabel = formatCodexResetTime(limitWindow.resetsAt);
+    const pacePercentage = getExpectedCodexPacePercentage(
+      limitWindow.resetsAt,
+      limitWindow.windowDurationMins
+    );
+    const paceLabel =
+      pacePercentage != null ? getPaceStatusLabel(safePercentage, pacePercentage) : null;
 
     return (
       <div className="rounded-xl border border-border/60 bg-card/50 p-4">
@@ -85,7 +92,7 @@ export function CodexUsageSection() {
             {Math.round(safePercentage)}%
           </span>
         </div>
-        <div className="mt-3 h-2 w-full rounded-full bg-secondary/60">
+        <div className="relative mt-3 h-2 w-full rounded-full bg-secondary/60">
           <div
             className={cn(
               'h-full rounded-full transition-all duration-300',
@@ -93,8 +100,29 @@ export function CodexUsageSection() {
             )}
             style={{ width: `${safePercentage}%` }}
           />
+          {pacePercentage != null && pacePercentage > 0 && pacePercentage < 100 && (
+            <div
+              className="absolute top-0 h-full w-0.5 bg-foreground/60"
+              style={{ left: `${pacePercentage}%` }}
+              title={`Expected: ${Math.round(pacePercentage)}%`}
+            />
+          )}
         </div>
-        {resetLabel && <p className="mt-2 text-xs text-muted-foreground">{resetLabel}</p>}
+        <div className="mt-2 flex items-center justify-between">
+          {paceLabel ? (
+            <p
+              className={cn(
+                'text-xs font-medium',
+                safePercentage > (pacePercentage ?? 0) ? 'text-orange-500' : 'text-green-500'
+              )}
+            >
+              {paceLabel}
+            </p>
+          ) : (
+            <div />
+          )}
+          {resetLabel && <p className="text-xs text-muted-foreground">{resetLabel}</p>}
+        </div>
       </div>
     );
   };

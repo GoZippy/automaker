@@ -195,15 +195,11 @@ export async function performMerge(
 
     // Delete the branch (but not main/master)
     if (branchName !== 'main' && branchName !== 'master') {
-      if (!isValidBranchName(branchName)) {
-        logger.warn(`Invalid branch name detected, skipping deletion: ${branchName}`);
-      } else {
-        try {
-          await execGitCommand(['branch', '-D', branchName], projectPath);
-          branchDeleted = true;
-        } catch {
-          logger.warn(`Failed to delete branch: ${branchName}`);
-        }
+      try {
+        await execGitCommand(['branch', '-D', branchName], projectPath);
+        branchDeleted = true;
+      } catch {
+        logger.warn(`Failed to delete branch: ${branchName}`);
       }
     }
   }

@@ -16,6 +16,7 @@
  */
 
 import { createLogger, getErrorMessage } from '@automaker/utils';
+import { getConflictFiles } from '@automaker/git-utils';
 import { execGitCommand, execGitCommandWithLockRetry } from '../lib/git.js';
 
 const logger = createLogger('PullService');
@@ -118,7 +119,7 @@ export async function stashChanges(worktreePath: string, branchName: string): Pr
  * @returns The stdout from stash pop
  */
 export async function popStash(worktreePath: string): Promise<string> {
-  return await execGitCommand(['stash', 'pop'], worktreePath);
+  return await execGitCommandWithLockRetry(['stash', 'pop'], worktreePath);
 }
 
 /**
@@ -129,7 +130,7 @@ export async function popStash(worktreePath: string): Promise<string> {
  */
 async function tryPopStash(worktreePath: string): Promise<boolean> {
   try {
-    await execGitCommand(['stash', 'pop'], worktreePath);
+    await execGitCommandWithLockRetry(['stash', 'pop'], worktreePath);
     return true;
   } catch (stashPopError) {
     // Stash pop failed - leave it in stash list for manual recovery
@@ -142,51 +143,38 @@ async function tryPopStash(worktreePath: string): Promise<boolean> {
 }
 
 /**
+ * Result of the upstream/remote branch check.
+ * - 'tracking': the branch has a configured upstream tracking ref
+ * - 'remote': no tracking ref, but the remote branch exists
+ * - 'none': neither a tracking ref nor a remote branch was found
+ */
+export type UpstreamStatus = 'tracking' | 'remote' | 'none';
+
+/**
  * Check whether the branch has an upstream tracking ref, or whether
  * the remote branch exists.
  *
  * @param worktreePath - Path to the git worktree
  * @param branchName - Current branch name
  * @param remote - Remote name
- * @returns true if upstream or remote branch exists
+ * @returns UpstreamStatus indicating tracking ref, remote branch, or neither
  */
 export async function hasUpstreamOrRemoteBranch(
   worktreePath: string,
   branchName: string,
   remote: string
-): Promise<boolean> {
+): Promise<UpstreamStatus> {
   try {
     await execGitCommand(['rev-parse', '--abbrev-ref', `${branchName}@{upstream}`], worktreePath);
-    return true;
+    return 'tracking';
   } catch {
     // No upstream tracking - check if the remote branch exists
     try {
       await execGitCommand(['rev-parse', '--verify', `${remote}/${branchName}`], worktreePath);
-      return true;
+      return 'remote';
     } catch {
-      return false;
+      return 'none';
     }
-  }
-}
-
-/**
- * Get the list of files with unresolved merge conflicts.
- *
- * @param worktreePath - Path to the git worktree
- * @returns Array of file paths with conflicts
- */
-export async function getConflictFiles(worktreePath: string): Promise<string[]> {
-  try {
-    const diffOutput = await execGitCommand(
-      ['diff', '--name-only', '--diff-filter=U'],
-      worktreePath
-    );
-    return diffOutput
-      .trim()
-      .split('\n')
-      .filter((f) => f.trim().length > 0);
-  } catch {
-    return [];
   }
 }
 
@@ -233,7 +221,15 @@ export async function performPull(
   const stashIfNeeded = options?.stashIfNeeded ?? false;
 
   // 1. Get current branch name
-  const branchName = await getCurrentBranch(worktreePath);
+  let branchName: string;
+  try {
+    branchName = await getCurrentBranch(worktreePath);
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to get current branch: ${getErrorMessage(err)}`,
+    };
+  }
 
   // 2. Check for detached HEAD state
   if (branchName === 'HEAD') {
@@ -254,7 +250,16 @@ export async function performPull(
   }
 
   // 4. Check for local changes
-  const { hasLocalChanges, localChangedFiles } = await getLocalChanges(worktreePath);
+  let hasLocalChanges: boolean;
+  let localChangedFiles: string[];
+  try {
+    ({ hasLocalChanges, localChangedFiles } = await getLocalChanges(worktreePath));
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to get local changes: ${getErrorMessage(err)}`,
+    };
+  }
 
   // 5. If there are local changes and stashIfNeeded is not requested, return info
   if (hasLocalChanges && !stashIfNeeded) {
@@ -284,8 +289,8 @@ export async function performPull(
   }
 
   // 7. Verify upstream tracking or remote branch exists
-  const hasUpstream = await hasUpstreamOrRemoteBranch(worktreePath, branchName, targetRemote);
-  if (!hasUpstream) {
+  const upstreamStatus = await hasUpstreamOrRemoteBranch(worktreePath, branchName, targetRemote);
+  if (upstreamStatus === 'none') {
     let stashRecoveryFailed = false;
     if (didStash) {
       const stashPopped = await tryPopStash(worktreePath);
@@ -294,15 +299,18 @@ export async function performPull(
     return {
       success: false,
       error: `Branch '${branchName}' has no upstream branch on remote '${targetRemote}'. Push it first or set upstream with: git branch --set-upstream-to=${targetRemote}/${branchName}${stashRecoveryFailed ? ' Local changes remain stashed and need manual recovery (run: git stash pop).' : ''}`,
-      stashRecoveryFailed: stashRecoveryFailed || undefined,
+      stashRecoveryFailed: stashRecoveryFailed ? stashRecoveryFailed : undefined,
     };
   }
 
   // 8. Pull latest changes
+  // When the branch has a configured upstream tracking ref, let Git use it automatically.
+  // When only the remote branch exists (no tracking ref), explicitly specify remote and branch.
+  const pullArgs = upstreamStatus === 'tracking' ? ['pull'] : ['pull', targetRemote, branchName];
   let pullConflict = false;
   let pullConflictFiles: string[] = [];
   try {
-    const pullOutput = await execGitCommand(['pull', targetRemote, branchName], worktreePath);
+    const pullOutput = await execGitCommand(pullArgs, worktreePath);
 
     const alreadyUpToDate = pullOutput.includes('Already up to date');
 
@@ -339,14 +347,14 @@ export async function performPull(
         return {
           success: false,
           error: `Branch '${branchName}' has no upstream branch. Push it first or set upstream with: git branch --set-upstream-to=${targetRemote}/${branchName}${stashRecoveryFailed ? ' Local changes remain stashed and need manual recovery (run: git stash pop).' : ''}`,
-          stashRecoveryFailed: stashRecoveryFailed || undefined,
+          stashRecoveryFailed: stashRecoveryFailed ? stashRecoveryFailed : undefined,
         };
       }
 
       return {
         success: false,
         error: `${errorMsg}${stashRecoveryFailed ? ' Local changes remain stashed and need manual recovery (run: git stash pop).' : ''}`,
-        stashRecoveryFailed: stashRecoveryFailed || undefined,
+        stashRecoveryFailed: stashRecoveryFailed ? stashRecoveryFailed : undefined,
       };
     }
   }
@@ -391,27 +399,9 @@ export async function performPull(
  */
 async function reapplyStash(worktreePath: string, branchName: string): Promise<PullResult> {
   try {
-    const stashPopOutput = await popStash(worktreePath);
-    const stashPopCombined = stashPopOutput || '';
+    await popStash(worktreePath);
 
-    // Check if stash pop had conflicts
-    if (isStashConflict(stashPopCombined)) {
-      const stashConflictFiles = await getConflictFiles(worktreePath);
-
-      return {
-        success: true,
-        branch: branchName,
-        pulled: true,
-        hasConflicts: true,
-        conflictSource: 'stash',
-        conflictFiles: stashConflictFiles,
-        stashed: true,
-        stashRestored: true, // Stash was applied but with conflicts
-        message: 'Pull succeeded but reapplying your stashed changes resulted in merge conflicts.',
-      };
-    }
-
-    // Stash pop succeeded cleanly
+    // Stash pop succeeded cleanly (popStash throws on non-zero exit)
     return {
       success: true,
       branch: branchName,
@@ -426,6 +416,7 @@ async function reapplyStash(worktreePath: string, branchName: string): Promise<P
     const errorOutput = `${err.stderr || ''} ${err.stdout || ''} ${err.message || ''}`;
 
     // Check if stash pop failed due to conflicts
+    // The stash remains in the stash list when conflicts occur, so stashRestored is false
     if (isStashConflict(errorOutput)) {
       const stashConflictFiles = await getConflictFiles(worktreePath);
 
@@ -437,7 +428,7 @@ async function reapplyStash(worktreePath: string, branchName: string): Promise<P
         conflictSource: 'stash',
         conflictFiles: stashConflictFiles,
         stashed: true,
-        stashRestored: true,
+        stashRestored: false,
         message: 'Pull succeeded but reapplying your stashed changes resulted in merge conflicts.',
       };
     }
