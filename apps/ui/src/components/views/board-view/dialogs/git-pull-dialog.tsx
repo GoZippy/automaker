@@ -76,17 +76,6 @@ export function GitPullDialog({
   const [pullResult, setPullResult] = useState<PullResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Reset state when dialog opens
-  useEffect(() => {
-    if (open && worktree) {
-      setPhase('checking');
-      setPullResult(null);
-      setErrorMessage(null);
-      // Start the initial check
-      checkForLocalChanges();
-    }
-  }, [open, worktree]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const checkForLocalChanges = useCallback(async () => {
     if (!worktree) return;
 
@@ -129,6 +118,17 @@ export function GitPullDialog({
     }
   }, [worktree, remote, onPulled]);
 
+  // Reset state when dialog opens
+  useEffect(() => {
+    if (open && worktree) {
+      setPhase('checking');
+      setPullResult(null);
+      setErrorMessage(null);
+      // Start the initial check
+      checkForLocalChanges();
+    }
+  }, [open, worktree, checkForLocalChanges]);
+
   const handlePullWithStash = useCallback(async () => {
     if (!worktree) return;
 
@@ -154,9 +154,14 @@ export function GitPullDialog({
 
       if (result.result?.hasConflicts) {
         setPhase('conflict');
-      } else {
+      } else if (result.result?.pulled) {
         setPhase('success');
         onPulled?.();
+      } else {
+        // Unrecognized response: no pulled flag and no conflicts
+        console.warn('handlePullWithStash: unrecognized response', result.result);
+        setErrorMessage('Unexpected pull response');
+        setPhase('error');
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to pull');
@@ -300,14 +305,16 @@ export function GitPullDialog({
                     {pullResult?.message || 'Changes pulled successfully'}
                   </span>
 
-                  {pullResult?.stashed && pullResult?.stashRestored && (
-                    <div className="flex items-start gap-2 p-3 rounded-md bg-green-500/10 border border-green-500/20">
-                      <Archive className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
-                      <span className="text-green-600 dark:text-green-400 text-sm">
-                        Your stashed changes have been restored successfully.
-                      </span>
-                    </div>
-                  )}
+                  {pullResult?.stashed &&
+                    pullResult?.stashRestored &&
+                    !pullResult?.stashRecoveryFailed && (
+                      <div className="flex items-start gap-2 p-3 rounded-md bg-green-500/10 border border-green-500/20">
+                        <Archive className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                        <span className="text-green-600 dark:text-green-400 text-sm">
+                          Your stashed changes have been restored successfully.
+                        </span>
+                      </div>
+                    )}
 
                   {pullResult?.stashed &&
                     (!pullResult?.stashRestored || pullResult?.stashRecoveryFailed) && (

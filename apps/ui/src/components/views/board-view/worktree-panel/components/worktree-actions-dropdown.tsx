@@ -37,6 +37,9 @@ import {
   History,
   Archive,
   Cherry,
+  AlertTriangle,
+  XCircle,
+  CheckCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -112,6 +115,10 @@ interface WorktreeActionsDropdownProps {
   onViewStashes?: (worktree: WorktreeInfo) => void;
   /** Cherry-pick commits from another branch */
   onCherryPick?: (worktree: WorktreeInfo) => void;
+  /** Abort an in-progress merge/rebase/cherry-pick */
+  onAbortOperation?: (worktree: WorktreeInfo) => void;
+  /** Continue an in-progress merge/rebase/cherry-pick after resolving conflicts */
+  onContinueOperation?: (worktree: WorktreeInfo) => void;
   hasInitScript: boolean;
 }
 
@@ -162,6 +169,8 @@ export function WorktreeActionsDropdown({
   onStashChanges,
   onViewStashes,
   onCherryPick,
+  onAbortOperation,
+  onContinueOperation,
   hasInitScript,
 }: WorktreeActionsDropdownProps) {
   // Get available editors for the "Open In" submenu
@@ -233,6 +242,61 @@ export function WorktreeActionsDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
+        {/* Conflict indicator and actions when merge/rebase/cherry-pick is in progress */}
+        {worktree.hasConflicts && (
+          <>
+            <DropdownMenuLabel className="text-xs flex items-center gap-2 text-red-600 dark:text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {worktree.conflictType === 'merge'
+                ? 'Merge'
+                : worktree.conflictType === 'rebase'
+                  ? 'Rebase'
+                  : worktree.conflictType === 'cherry-pick'
+                    ? 'Cherry-pick'
+                    : 'Operation'}{' '}
+              Conflicts
+              {worktree.conflictFiles && worktree.conflictFiles.length > 0 && (
+                <span className="ml-auto text-[10px] bg-red-500/20 text-red-600 dark:text-red-400 px-1.5 py-0.5 rounded">
+                  {worktree.conflictFiles.length} file
+                  {worktree.conflictFiles.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </DropdownMenuLabel>
+            {onAbortOperation && (
+              <DropdownMenuItem
+                onClick={() => onAbortOperation(worktree)}
+                className="text-xs text-destructive focus:text-destructive"
+              >
+                <XCircle className="w-3.5 h-3.5 mr-2" />
+                Abort{' '}
+                {worktree.conflictType === 'merge'
+                  ? 'Merge'
+                  : worktree.conflictType === 'rebase'
+                    ? 'Rebase'
+                    : worktree.conflictType === 'cherry-pick'
+                      ? 'Cherry-pick'
+                      : 'Operation'}
+              </DropdownMenuItem>
+            )}
+            {onContinueOperation && (
+              <DropdownMenuItem
+                onClick={() => onContinueOperation(worktree)}
+                className="text-xs text-green-600 focus:text-green-700"
+              >
+                <CheckCircle className="w-3.5 h-3.5 mr-2" />
+                Continue{' '}
+                {worktree.conflictType === 'merge'
+                  ? 'Merge'
+                  : worktree.conflictType === 'rebase'
+                    ? 'Rebase'
+                    : worktree.conflictType === 'cherry-pick'
+                      ? 'Cherry-pick'
+                      : 'Operation'}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+          </>
+        )}
         {/* Loading indicator while git status is being determined */}
         {isLoadingGitStatus && (
           <>

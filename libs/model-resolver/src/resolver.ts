@@ -11,7 +11,7 @@
  *
  * With canonical model IDs:
  * - Cursor: cursor-auto, cursor-composer-1, cursor-gpt-5.2
- * - OpenCode: opencode-big-pickle, opencode-grok-code
+ * - OpenCode: opencode-big-pickle, opencode-kimi-k2.5-free
  * - Copilot: copilot-gpt-5.1, copilot-claude-sonnet-4.5, copilot-gemini-3-pro-preview
  * - Gemini: gemini-2.5-flash, gemini-2.5-pro
  * - Claude: claude-haiku, claude-sonnet, claude-opus (also supports legacy aliases)
@@ -110,7 +110,7 @@ export function resolveModelString(
     return resolved;
   }
 
-  // Full Claude model string (e.g., claude-sonnet-4-5-20250929) - pass through
+  // Full Claude model string (e.g., claude-sonnet-4-6) - pass through
   if (canonicalKey.includes('claude-')) {
     console.log(`[ModelResolver] Using full Claude model string: ${canonicalKey}`);
     return canonicalKey;

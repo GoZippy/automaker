@@ -245,15 +245,9 @@ async function resolveCodexExecutionPlan(options: ExecuteOptions): Promise<Codex
     throw new Error(ERROR_CODEX_CLI_REQUIRED);
   }
 
-  if (!cliAuthenticated) {
-    throw new Error(ERROR_CODEX_AUTH_REQUIRED);
-  }
-
-  return {
-    mode: CODEX_EXECUTION_MODE_CLI,
-    cliPath,
-    openAiApiKey,
-  };
+  // At this point, neither hasCliNativeAuth nor hasApiKey is true,
+  // so authentication is required regardless.
+  throw new Error(ERROR_CODEX_AUTH_REQUIRED);
 }
 
 function getEventType(event: Record<string, unknown>): string | null {

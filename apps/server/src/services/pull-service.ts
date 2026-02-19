@@ -16,7 +16,7 @@
  */
 
 import { createLogger } from '@automaker/utils';
-import { execGitCommand } from '../lib/git.js';
+import { execGitCommand, execGitCommandWithLockRetry } from '../lib/git.js';
 import { getErrorMessage } from '../routes/worktree/common.js';
 
 const logger = createLogger('PullService');
@@ -106,7 +106,10 @@ export async function getLocalChanges(
  */
 export async function stashChanges(worktreePath: string, branchName: string): Promise<void> {
   const stashMessage = `automaker-pull-stash: Pre-pull stash on ${branchName}`;
-  await execGitCommand(['stash', 'push', '--include-untracked', '-m', stashMessage], worktreePath);
+  await execGitCommandWithLockRetry(
+    ['stash', 'push', '--include-untracked', '-m', stashMessage],
+    worktreePath
+  );
 }
 
 /**

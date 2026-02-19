@@ -48,6 +48,9 @@ export function ViewWorktreeChangesDialog({
                 {worktree.changedFilesCount > 1 ? 's' : ''} changed)
               </span>
             )}
+            <span className="ml-1 text-xs text-muted-foreground">
+              — Use the Stage/Unstage buttons to prepare files for commit.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -58,6 +61,8 @@ export function ViewWorktreeChangesDialog({
               featureId={worktree.branch}
               useWorktrees={true}
               compact={false}
+              enableStaging={true}
+              worktreePath={worktree.path}
               className="mt-4"
             />
           </div>

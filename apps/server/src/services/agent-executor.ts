@@ -42,6 +42,27 @@ export class AgentExecutor {
   private static readonly WRITE_DEBOUNCE_MS = 500;
   private static readonly STREAM_HEARTBEAT_MS = 15_000;
 
+  /**
+   * Sanitize a provider error value into clean text.
+   * Coalesces to string, removes ANSI codes, strips leading "Error:" prefix,
+   * trims, and returns 'Unknown error' when empty.
+   */
+  private static sanitizeProviderError(input: string | { error?: string } | undefined): string {
+    let raw: string;
+    if (typeof input === 'string') {
+      raw = input;
+    } else if (input && typeof input === 'object' && typeof input.error === 'string') {
+      raw = input.error;
+    } else {
+      raw = '';
+    }
+    const cleaned = raw
+      .replace(/\x1b\[[0-9;]*m/g, '')
+      .replace(/^Error:\s*/i, '')
+      .trim();
+    return cleaned || 'Unknown error';
+  }
+
   constructor(
     private eventBus: TypedEventBus,
     private featureStateManager: FeatureStateManager,
@@ -255,15 +276,7 @@ export class AgentExecutor {
             }
           }
         } else if (msg.type === 'error') {
-          // Clean the error: strip ANSI codes and the redundant "Error: " prefix
-          // that CLI providers add. Without this, wrapping in new Error() produces
-          // "Error: Error: Session not found" (double-prefixed).
-          const cleanedError =
-            (msg.error || 'Unknown error')
-              .replace(/\x1b\[[0-9;]*m/g, '')
-              .replace(/^Error:\s*/i, '')
-              .trim() || 'Unknown error';
-          throw new Error(cleanedError);
+          throw new Error(AgentExecutor.sanitizeProviderError(msg.error));
         } else if (msg.type === 'result' && msg.subtype === 'success') scheduleWrite();
       }
       await writeToFile();

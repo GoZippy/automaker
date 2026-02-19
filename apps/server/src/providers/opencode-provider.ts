@@ -549,8 +549,15 @@ export class OpencodeProvider extends CliProvider {
 
     // sdkSessionId IS set — the CLI will receive `--session <id>`.
     // If that session no longer exists, intercept the error and retry fresh.
+    //
+    // To avoid buffering the entire stream in memory for long-lived sessions,
+    // we only buffer an initial window of messages until we observe a healthy
+    // (non-error) message. Once a healthy message is seen, we flush the buffer
+    // and switch to direct passthrough, while still watching for session errors
+    // via isSessionNotFoundError on any subsequent error messages.
     const buffered: ProviderMessage[] = [];
     let sessionError = false;
+    let seenHealthyMessage = false;
 
     try {
       for await (const msg of super.executeQuery(options)) {
@@ -565,13 +572,30 @@ export class OpencodeProvider extends CliProvider {
             break; // stop consuming the failed stream
           }
 
-          // Non-session error — clean and buffer
+          // Non-session error — clean it
           if (msg.error && typeof msg.error === 'string') {
             msg.error = OpencodeProvider.cleanErrorMessage(msg.error);
           }
+        } else {
+          // A non-error message is a healthy signal — stop buffering after this
+          seenHealthyMessage = true;
         }
 
-        buffered.push(msg);
+        if (seenHealthyMessage && buffered.length > 0) {
+          // Flush the pre-healthy buffer first, then switch to passthrough
+          for (const bufferedMsg of buffered) {
+            yield bufferedMsg;
+          }
+          buffered.length = 0;
+        }
+
+        if (seenHealthyMessage) {
+          // Passthrough mode — yield directly without buffering
+          yield msg;
+        } else {
+          // Still in initial window — buffer until we see a healthy message
+          buffered.push(msg);
+        }
       }
     } catch (error) {
       // Also handle thrown exceptions (e.g. from mapError in cli-provider)
@@ -602,12 +626,15 @@ export class OpencodeProvider extends CliProvider {
         }
         yield retryMsg;
       }
-    } else {
-      // No session error — flush buffered messages to the consumer
+    } else if (buffered.length > 0) {
+      // No session error and still have buffered messages (stream ended before
+      // any healthy message was observed) — flush them to the consumer
       for (const msg of buffered) {
         yield msg;
       }
     }
+    // If seenHealthyMessage is true, all messages have already been yielded
+    // directly in passthrough mode — nothing left to flush.
   }
 
   /**
@@ -673,7 +700,7 @@ export class OpencodeProvider extends CliProvider {
           return {
             type: 'error',
             session_id: finishEvent.sessionID,
-            error: finishEvent.part.error,
+            error: OpencodeProvider.cleanErrorMessage(finishEvent.part.error),
           };
         }
 
@@ -682,7 +709,7 @@ export class OpencodeProvider extends CliProvider {
           return {
             type: 'error',
             session_id: finishEvent.sessionID,
-            error: 'Step execution failed',
+            error: OpencodeProvider.cleanErrorMessage('Step execution failed'),
           };
         }
 
@@ -705,8 +732,10 @@ export class OpencodeProvider extends CliProvider {
       case 'tool_error': {
         const toolErrorEvent = openCodeEvent as OpenCodeBaseEvent;
 
-        // Extract error message from part.error
-        const errorMessage = toolErrorEvent.part?.error || 'Tool execution failed';
+        // Extract error message from part.error and clean ANSI codes
+        const errorMessage = OpencodeProvider.cleanErrorMessage(
+          toolErrorEvent.part?.error || 'Tool execution failed'
+        );
 
         return {
           type: 'error',
@@ -719,16 +748,8 @@ export class OpencodeProvider extends CliProvider {
       // The event format includes the tool name, call ID, and state with input/output.
       // Handle both 'tool_use' (actual CLI format) and 'tool_call' (legacy/alternative) for robustness.
       case 'tool_use': {
-        const toolUseEvent = openCodeEvent as OpenCodeBaseEvent;
-        const part = toolUseEvent.part as OpenCodePart & {
-          callID?: string;
-          tool?: string;
-          state?: {
-            status?: string;
-            input?: unknown;
-            output?: string;
-          };
-        };
+        const toolUseEvent = openCodeEvent as OpenCodeToolUseEvent;
+        const part = toolUseEvent.part;
 
         // Generate a tool use ID if not provided
         const toolUseId = part?.callID || part?.call_id || generateToolUseId();
@@ -898,9 +919,9 @@ export class OpencodeProvider extends CliProvider {
         default: true,
       },
       {
-        id: 'opencode/glm-4.7-free',
-        name: 'GLM 4.7 Free',
-        modelString: 'opencode/glm-4.7-free',
+        id: 'opencode/glm-5-free',
+        name: 'GLM 5 Free',
+        modelString: 'opencode/glm-5-free',
         provider: 'opencode',
         description: 'OpenCode free tier GLM model',
         supportsTools: true,
@@ -918,19 +939,19 @@ export class OpencodeProvider extends CliProvider {
         tier: 'basic',
       },
       {
-        id: 'opencode/grok-code',
-        name: 'Grok Code (Free)',
-        modelString: 'opencode/grok-code',
+        id: 'opencode/kimi-k2.5-free',
+        name: 'Kimi K2.5 Free',
+        modelString: 'opencode/kimi-k2.5-free',
         provider: 'opencode',
-        description: 'OpenCode free tier Grok model for coding',
+        description: 'OpenCode free tier Kimi model for coding',
         supportsTools: true,
         supportsVision: false,
         tier: 'basic',
       },
       {
-        id: 'opencode/minimax-m2.1-free',
-        name: 'MiniMax M2.1 Free',
-        modelString: 'opencode/minimax-m2.1-free',
+        id: 'opencode/minimax-m2.5-free',
+        name: 'MiniMax M2.5 Free',
+        modelString: 'opencode/minimax-m2.5-free',
         provider: 'opencode',
         description: 'OpenCode free tier MiniMax model',
         supportsTools: true,
@@ -1052,7 +1073,7 @@ export class OpencodeProvider extends CliProvider {
    *
    * OpenCode CLI output format (one model per line):
    * opencode/big-pickle
-   * opencode/glm-4.7-free
+   * opencode/glm-5-free
    * anthropic/claude-3-5-haiku-20241022
    * github-copilot/claude-3.5-sonnet
    * ...

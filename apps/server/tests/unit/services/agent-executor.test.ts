@@ -129,7 +129,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: {} as BaseProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
       };
       expect(options.featureId).toBe('test-feature');
     });
@@ -166,7 +166,7 @@ describe('AgentExecutor', () => {
         projectPath: '/test/project',
         abortController: new AbortController(),
         provider: {} as BaseProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
       };
 
       expect(options.workDir).toBe('/test/workdir');
@@ -174,7 +174,7 @@ describe('AgentExecutor', () => {
       expect(options.prompt).toBe('Test prompt');
       expect(options.projectPath).toBe('/test/project');
       expect(options.abortController).toBeInstanceOf(AbortController);
-      expect(options.effectiveBareModel).toBe('claude-sonnet-4-20250514');
+      expect(options.effectiveBareModel).toBe('claude-sonnet-4-6');
     });
 
     it('should accept optional options', () => {
@@ -185,10 +185,10 @@ describe('AgentExecutor', () => {
         projectPath: '/test/project',
         abortController: new AbortController(),
         provider: {} as BaseProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         // Optional fields
         imagePaths: ['/image1.png', '/image2.png'],
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         planningMode: 'spec',
         requirePlanApproval: true,
         previousContent: 'Previous content',
@@ -419,7 +419,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController,
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -461,7 +461,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         previousContent: 'Previous context from earlier session',
       };
 
@@ -507,7 +507,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip', // No spec detection in skip mode
       };
 
@@ -558,7 +558,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -618,7 +618,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -671,7 +671,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -712,7 +712,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -763,7 +763,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -810,7 +810,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 
@@ -855,7 +855,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
         branchName: 'feature/my-feature',
       };
@@ -906,7 +906,7 @@ describe('AgentExecutor', () => {
         projectPath: '/project',
         abortController: new AbortController(),
         provider: mockProvider,
-        effectiveBareModel: 'claude-sonnet-4-20250514',
+        effectiveBareModel: 'claude-sonnet-4-6',
         planningMode: 'skip',
       };
 

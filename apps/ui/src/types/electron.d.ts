@@ -755,6 +755,10 @@ export interface FileStatus {
   status: string;
   path: string;
   statusText: string;
+  /** Raw staging area (index) status character from git porcelain format */
+  indexStatus?: string;
+  /** Raw working tree status character from git porcelain format */
+  workTreeStatus?: string;
 }
 
 export interface FileDiffsResult {
@@ -984,6 +988,20 @@ export interface WorktreeAPI {
     featureId: string,
     filePath: string
   ) => Promise<FileDiffResult>;
+
+  // Stage or unstage files in a worktree
+  stageFiles: (
+    worktreePath: string,
+    files: string[],
+    operation: 'stage' | 'unstage'
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      operation: 'stage' | 'unstage';
+      filesCount: number;
+    };
+    error?: string;
+  }>;
 
   // Pull latest changes from remote with optional stash management
   pull: (
@@ -1622,6 +1640,20 @@ export interface GitAPI {
 
   // Get diff for a specific file in the main project
   getFileDiff: (projectPath: string, filePath: string) => Promise<FileDiffResult>;
+
+  // Stage or unstage files in the main project
+  stageFiles: (
+    projectPath: string,
+    files: string[],
+    operation: 'stage' | 'unstage'
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      operation: 'stage' | 'unstage';
+      filesCount: number;
+    };
+    error?: string;
+  }>;
 }
 
 // Model definition type

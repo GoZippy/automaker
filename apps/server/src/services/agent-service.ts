@@ -97,6 +97,20 @@ export class AgentService {
   }
 
   /**
+   * Detect provider-side session errors (session not found, expired, etc.).
+   * Used to decide whether to clear a stale sdkSessionId.
+   */
+  private isStaleSessionError(rawErrorText: string): boolean {
+    const errorLower = rawErrorText.toLowerCase();
+    return (
+      errorLower.includes('session not found') ||
+      errorLower.includes('session expired') ||
+      errorLower.includes('invalid session') ||
+      errorLower.includes('no such session')
+    );
+  }
+
+  /**
    * Start or resume a conversation
    */
   async startConversation({
@@ -195,7 +209,15 @@ export class AgentService {
     const resolvedWorkingDirectory = path.resolve(effectiveWorkingDirectory);
 
     // Validate that the working directory is allowed using centralized validation
-    validateWorkingDirectory(resolvedWorkingDirectory);
+    try {
+      validateWorkingDirectory(resolvedWorkingDirectory);
+    } catch (validationError) {
+      this.logger.warn(
+        `Session "${sessionId}": working directory "${resolvedWorkingDirectory}" is not allowed — ` +
+          `returning null so callers treat it as a missing session. Error: ${(validationError as Error).message}`
+      );
+      return null;
+    }
 
     // Load persisted queue
     const promptQueue = await this.loadQueueState(sessionId);
@@ -411,7 +433,7 @@ export class AgentService {
 
       // When using a custom provider (GLM, MiniMax), use resolved Claude model for SDK config
       // (thinking level budgets, allowedTools) but we MUST pass the provider's model ID
-      // (e.g. "GLM-4.7") to the API - not "claude-sonnet-4-20250514" which causes "model not found"
+      // (e.g. "GLM-4.7") to the API - not "claude-sonnet-4-6" which causes "model not found"
       const modelForSdk = providerResolvedModel || model;
       const sessionModelForSdk = providerResolvedModel ? undefined : session.model;
 
@@ -616,14 +638,7 @@ export class AgentService {
           // sdkSessionId so the next attempt starts a fresh provider session.
           // This handles providers that don't have built-in session recovery
           // (unlike OpenCode which auto-retries without the session flag).
-          const errorLower = rawErrorText.toLowerCase();
-          if (
-            session.sdkSessionId &&
-            (errorLower.includes('session not found') ||
-              errorLower.includes('session expired') ||
-              errorLower.includes('invalid session') ||
-              errorLower.includes('no such session'))
-          ) {
+          if (session.sdkSessionId && this.isStaleSessionError(rawErrorText)) {
             this.logger.info(
               `Clearing stale sdkSessionId for session ${sessionId} after provider session error`
             );
@@ -699,13 +714,7 @@ export class AgentService {
 
       // Check if the thrown error is a provider-side session error.
       // Clear the stale sdkSessionId so the next retry starts fresh.
-      if (
-        session.sdkSessionId &&
-        (thrownErrorMsg.includes('session not found') ||
-          thrownErrorMsg.includes('session expired') ||
-          thrownErrorMsg.includes('invalid session') ||
-          thrownErrorMsg.includes('no such session'))
-      ) {
+      if (session.sdkSessionId && this.isStaleSessionError(rawThrownMsg)) {
         this.logger.info(
           `Clearing stale sdkSessionId for session ${sessionId} after thrown session error`
         );

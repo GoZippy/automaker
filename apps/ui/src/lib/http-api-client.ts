@@ -2135,6 +2135,8 @@ export class HttpApiClient implements ElectronAPI {
         featureId,
         filePath,
       }),
+    stageFiles: (worktreePath: string, files: string[], operation: 'stage' | 'unstage') =>
+      this.post('/api/worktree/stage-files', { worktreePath, files, operation }),
     pull: (worktreePath: string, remote?: string, stashIfNeeded?: boolean) =>
       this.post('/api/worktree/pull', { worktreePath, remote, stashIfNeeded }),
     checkoutBranch: (worktreePath: string, branchName: string, baseBranch?: string) =>
@@ -2232,6 +2234,10 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/cherry-pick', { worktreePath, commitHashes, options }),
     rebase: (worktreePath: string, ontoBranch: string) =>
       this.post('/api/worktree/rebase', { worktreePath, ontoBranch }),
+    abortOperation: (worktreePath: string) =>
+      this.post('/api/worktree/abort-operation', { worktreePath }),
+    continueOperation: (worktreePath: string) =>
+      this.post('/api/worktree/continue-operation', { worktreePath }),
     getBranchCommitLog: (worktreePath: string, branchName?: string, limit?: number) =>
       this.post('/api/worktree/branch-commit-log', { worktreePath, branchName, limit }),
     getTestLogs: (worktreePath?: string, sessionId?: string): Promise<TestLogsResponse> => {
@@ -2263,6 +2269,8 @@ export class HttpApiClient implements ElectronAPI {
     getDiffs: (projectPath: string) => this.post('/api/git/diffs', { projectPath }),
     getFileDiff: (projectPath: string, filePath: string) =>
       this.post('/api/git/file-diff', { projectPath, filePath }),
+    stageFiles: (projectPath: string, files: string[], operation: 'stage' | 'unstage') =>
+      this.post('/api/git/stage-files', { projectPath, files, operation }),
   };
 
   // Spec Regeneration API

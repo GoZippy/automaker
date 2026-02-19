@@ -70,4 +70,8 @@ export interface FileStatus {
   status: string;
   path: string;
   statusText: string;
+  /** Raw staging area (index) status character from git porcelain format */
+  indexStatus?: string;
+  /** Raw working tree status character from git porcelain format */
+  workTreeStatus?: string;
 }

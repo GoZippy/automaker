@@ -272,10 +272,10 @@ describe('agent-service.ts', () => {
       await service.sendMessage({
         sessionId: 'session-1',
         message: 'Hello',
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
       });
 
-      expect(ProviderFactory.getProviderForModel).toHaveBeenCalledWith('claude-sonnet-4-20250514');
+      expect(ProviderFactory.getProviderForModel).toHaveBeenCalledWith('claude-sonnet-4-6');
     });
 
     it('should save session messages', async () => {
@@ -339,7 +339,10 @@ describe('agent-service.ts', () => {
 
     it('should handle non-existent session', async () => {
       const history = await service.getHistory('nonexistent');
-      expect(history).toBeDefined(); // Returns error object
+      expect(history).toBeDefined();
+      expect(history.success).toBe(false);
+      expect(history.error).toBeDefined();
+      expect(typeof history.error).toBe('string');
     });
   });
 
@@ -530,13 +533,13 @@ describe('agent-service.ts', () => {
 
     it('should set model for existing session', async () => {
       vi.mocked(fs.readFile).mockResolvedValue('{"session-1": {}}');
-      const result = await service.setSessionModel('session-1', 'claude-sonnet-4-20250514');
+      const result = await service.setSessionModel('session-1', 'claude-sonnet-4-6');
 
       expect(result).toBe(true);
     });
 
     it('should return false for non-existent session', async () => {
-      const result = await service.setSessionModel('nonexistent', 'claude-sonnet-4-20250514');
+      const result = await service.setSessionModel('nonexistent', 'claude-sonnet-4-6');
 
       expect(result).toBe(false);
     });
@@ -719,7 +722,7 @@ describe('agent-service.ts', () => {
       const result = await service.addToQueue('session-1', {
         message: 'Test prompt',
         imagePaths: ['/test/image.png'],
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
       });
 
       expect(result.success).toBe(true);

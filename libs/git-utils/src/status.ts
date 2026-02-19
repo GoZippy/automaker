@@ -99,6 +99,8 @@ export function parseGitStatus(statusOutput: string): FileStatus[] {
         status: primaryStatus,
         path: filePath,
         statusText: getStatusText(indexStatus, workTreeStatus),
+        indexStatus,
+        workTreeStatus,
       };
     });
 }

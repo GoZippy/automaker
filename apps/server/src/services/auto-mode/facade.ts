@@ -208,7 +208,7 @@ export class AutoModeServiceFacade {
         model?: string,
         opts?: Record<string, unknown>
       ) => {
-        const resolvedModel = model || 'claude-sonnet-4-20250514';
+        const resolvedModel = model || 'claude-sonnet-4-6';
         const provider = ProviderFactory.getProviderForModel(resolvedModel);
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
 
@@ -258,7 +258,7 @@ export class AutoModeServiceFacade {
               featureStateManager.saveFeatureSummary(projPath, fId, summary),
             buildTaskPrompt: (task, allTasks, taskIndex, _planContent, template, feedback) => {
               let taskPrompt = template
-                .replace(/\{\{taskName\}\}/g, task.description)
+                .replace(/\{\{taskName\}\}/g, task.description || `Task ${task.id}`)
                 .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
                 .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
                 .replace(/\{\{taskDescription\}\}/g, task.description || `Task ${task.id}`);
@@ -336,7 +336,7 @@ export class AutoModeServiceFacade {
           branchName?: string | null;
         }
       ) => {
-        const resolvedModel = model || 'claude-sonnet-4-20250514';
+        const resolvedModel = model || 'claude-sonnet-4-6';
         const provider = ProviderFactory.getProviderForModel(resolvedModel);
         const effectiveBareModel = stripProviderPrefix(resolvedModel);
 
@@ -385,7 +385,7 @@ export class AutoModeServiceFacade {
               featureStateManager.saveFeatureSummary(projPath, fId, summary),
             buildTaskPrompt: (task, allTasks, taskIndex, planContent, template, feedback) => {
               let taskPrompt = template
-                .replace(/\{\{taskName\}\}/g, task.description)
+                .replace(/\{\{taskName\}\}/g, task.description || `Task ${task.id}`)
                 .replace(/\{\{taskIndex\}\}/g, String(taskIndex + 1))
                 .replace(/\{\{totalTasks\}\}/g, String(allTasks.length))
                 .replace(/\{\{taskDescription\}\}/g, task.description || `Task ${task.id}`);

@@ -8,18 +8,23 @@
 export type OpencodeModelId =
   // OpenCode Free Tier Models
   | 'opencode-big-pickle'
-  | 'opencode-glm-4.7-free'
+  | 'opencode-glm-5-free'
   | 'opencode-gpt-5-nano'
-  | 'opencode-grok-code'
-  | 'opencode-minimax-m2.1-free';
+  | 'opencode-kimi-k2.5-free'
+  | 'opencode-minimax-m2.5-free';
 
 /**
  * Legacy OpenCode model IDs (with slash format) for migration support
+ * Includes both current and previously-available models for backward compatibility.
  */
 export type LegacyOpencodeModelId =
   | 'opencode/big-pickle'
-  | 'opencode/glm-4.7-free'
+  | 'opencode/glm-5-free'
   | 'opencode/gpt-5-nano'
+  | 'opencode/kimi-k2.5-free'
+  | 'opencode/minimax-m2.5-free'
+  // Retired models (kept for migration from older settings)
+  | 'opencode/glm-4.7-free'
   | 'opencode/grok-code'
   | 'opencode/minimax-m2.1-free';
 
@@ -35,23 +40,40 @@ export const OPENCODE_MODEL_MAP: Record<string, OpencodeModelId> = {
   // OpenCode free tier aliases
   'big-pickle': 'opencode-big-pickle',
   pickle: 'opencode-big-pickle',
-  'glm-free': 'opencode-glm-4.7-free',
+  'glm-free': 'opencode-glm-5-free',
+  'glm-5': 'opencode-glm-5-free',
   'gpt-nano': 'opencode-gpt-5-nano',
   nano: 'opencode-gpt-5-nano',
-  'grok-code': 'opencode-grok-code',
-  grok: 'opencode-grok-code',
-  minimax: 'opencode-minimax-m2.1-free',
+  'kimi-free': 'opencode-kimi-k2.5-free',
+  kimi: 'opencode-kimi-k2.5-free',
+  minimax: 'opencode-minimax-m2.5-free',
 } as const;
 
 /**
- * Map from legacy slash-format model IDs to canonical prefixed IDs
+ * Map from legacy slash-format model IDs to canonical prefixed IDs.
+ * Retired models are mapped to their closest replacement.
  */
 export const LEGACY_OPENCODE_MODEL_MAP: Record<LegacyOpencodeModelId, OpencodeModelId> = {
+  // Current models
   'opencode/big-pickle': 'opencode-big-pickle',
-  'opencode/glm-4.7-free': 'opencode-glm-4.7-free',
+  'opencode/glm-5-free': 'opencode-glm-5-free',
   'opencode/gpt-5-nano': 'opencode-gpt-5-nano',
-  'opencode/grok-code': 'opencode-grok-code',
-  'opencode/minimax-m2.1-free': 'opencode-minimax-m2.1-free',
+  'opencode/kimi-k2.5-free': 'opencode-kimi-k2.5-free',
+  'opencode/minimax-m2.5-free': 'opencode-minimax-m2.5-free',
+  // Retired models → mapped to replacements
+  'opencode/glm-4.7-free': 'opencode-glm-5-free',
+  'opencode/grok-code': 'opencode-big-pickle', // grok-code retired, fallback to default
+  'opencode/minimax-m2.1-free': 'opencode-minimax-m2.5-free',
+};
+
+/**
+ * Map from retired canonical (dash-format) model IDs to their replacements.
+ * Used to migrate settings that reference models no longer available.
+ */
+export const RETIRED_OPENCODE_MODEL_MAP: Record<string, OpencodeModelId> = {
+  'opencode-glm-4.7-free': 'opencode-glm-5-free',
+  'opencode-grok-code': 'opencode-big-pickle',
+  'opencode-minimax-m2.1-free': 'opencode-minimax-m2.5-free',
 };
 
 /**
@@ -81,8 +103,8 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-glm-4.7-free',
-    label: 'GLM 4.7 Free',
+    id: 'opencode-glm-5-free',
+    label: 'GLM 5 Free',
     description: 'OpenCode free tier GLM model',
     supportsVision: false,
     provider: 'opencode',
@@ -97,16 +119,16 @@ export const OPENCODE_MODELS: OpencodeModelConfig[] = [
     tier: 'free',
   },
   {
-    id: 'opencode-grok-code',
-    label: 'Grok Code',
-    description: 'OpenCode free tier Grok model for coding',
+    id: 'opencode-kimi-k2.5-free',
+    label: 'Kimi K2.5 Free',
+    description: 'OpenCode free tier Kimi model for coding',
     supportsVision: false,
     provider: 'opencode',
     tier: 'free',
   },
   {
-    id: 'opencode-minimax-m2.1-free',
-    label: 'MiniMax M2.1 Free',
+    id: 'opencode-minimax-m2.5-free',
+    label: 'MiniMax M2.5 Free',
     description: 'OpenCode free tier MiniMax model',
     supportsVision: false,
     provider: 'opencode',
@@ -160,12 +182,18 @@ export function getOpencodeModelProvider(modelId: OpencodeModelId): OpencodeProv
 }
 
 /**
- * Helper: Resolve an alias or partial model ID to a full model ID
+ * Helper: Resolve an alias or partial model ID to a full model ID.
+ * Also handles retired model IDs by mapping them to their replacements.
  */
 export function resolveOpencodeModelId(input: string): OpencodeModelId | undefined {
   // Check if it's already a valid model ID
   if (OPENCODE_MODEL_CONFIG_MAP[input as OpencodeModelId]) {
     return input as OpencodeModelId;
+  }
+
+  // Check retired model map (handles old canonical IDs like 'opencode-grok-code')
+  if (input in RETIRED_OPENCODE_MODEL_MAP) {
+    return RETIRED_OPENCODE_MODEL_MAP[input];
   }
 
   // Check alias map

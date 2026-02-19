@@ -24,3 +24,8 @@ export { ViewStashesDialog } from './view-stashes-dialog';
 export { StashApplyConflictDialog } from './stash-apply-conflict-dialog';
 export { CherryPickDialog } from './cherry-pick-dialog';
 export { GitPullDialog } from './git-pull-dialog';
+export {
+  BranchConflictDialog,
+  type BranchConflictData,
+  type BranchConflictType,
+} from './branch-conflict-dialog';

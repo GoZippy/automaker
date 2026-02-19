@@ -22,6 +22,12 @@ interface WorktreeInfo {
   changedFilesCount?: number;
   featureId?: string;
   linkedToBranch?: string;
+  /** Whether a merge, rebase, or cherry-pick is in progress with conflicts */
+  hasConflicts?: boolean;
+  /** Type of conflict operation in progress */
+  conflictType?: 'merge' | 'rebase' | 'cherry-pick';
+  /** List of files with conflicts */
+  conflictFiles?: string[];
 }
 
 interface RemovedWorktree {

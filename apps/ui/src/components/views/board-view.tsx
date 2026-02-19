@@ -56,7 +56,7 @@ import {
   PlanApprovalDialog,
   MergeRebaseDialog,
 } from './board-view/dialogs';
-import type { DependencyLinkType, PullStrategy } from './board-view/dialogs';
+import type { DependencyLinkType } from './board-view/dialogs';
 import { PipelineSettingsDialog } from './board-view/dialogs/pipeline-settings-dialog';
 import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
 import { DeleteWorktreeDialog } from './board-view/dialogs/delete-worktree-dialog';
@@ -87,7 +87,8 @@ import {
   useListViewState,
 } from './board-view/hooks';
 import { SelectionActionBar, ListView } from './board-view/components';
-import { MassEditDialog } from './board-view/dialogs';
+import { MassEditDialog, BranchConflictDialog } from './board-view/dialogs';
+import type { BranchConflictData } from './board-view/dialogs';
 import { InitScriptIndicator } from './board-view/init-script-indicator';
 import { useInitScriptEvents } from '@/hooks/use-init-script-events';
 import { usePipelineConfig } from '@/hooks/queries';
@@ -188,6 +189,10 @@ export function BoardView() {
     null
   );
   const [worktreeRefreshKey, setWorktreeRefreshKey] = useState(0);
+
+  // Branch conflict dialog state (for branch switch and stash pop conflicts)
+  const [branchConflictData, setBranchConflictData] = useState<BranchConflictData | null>(null);
+  const [showBranchConflictDialog, setShowBranchConflictDialog] = useState(false);
 
   // Backlog plan dialog state
   const [showPlanDialog, setShowPlanDialog] = useState(false);
@@ -935,56 +940,29 @@ export function BoardView() {
     setShowMergeRebaseDialog(true);
   }, []);
 
-  // Handler called when user confirms the merge & rebase dialog
-  const handleConfirmResolveConflicts = useCallback(
-    async (worktree: WorktreeInfo, remoteBranch: string, strategy: PullStrategy) => {
-      const isRebase = strategy === 'rebase';
-
-      const description = isRebase
-        ? `Fetch the latest changes from ${remoteBranch} and rebase the current branch (${worktree.branch}) onto ${remoteBranch}. Use "git fetch" followed by "git rebase ${remoteBranch}" to replay commits on top of the remote branch for a linear history. If rebase conflicts arise, resolve them one commit at a time using "git rebase --continue" after fixing each conflict. After completing the rebase, ensure the code compiles and tests pass.`
-        : `Pull latest from ${remoteBranch} and resolve conflicts. Merge ${remoteBranch} into the current branch (${worktree.branch}), resolving any merge conflicts that arise. After resolving conflicts, ensure the code compiles and tests pass.`;
-
-      const title = isRebase
-        ? `Rebase & Resolve Conflicts: ${worktree.branch} onto ${remoteBranch}`
-        : `Resolve Merge Conflicts: ${remoteBranch} → ${worktree.branch}`;
-
-      const featureData = {
-        title,
-        category: 'Maintenance',
-        description,
-        images: [],
-        imagePaths: [],
-        skipTests: defaultSkipTests,
-        model: 'opus' as const,
-        thinkingLevel: 'none' as const,
-        branchName: worktree.branch,
-        workMode: 'custom' as const, // Use the worktree's branch
-        priority: 1, // High priority for conflict resolution
-        planningMode: 'skip' as const,
-        requirePlanApproval: false,
-      };
-
-      await handleAddAndStartFeature(featureData);
-    },
-    [handleAddAndStartFeature, defaultSkipTests]
-  );
-
   // Handler called when merge/rebase fails due to conflicts and user wants to create a feature to resolve them
   const handleCreateMergeConflictResolutionFeature = useCallback(
     async (conflictInfo: MergeConflictInfo) => {
       const isRebase = conflictInfo.operationType === 'rebase';
+      const isCherryPick = conflictInfo.operationType === 'cherry-pick';
       const conflictFilesInfo =
         conflictInfo.conflictFiles && conflictInfo.conflictFiles.length > 0
           ? `\n\nConflicting files:\n${conflictInfo.conflictFiles.map((f) => `- ${f}`).join('\n')}`
           : '';
 
-      const description = isRebase
-        ? `Fetch the latest changes from ${conflictInfo.sourceBranch} and rebase the current branch (${conflictInfo.targetBranch}) onto ${conflictInfo.sourceBranch}. Use "git fetch" followed by "git rebase ${conflictInfo.sourceBranch}" to replay commits on top of the remote branch for a linear history. If rebase conflicts arise, resolve them one commit at a time using "git rebase --continue" after fixing each conflict. After completing the rebase, ensure the code compiles and tests pass.${conflictFilesInfo}`
-        : `Resolve merge conflicts when merging "${conflictInfo.sourceBranch}" into "${conflictInfo.targetBranch}". The merge was started but encountered conflicts that need to be resolved manually. After resolving all conflicts, ensure the code compiles and tests pass, then complete the merge by committing the resolved changes.${conflictFilesInfo}`;
+      let description: string;
+      let title: string;
 
-      const title = isRebase
-        ? `Rebase & Resolve Conflicts: ${conflictInfo.targetBranch} onto ${conflictInfo.sourceBranch}`
-        : `Resolve Merge Conflicts: ${conflictInfo.sourceBranch} → ${conflictInfo.targetBranch}`;
+      if (isRebase) {
+        description = `Fetch the latest changes from ${conflictInfo.sourceBranch} and rebase the current branch (${conflictInfo.targetBranch}) onto ${conflictInfo.sourceBranch}. Use "git fetch" followed by "git rebase ${conflictInfo.sourceBranch}" to replay commits on top of the remote branch for a linear history. If rebase conflicts arise, resolve them one commit at a time using "git rebase --continue" after fixing each conflict. After completing the rebase, ensure the code compiles and tests pass.${conflictFilesInfo}`;
+        title = `Rebase & Resolve Conflicts: ${conflictInfo.targetBranch} onto ${conflictInfo.sourceBranch}`;
+      } else if (isCherryPick) {
+        description = `Resolve cherry-pick conflicts when cherry-picking commits from "${conflictInfo.sourceBranch}" into "${conflictInfo.targetBranch}". The cherry-pick was attempted but encountered conflicts that need to be resolved manually. Cherry-pick the commits again using "git cherry-pick <commit-hashes>", resolve any conflicts, then use "git cherry-pick --continue" after fixing each conflict. After completing the cherry-pick, ensure the code compiles and tests pass.${conflictFilesInfo}`;
+        title = `Resolve Cherry-Pick Conflicts: ${conflictInfo.sourceBranch} → ${conflictInfo.targetBranch}`;
+      } else {
+        description = `Resolve merge conflicts when merging "${conflictInfo.sourceBranch}" into "${conflictInfo.targetBranch}". The merge was started but encountered conflicts that need to be resolved manually. After resolving all conflicts, ensure the code compiles and tests pass, then complete the merge by committing the resolved changes.${conflictFilesInfo}`;
+        title = `Resolve Merge Conflicts: ${conflictInfo.sourceBranch} → ${conflictInfo.targetBranch}`;
+      }
 
       const featureData = {
         title,
@@ -1007,60 +985,72 @@ export function BoardView() {
     [handleAddAndStartFeature, defaultSkipTests]
   );
 
-  // Handler called when branch switch stash reapply causes merge conflicts
-  const handleBranchSwitchConflict = useCallback(
-    async (conflictInfo: BranchSwitchConflictInfo) => {
-      const description = `Resolve merge conflicts that occurred when switching from "${conflictInfo.previousBranch}" to "${conflictInfo.branchName}". Local changes were stashed before switching and reapplying them caused conflicts. Please resolve all merge conflicts, ensure the code compiles and tests pass.`;
-
-      const featureData = {
-        title: `Resolve Stash Conflicts: switch to ${conflictInfo.branchName}`,
-        category: 'Maintenance',
-        description,
-        images: [],
-        imagePaths: [],
-        skipTests: defaultSkipTests,
-        model: resolveModelString('opus'),
-        thinkingLevel: 'none' as const,
-        branchName: conflictInfo.branchName,
-        workMode: 'custom' as const,
-        priority: 1,
-        planningMode: 'skip' as const,
-        requirePlanApproval: false,
-      };
-
-      await handleAddAndStartFeature(featureData);
-    },
-    [handleAddAndStartFeature, defaultSkipTests]
-  );
+  // Handler called when branch switch stash reapply causes merge conflicts.
+  // Shows a dialog to let the user choose between manual or AI resolution.
+  const handleBranchSwitchConflict = useCallback((conflictInfo: BranchSwitchConflictInfo) => {
+    setBranchConflictData({ type: 'branch-switch', info: conflictInfo });
+    setShowBranchConflictDialog(true);
+  }, []);
 
   // Handler called when checkout fails AND the stash-pop restoration produces merge conflicts.
-  // Creates an AI-assisted board task to guide the user through resolving the conflicts.
-  const handleStashPopConflict = useCallback(
-    async (conflictInfo: StashPopConflictInfo) => {
-      const description =
-        `Resolve merge conflicts that occurred when attempting to switch to branch "${conflictInfo.branchName}". ` +
-        `The checkout failed and, while restoring the previously stashed local changes, git reported merge conflicts. ` +
-        `${conflictInfo.stashPopConflictMessage} ` +
-        `Please review all conflicted files, resolve the conflicts, ensure the code compiles and tests pass, ` +
-        `then re-attempt the branch switch.`;
+  // Shows a dialog to let the user choose between manual or AI resolution.
+  const handleStashPopConflict = useCallback((conflictInfo: StashPopConflictInfo) => {
+    setBranchConflictData({ type: 'stash-pop', info: conflictInfo });
+    setShowBranchConflictDialog(true);
+  }, []);
 
-      const featureData = {
-        title: `Resolve Stash-Pop Conflicts: branch switch to ${conflictInfo.branchName}`,
-        category: 'Maintenance',
-        description,
-        images: [],
-        imagePaths: [],
-        skipTests: defaultSkipTests,
-        model: resolveModelString('opus'),
-        thinkingLevel: 'none' as const,
-        branchName: conflictInfo.branchName,
-        workMode: 'custom' as const,
-        priority: 1,
-        planningMode: 'skip' as const,
-        requirePlanApproval: false,
-      };
+  // Handler called when the user selects "Resolve with AI" from the branch conflict dialog.
+  // Creates and starts the AI-assisted conflict resolution feature task.
+  const handleBranchConflictResolveWithAI = useCallback(
+    async (conflictData: BranchConflictData) => {
+      if (conflictData.type === 'branch-switch') {
+        const conflictInfo = conflictData.info;
+        const description = `Resolve merge conflicts that occurred when switching from "${conflictInfo.previousBranch}" to "${conflictInfo.branchName}". Local changes were stashed before switching and reapplying them caused conflicts. Please resolve all merge conflicts, ensure the code compiles and tests pass.`;
 
-      await handleAddAndStartFeature(featureData);
+        const featureData = {
+          title: `Resolve Stash Conflicts: switch to ${conflictInfo.branchName}`,
+          category: 'Maintenance',
+          description,
+          images: [],
+          imagePaths: [],
+          skipTests: defaultSkipTests,
+          model: resolveModelString('opus'),
+          thinkingLevel: 'none' as const,
+          branchName: conflictInfo.branchName,
+          workMode: 'custom' as const,
+          priority: 1,
+          planningMode: 'skip' as const,
+          requirePlanApproval: false,
+        };
+
+        await handleAddAndStartFeature(featureData);
+      } else {
+        const conflictInfo = conflictData.info;
+        const description =
+          `Resolve merge conflicts that occurred when attempting to switch to branch "${conflictInfo.branchName}". ` +
+          `The checkout failed and, while restoring the previously stashed local changes, git reported merge conflicts. ` +
+          `${conflictInfo.stashPopConflictMessage} ` +
+          `Please review all conflicted files, resolve the conflicts, ensure the code compiles and tests pass, ` +
+          `then re-attempt the branch switch.`;
+
+        const featureData = {
+          title: `Resolve Stash-Pop Conflicts: branch switch to ${conflictInfo.branchName}`,
+          category: 'Maintenance',
+          description,
+          images: [],
+          imagePaths: [],
+          skipTests: defaultSkipTests,
+          model: resolveModelString('opus'),
+          thinkingLevel: 'none' as const,
+          branchName: conflictInfo.branchName,
+          workMode: 'custom' as const,
+          priority: 1,
+          planningMode: 'skip' as const,
+          requirePlanApproval: false,
+        };
+
+        await handleAddAndStartFeature(featureData);
+      }
     },
     [handleAddAndStartFeature, defaultSkipTests]
   );
@@ -1925,8 +1915,15 @@ export function BoardView() {
         open={showMergeRebaseDialog}
         onOpenChange={setShowMergeRebaseDialog}
         worktree={selectedWorktreeForAction}
-        onConfirm={handleConfirmResolveConflicts}
         onCreateConflictResolutionFeature={handleCreateMergeConflictResolutionFeature}
+      />
+
+      {/* Branch Switch / Stash Pop Conflict Dialog */}
+      <BranchConflictDialog
+        open={showBranchConflictDialog}
+        onOpenChange={setShowBranchConflictDialog}
+        conflictData={branchConflictData}
+        onResolveWithAI={handleBranchConflictResolveWithAI}
       />
 
       {/* Commit Worktree Dialog */}

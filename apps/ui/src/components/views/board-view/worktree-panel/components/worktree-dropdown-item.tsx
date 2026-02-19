@@ -1,6 +1,6 @@
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Check, CircleDot, Globe, GitPullRequest, FlaskConical } from 'lucide-react';
+import { Check, CircleDot, Globe, GitPullRequest, FlaskConical, AlertTriangle } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import type { WorktreeInfo, DevServerInfo, TestSessionInfo } from '../types';
@@ -8,6 +8,8 @@ import {
   truncateBranchName,
   getPRBadgeStyles,
   getChangesBadgeStyles,
+  getConflictBadgeStyles,
+  getConflictTypeLabel,
   getTestStatusStyles,
 } from './worktree-indicator-utils';
 
@@ -179,6 +181,20 @@ export function WorktreeDropdownItem({
         {isAutoModeRunning && (
           <span className="flex items-center justify-center h-4 px-0.5" title="Auto Mode Running">
             <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          </span>
+        )}
+
+        {/* Conflict indicator */}
+        {worktree.hasConflicts && (
+          <span
+            className={cn(
+              'inline-flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-medium rounded border',
+              getConflictBadgeStyles()
+            )}
+            title={`${getConflictTypeLabel(worktree.conflictType)} conflicts${worktree.conflictFiles?.length ? ` (${worktree.conflictFiles.length} files)` : ''}`}
+          >
+            <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+            {getConflictTypeLabel(worktree.conflictType)}
           </span>
         )}
 

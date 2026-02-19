@@ -54,7 +54,7 @@ export function createStashApplyHandler(events: EventEmitter) {
       const result = await applyOrPop(worktreePath, idx, { pop }, events);
 
       if (!result.success) {
-        logError(new Error(result.error ?? 'Stash apply failed'), 'Stash apply failed');
+        // applyOrPop already logs the error internally via logError — no need to double-log here
         res.status(500).json({ success: false, error: result.error });
         return;
       }

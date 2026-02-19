@@ -11,6 +11,12 @@ export interface WorktreeInfo {
   hasChanges?: boolean;
   changedFilesCount?: number;
   pr?: WorktreePRInfo;
+  /** Whether a merge, rebase, or cherry-pick is in progress with conflicts */
+  hasConflicts?: boolean;
+  /** Type of conflict operation in progress */
+  conflictType?: 'merge' | 'rebase' | 'cherry-pick';
+  /** List of files with conflicts */
+  conflictFiles?: string[];
 }
 
 export interface BranchInfo {
@@ -81,7 +87,7 @@ export interface MergeConflictInfo {
   /** List of files with conflicts, if available */
   conflictFiles?: string[];
   /** Type of operation that caused the conflict */
-  operationType?: 'merge' | 'rebase';
+  operationType?: 'merge' | 'rebase' | 'cherry-pick';
 }
 
 export interface BranchSwitchConflictInfo {

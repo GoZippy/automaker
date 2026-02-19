@@ -16,7 +16,7 @@
 
 import { createLogger } from '@automaker/utils';
 import type { EventEmitter } from '../lib/events.js';
-import { execGitCommand } from '../lib/git.js';
+import { execGitCommand, execGitCommandWithLockRetry } from '../lib/git.js';
 import { getErrorMessage, logError } from '../routes/worktree/common.js';
 
 const logger = createLogger('StashService');
@@ -105,6 +105,46 @@ function isConflictOutput(output: string): boolean {
   return output.includes('CONFLICT') || output.includes('Merge conflict');
 }
 
+/**
+ * Build a conflict result from stash apply/pop, emit events, and return.
+ * Extracted to avoid duplicating conflict handling in the try and catch paths.
+ */
+async function handleStashConflicts(
+  worktreePath: string,
+  stashIndex: number,
+  operation: 'apply' | 'pop',
+  events?: EventEmitter
+): Promise<StashApplyResult> {
+  const conflictFiles = await getConflictedFiles(worktreePath);
+
+  events?.emit('stash:conflicts', {
+    worktreePath,
+    stashIndex,
+    operation,
+    conflictFiles,
+  });
+
+  const result: StashApplyResult = {
+    success: true,
+    applied: true,
+    hasConflicts: true,
+    conflictFiles,
+    operation,
+    stashIndex,
+    message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} with conflicts. Please resolve the conflicts.`,
+  };
+
+  events?.emit('stash:success', {
+    worktreePath,
+    stashIndex,
+    operation,
+    hasConflicts: true,
+    conflictFiles,
+  });
+
+  return result;
+}
+
 // ============================================================================
 // Main Service Function
 // ============================================================================
@@ -164,34 +204,7 @@ export async function applyOrPop(
 
       // 4. Check if the error is a conflict
       if (isConflictOutput(combinedOutput)) {
-        const conflictFiles = await getConflictedFiles(worktreePath);
-
-        events?.emit('stash:conflicts', {
-          worktreePath,
-          stashIndex,
-          operation,
-          conflictFiles,
-        });
-
-        const result: StashApplyResult = {
-          success: true,
-          applied: true,
-          hasConflicts: true,
-          conflictFiles,
-          operation,
-          stashIndex,
-          message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} with conflicts. Please resolve the conflicts.`,
-        };
-
-        events?.emit('stash:success', {
-          worktreePath,
-          stashIndex,
-          operation,
-          hasConflicts: true,
-          conflictFiles,
-        });
-
-        return result;
+        return handleStashConflicts(worktreePath, stashIndex, operation, events);
       }
 
       // 5. Non-conflict git error – re-throw so the outer catch logs and handles it
@@ -205,34 +218,7 @@ export async function applyOrPop(
     events?.emit('stash:progress', { worktreePath, stashIndex, operation, output: combinedOutput });
 
     if (isConflictOutput(combinedOutput)) {
-      const conflictFiles = await getConflictedFiles(worktreePath);
-
-      events?.emit('stash:conflicts', {
-        worktreePath,
-        stashIndex,
-        operation,
-        conflictFiles,
-      });
-
-      const result: StashApplyResult = {
-        success: true,
-        applied: true,
-        hasConflicts: true,
-        conflictFiles,
-        operation,
-        stashIndex,
-        message: `Stash ${operation === 'pop' ? 'popped' : 'applied'} with conflicts. Please resolve the conflicts.`,
-      };
-
-      events?.emit('stash:success', {
-        worktreePath,
-        stashIndex,
-        operation,
-        hasConflicts: true,
-        conflictFiles,
-      });
-
-      return result;
+      return handleStashConflicts(worktreePath, stashIndex, operation, events);
     }
 
     // 7. Clean success
@@ -296,17 +282,20 @@ export async function applyOrPop(
  */
 export async function pushStash(
   worktreePath: string,
-  options?: { message?: string; files?: string[] }
+  options?: { message?: string; files?: string[] },
+  events?: EventEmitter
 ): Promise<StashPushResult> {
   const message = options?.message;
   const files = options?.files;
 
   logger.info(`[StashService] push stash in ${worktreePath}`);
+  events?.emit('stash:start', { worktreePath, operation: 'push' });
 
   // 1. Check for any changes to stash
   const status = await execGitCommand(['status', '--porcelain'], worktreePath);
 
   if (!status.trim()) {
+    events?.emit('stash:success', { worktreePath, operation: 'push', stashed: false });
     return {
       success: true,
       stashed: false,
@@ -326,12 +315,19 @@ export async function pushStash(
     args.push(...files);
   }
 
-  // 3. Execute stash push
-  await execGitCommand(args, worktreePath);
+  // 3. Execute stash push (with automatic index.lock cleanup and retry)
+  await execGitCommandWithLockRetry(args, worktreePath);
 
   // 4. Get current branch name
   const branchOutput = await execGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath);
   const branchName = branchOutput.trim();
+
+  events?.emit('stash:success', {
+    worktreePath,
+    operation: 'push',
+    stashed: true,
+    branch: branchName,
+  });
 
   return {
     success: true,
@@ -445,13 +441,17 @@ export async function listStash(worktreePath: string): Promise<StashListResult> 
  */
 export async function dropStash(
   worktreePath: string,
-  stashIndex: number
+  stashIndex: number,
+  events?: EventEmitter
 ): Promise<StashDropResult> {
   const stashRef = `stash@{${stashIndex}}`;
 
   logger.info(`[StashService] drop ${stashRef} in ${worktreePath}`);
+  events?.emit('stash:start', { worktreePath, stashIndex, stashRef, operation: 'drop' });
 
   await execGitCommand(['stash', 'drop', stashRef], worktreePath);
+
+  events?.emit('stash:success', { worktreePath, stashIndex, stashRef, operation: 'drop' });
 
   return {
     success: true,

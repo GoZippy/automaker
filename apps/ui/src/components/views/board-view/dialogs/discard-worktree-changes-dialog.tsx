@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { TruncatedFilePath } from '@/components/ui/truncated-file-path';
 import type { FileStatus } from '@/types/electron';
+import { parseDiff, type ParsedFileDiff } from '@/lib/diff-utils';
 
 interface WorktreeInfo {
   path: string;
@@ -42,23 +43,6 @@ interface DiscardWorktreeChangesDialogProps {
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
   onDiscarded: () => void;
-}
-
-interface ParsedDiffHunk {
-  header: string;
-  lines: {
-    type: 'context' | 'addition' | 'deletion' | 'header';
-    content: string;
-    lineNumber?: { old?: number; new?: number };
-  }[];
-}
-
-interface ParsedFileDiff {
-  filePath: string;
-  hunks: ParsedDiffHunk[];
-  isNew?: boolean;
-  isDeleted?: boolean;
-  isRenamed?: boolean;
 }
 
 const getFileIcon = (status: string) => {
@@ -118,98 +102,7 @@ const getStatusBadgeColor = (status: string) => {
   }
 };
 
-/**
- * Parse unified diff format into structured data
- */
-function parseDiff(diffText: string): ParsedFileDiff[] {
-  if (!diffText) return [];
-
-  const files: ParsedFileDiff[] = [];
-  const lines = diffText.split('\n');
-  let currentFile: ParsedFileDiff | null = null;
-  let currentHunk: ParsedDiffHunk | null = null;
-  let oldLineNum = 0;
-  let newLineNum = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.startsWith('diff --git')) {
-      if (currentFile) {
-        if (currentHunk) currentFile.hunks.push(currentHunk);
-        files.push(currentFile);
-      }
-      const match = line.match(/diff --git a\/(.*?) b\/(.*)/);
-      currentFile = {
-        filePath: match ? match[2] : 'unknown',
-        hunks: [],
-      };
-      currentHunk = null;
-      continue;
-    }
-
-    if (line.startsWith('new file mode')) {
-      if (currentFile) currentFile.isNew = true;
-      continue;
-    }
-    if (line.startsWith('deleted file mode')) {
-      if (currentFile) currentFile.isDeleted = true;
-      continue;
-    }
-    if (line.startsWith('rename from') || line.startsWith('rename to')) {
-      if (currentFile) currentFile.isRenamed = true;
-      continue;
-    }
-    if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-      continue;
-    }
-
-    if (line.startsWith('@@')) {
-      if (currentHunk && currentFile) currentFile.hunks.push(currentHunk);
-      const hunkMatch = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      oldLineNum = hunkMatch ? parseInt(hunkMatch[1], 10) : 1;
-      newLineNum = hunkMatch ? parseInt(hunkMatch[2], 10) : 1;
-      currentHunk = {
-        header: line,
-        lines: [{ type: 'header', content: line }],
-      };
-      continue;
-    }
-
-    if (currentHunk) {
-      if (line.startsWith('+')) {
-        currentHunk.lines.push({
-          type: 'addition',
-          content: line.substring(1),
-          lineNumber: { new: newLineNum },
-        });
-        newLineNum++;
-      } else if (line.startsWith('-')) {
-        currentHunk.lines.push({
-          type: 'deletion',
-          content: line.substring(1),
-          lineNumber: { old: oldLineNum },
-        });
-        oldLineNum++;
-      } else if (line.startsWith(' ') || line === '') {
-        currentHunk.lines.push({
-          type: 'context',
-          content: line.substring(1) || '',
-          lineNumber: { old: oldLineNum, new: newLineNum },
-        });
-        oldLineNum++;
-        newLineNum++;
-      }
-    }
-  }
-
-  if (currentFile) {
-    if (currentHunk) currentFile.hunks.push(currentHunk);
-    files.push(currentFile);
-  }
-
-  return files;
-}
+// parseDiff is imported from @/lib/diff-utils
 
 function DiffLine({
   type,

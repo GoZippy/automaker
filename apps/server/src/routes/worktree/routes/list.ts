@@ -58,6 +58,88 @@ interface WorktreeInfo {
   hasChanges?: boolean;
   changedFilesCount?: number;
   pr?: WorktreePRInfo; // PR info if a PR has been created for this branch
+  /** Whether a merge or rebase is in progress (has conflicts) */
+  hasConflicts?: boolean;
+  /** Type of conflict operation in progress */
+  conflictType?: 'merge' | 'rebase' | 'cherry-pick';
+  /** List of files with conflicts */
+  conflictFiles?: string[];
+}
+
+/**
+ * Detect if a merge, rebase, or cherry-pick is in progress for a worktree.
+ * Checks for the presence of state files/directories that git creates
+ * during these operations.
+ */
+async function detectConflictState(worktreePath: string): Promise<{
+  hasConflicts: boolean;
+  conflictType?: 'merge' | 'rebase' | 'cherry-pick';
+  conflictFiles?: string[];
+}> {
+  try {
+    // Find the canonical .git directory for this worktree
+    const { stdout: gitDirRaw } = await execAsync('git rev-parse --git-dir', {
+      cwd: worktreePath,
+    });
+    const gitDir = path.resolve(worktreePath, gitDirRaw.trim());
+
+    // Check for merge, rebase, and cherry-pick state files/directories
+    const [mergeHeadExists, rebaseMergeExists, rebaseApplyExists, cherryPickHeadExists] =
+      await Promise.all([
+        secureFs
+          .access(path.join(gitDir, 'MERGE_HEAD'))
+          .then(() => true)
+          .catch(() => false),
+        secureFs
+          .access(path.join(gitDir, 'rebase-merge'))
+          .then(() => true)
+          .catch(() => false),
+        secureFs
+          .access(path.join(gitDir, 'rebase-apply'))
+          .then(() => true)
+          .catch(() => false),
+        secureFs
+          .access(path.join(gitDir, 'CHERRY_PICK_HEAD'))
+          .then(() => true)
+          .catch(() => false),
+      ]);
+
+    let conflictType: 'merge' | 'rebase' | 'cherry-pick' | undefined;
+    if (rebaseMergeExists || rebaseApplyExists) {
+      conflictType = 'rebase';
+    } else if (mergeHeadExists) {
+      conflictType = 'merge';
+    } else if (cherryPickHeadExists) {
+      conflictType = 'cherry-pick';
+    }
+
+    if (!conflictType) {
+      return { hasConflicts: false };
+    }
+
+    // Get list of conflicted files using machine-readable git status
+    let conflictFiles: string[] = [];
+    try {
+      const { stdout: statusOutput } = await execAsync('git diff --name-only --diff-filter=U', {
+        cwd: worktreePath,
+      });
+      conflictFiles = statusOutput
+        .trim()
+        .split('\n')
+        .filter((f) => f.trim().length > 0);
+    } catch {
+      // Fall back to empty list if diff fails
+    }
+
+    return {
+      hasConflicts: true,
+      conflictType,
+      conflictFiles,
+    };
+  } catch {
+    // If anything fails, assume no conflicts
+    return { hasConflicts: false };
+  }
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {
@@ -373,7 +455,7 @@ export function createListHandler() {
       // Read all worktree metadata to get PR info
       const allMetadata = await readAllWorktreeMetadata(projectPath);
 
-      // If includeDetails is requested, fetch change status for each worktree
+      // If includeDetails is requested, fetch change status and conflict state for each worktree
       if (includeDetails) {
         for (const worktree of worktrees) {
           try {
@@ -389,6 +471,18 @@ export function createListHandler() {
           } catch {
             worktree.hasChanges = false;
             worktree.changedFilesCount = 0;
+          }
+
+          // Detect merge/rebase/cherry-pick in progress
+          try {
+            const conflictState = await detectConflictState(worktree.path);
+            if (conflictState.hasConflicts) {
+              worktree.hasConflicts = true;
+              worktree.conflictType = conflictState.conflictType;
+              worktree.conflictFiles = conflictState.conflictFiles;
+            }
+          } catch {
+            // Ignore conflict detection errors
           }
         }
       }

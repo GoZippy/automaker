@@ -8,6 +8,8 @@
 export type CursorModelId =
   | 'cursor-auto' // Auto-select best model
   | 'cursor-composer-1' // Cursor Composer agent model
+  | 'cursor-sonnet-4.6' // Claude Sonnet 4.6
+  | 'cursor-sonnet-4.6-thinking' // Claude Sonnet 4.6 with extended thinking
   | 'cursor-sonnet-4.5' // Claude Sonnet 4.5
   | 'cursor-sonnet-4.5-thinking' // Claude Sonnet 4.5 with extended thinking
   | 'cursor-opus-4.5' // Claude Opus 4.5
@@ -35,6 +37,8 @@ export type CursorModelId =
 export type LegacyCursorModelId =
   | 'auto'
   | 'composer-1'
+  | 'sonnet-4.6'
+  | 'sonnet-4.6-thinking'
   | 'sonnet-4.5'
   | 'sonnet-4.5-thinking'
   | 'opus-4.5'
@@ -73,6 +77,20 @@ export const CURSOR_MODEL_MAP: Record<CursorModelId, CursorModelConfig> = {
     label: 'Composer 1',
     description: 'Cursor Composer agent model optimized for multi-file edits',
     hasThinking: false,
+    supportsVision: false,
+  },
+  'cursor-sonnet-4.6': {
+    id: 'cursor-sonnet-4.6',
+    label: 'Claude Sonnet 4.6',
+    description: 'Anthropic Claude Sonnet 4.6 via Cursor',
+    hasThinking: false,
+    supportsVision: false, // Model supports vision but Cursor CLI doesn't pass images
+  },
+  'cursor-sonnet-4.6-thinking': {
+    id: 'cursor-sonnet-4.6-thinking',
+    label: 'Claude Sonnet 4.6 (Thinking)',
+    description: 'Claude Sonnet 4.6 with extended thinking enabled',
+    hasThinking: true,
     supportsVision: false,
   },
   'cursor-sonnet-4.5': {
@@ -223,6 +241,8 @@ export const CURSOR_MODEL_MAP: Record<CursorModelId, CursorModelConfig> = {
 export const LEGACY_CURSOR_MODEL_MAP: Record<LegacyCursorModelId, CursorModelId> = {
   auto: 'cursor-auto',
   'composer-1': 'cursor-composer-1',
+  'sonnet-4.6': 'cursor-sonnet-4.6',
+  'sonnet-4.6-thinking': 'cursor-sonnet-4.6-thinking',
   'sonnet-4.5': 'cursor-sonnet-4.5',
   'sonnet-4.5-thinking': 'cursor-sonnet-4.5-thinking',
   'opus-4.5': 'cursor-opus-4.5',
@@ -375,6 +395,22 @@ export const CURSOR_MODEL_GROUPS: GroupedModel[] = [
         label: 'Max High',
         description: 'Max capacity + high compute',
         badge: 'Premium',
+      },
+    ],
+  },
+  // Sonnet 4.6 group (thinking mode)
+  {
+    baseId: 'cursor-sonnet-4.6-group',
+    label: 'Claude Sonnet 4.6',
+    description: 'Anthropic Claude Sonnet 4.6 via Cursor',
+    variantType: 'thinking',
+    variants: [
+      { id: 'cursor-sonnet-4.6', label: 'Standard', description: 'Fast responses' },
+      {
+        id: 'cursor-sonnet-4.6-thinking',
+        label: 'Thinking',
+        description: 'Extended reasoning',
+        badge: 'Reasoning',
       },
     ],
   },

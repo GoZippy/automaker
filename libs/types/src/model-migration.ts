@@ -8,7 +8,11 @@
 import type { CursorModelId, LegacyCursorModelId } from './cursor-models.js';
 import { LEGACY_CURSOR_MODEL_MAP, CURSOR_MODEL_MAP } from './cursor-models.js';
 import type { OpencodeModelId, LegacyOpencodeModelId } from './opencode-models.js';
-import { LEGACY_OPENCODE_MODEL_MAP, OPENCODE_MODEL_CONFIG_MAP } from './opencode-models.js';
+import {
+  LEGACY_OPENCODE_MODEL_MAP,
+  OPENCODE_MODEL_CONFIG_MAP,
+  RETIRED_OPENCODE_MODEL_MAP,
+} from './opencode-models.js';
 import type { ClaudeCanonicalId } from './model.js';
 import { LEGACY_CLAUDE_ALIAS_MAP, CLAUDE_CANONICAL_MAP, CLAUDE_MODEL_MAP } from './model.js';
 import type { PhaseModelEntry } from './settings.js';
@@ -61,9 +65,14 @@ export function migrateModelId(legacyId: string | undefined | null): string {
     return LEGACY_CURSOR_MODEL_MAP[legacyId];
   }
 
-  // Already has opencode- prefix - it's canonical
+  // Already has opencode- prefix - check if it's a current canonical ID
   if (legacyId.startsWith('opencode-') && legacyId in OPENCODE_MODEL_CONFIG_MAP) {
     return legacyId;
+  }
+
+  // Retired opencode- canonical IDs (e.g., 'opencode-grok-code' → 'opencode-big-pickle')
+  if (legacyId.startsWith('opencode-') && legacyId in RETIRED_OPENCODE_MODEL_MAP) {
+    return RETIRED_OPENCODE_MODEL_MAP[legacyId];
   }
 
   // Legacy OpenCode model ID (with slash format)
@@ -128,29 +137,36 @@ export function migrateOpencodeModelIds(ids: string[]): OpencodeModelId[] {
     return [];
   }
 
-  return ids.map((id) => {
-    // Already canonical (dash format)
-    if (id.startsWith('opencode-') && id in OPENCODE_MODEL_CONFIG_MAP) {
+  return ids
+    .map((id) => {
+      // Already canonical (dash format) and current
+      if (id.startsWith('opencode-') && id in OPENCODE_MODEL_CONFIG_MAP) {
+        return id as OpencodeModelId;
+      }
+
+      // Retired canonical IDs (e.g., 'opencode-grok-code') → replacement
+      if (id.startsWith('opencode-') && id in RETIRED_OPENCODE_MODEL_MAP) {
+        return RETIRED_OPENCODE_MODEL_MAP[id];
+      }
+
+      // Legacy ID (slash format)
+      if (isLegacyOpencodeModelId(id)) {
+        return LEGACY_OPENCODE_MODEL_MAP[id];
+      }
+
+      // Convert slash to dash format for unknown models
+      if (id.startsWith('opencode/')) {
+        return id.replace('opencode/', 'opencode-') as OpencodeModelId;
+      }
+
+      // Add prefix if not present
+      if (!id.startsWith('opencode-')) {
+        return `opencode-${id}` as OpencodeModelId;
+      }
+
       return id as OpencodeModelId;
-    }
-
-    // Legacy ID (slash format)
-    if (isLegacyOpencodeModelId(id)) {
-      return LEGACY_OPENCODE_MODEL_MAP[id];
-    }
-
-    // Convert slash to dash format for unknown models
-    if (id.startsWith('opencode/')) {
-      return id.replace('opencode/', 'opencode-') as OpencodeModelId;
-    }
-
-    // Add prefix if not present
-    if (!id.startsWith('opencode-')) {
-      return `opencode-${id}` as OpencodeModelId;
-    }
-
-    return id as OpencodeModelId;
-  });
+    })
+    .filter((id, index, self) => self.indexOf(id) === index); // Deduplicate after migration
 }
 
 /**

@@ -30,6 +30,13 @@ export interface CopilotModelConfig {
  */
 export const COPILOT_MODEL_MAP = {
   // Claude models (Anthropic via GitHub Copilot)
+  'copilot-claude-sonnet-4.6': {
+    label: 'Claude Sonnet 4.6',
+    description: 'Anthropic Claude Sonnet 4.6 via GitHub Copilot.',
+    supportsVision: true,
+    supportsTools: true,
+    contextWindow: 200000,
+  },
   'copilot-claude-sonnet-4.5': {
     label: 'Claude Sonnet 4.5',
     description: 'Anthropic Claude Sonnet 4.5 via GitHub Copilot.',
@@ -147,7 +154,7 @@ export function getAllCopilotModelIds(): CopilotModelId[] {
 /**
  * Default Copilot model
  */
-export const DEFAULT_COPILOT_MODEL: CopilotModelId = 'copilot-claude-sonnet-4.5';
+export const DEFAULT_COPILOT_MODEL: CopilotModelId = 'copilot-claude-sonnet-4.6';
 
 /**
  * GitHub Copilot authentication status

@@ -35,7 +35,10 @@ export interface MergeServiceResult {
  */
 function isValidBranchName(name: string): boolean {
   // First char must be alphanumeric, dot, underscore, or slash (not dash)
-  return /^[a-zA-Z0-9._/][a-zA-Z0-9._\-/]*$/.test(name) && name.length < 250;
+  // Reject names containing '..' to prevent git ref traversal
+  return (
+    /^[a-zA-Z0-9._/][a-zA-Z0-9._\-/]*$/.test(name) && name.length < 250 && !name.includes('..')
+  );
 }
 
 /**

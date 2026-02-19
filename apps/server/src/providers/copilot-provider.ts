@@ -42,7 +42,7 @@ import {
 const logger = createLogger('CopilotProvider');
 
 // Default bare model (without copilot- prefix) for SDK calls
-const DEFAULT_BARE_MODEL = 'claude-sonnet-4.5';
+const DEFAULT_BARE_MODEL = 'claude-sonnet-4.6';
 
 // =============================================================================
 // SDK Event Types (from @github/copilot-sdk)

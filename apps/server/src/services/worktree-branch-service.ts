@@ -16,9 +16,8 @@
  * rebase-service.ts.
  */
 
-import { createLogger } from '@automaker/utils';
-import { execGitCommand } from '../lib/git.js';
-import { getErrorMessage } from '../routes/worktree/common.js';
+import { createLogger, getErrorMessage } from '@automaker/utils';
+import { execGitCommand, execGitCommandWithLockRetry } from '../lib/git.js';
 import type { EventEmitter } from '../lib/events.js';
 
 const logger = createLogger('WorktreeBranchService');
@@ -66,7 +65,11 @@ async function hasAnyChanges(cwd: string): Promise<boolean> {
         return true;
       });
     return lines.length > 0;
-  } catch {
+  } catch (err) {
+    logger.error('hasAnyChanges: execGitCommand failed — returning false', {
+      cwd,
+      error: getErrorMessage(err),
+    });
     return false;
   }
 }
@@ -78,24 +81,11 @@ async function hasAnyChanges(cwd: string): Promise<boolean> {
  */
 async function stashChanges(cwd: string, message: string): Promise<boolean> {
   try {
-    // Get stash count before
-    const beforeOutput = await execGitCommand(['stash', 'list'], cwd);
-    const countBefore = beforeOutput
-      .trim()
-      .split('\n')
-      .filter((l) => l.trim()).length;
-
-    // Stash including untracked files
-    await execGitCommand(['stash', 'push', '--include-untracked', '-m', message], cwd);
-
-    // Get stash count after to verify something was stashed
-    const afterOutput = await execGitCommand(['stash', 'list'], cwd);
-    const countAfter = afterOutput
-      .trim()
-      .split('\n')
-      .filter((l) => l.trim()).length;
-
-    return countAfter > countBefore;
+    // Stash including untracked files — a successful execGitCommand is proof
+    // the stash was created. No need for a post-push listing which can throw
+    // and incorrectly report a failed stash.
+    await execGitCommandWithLockRetry(['stash', 'push', '--include-untracked', '-m', message], cwd);
+    return true;
   } catch (error) {
     const errorMsg = getErrorMessage(error);
 
@@ -127,11 +117,8 @@ async function popStash(
   cwd: string
 ): Promise<{ success: boolean; hasConflicts: boolean; error?: string }> {
   try {
-    const stdout = await execGitCommand(['stash', 'pop'], cwd);
-    // Check for conflict markers in the output
-    if (stdout.includes('CONFLICT') || stdout.includes('Merge conflict')) {
-      return { success: false, hasConflicts: true };
-    }
+    await execGitCommand(['stash', 'pop'], cwd);
+    // If execGitCommand succeeds (zero exit code), there are no conflicts
     return { success: true, hasConflicts: false };
   } catch (error) {
     const errorMsg = getErrorMessage(error);
@@ -274,11 +261,9 @@ export async function performSwitchBranch(
     };
   }
 
-  // 4. Check if target branch exists (locally or as remote ref)
+  // 4. Check if target branch exists as a local branch
   if (!isRemote) {
-    try {
-      await execGitCommand(['rev-parse', '--verify', branchName], worktreePath);
-    } catch {
+    if (!(await localBranchExists(worktreePath, branchName))) {
       events?.emit('switch:error', {
         worktreePath,
         branchName,

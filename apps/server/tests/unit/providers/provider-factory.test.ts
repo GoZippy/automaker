@@ -59,8 +59,8 @@ describe('provider-factory.ts', () => {
         expect(provider).toBeInstanceOf(ClaudeProvider);
       });
 
-      it('should return ClaudeProvider for claude-sonnet-4-20250514', () => {
-        const provider = ProviderFactory.getProviderForModel('claude-sonnet-4-20250514');
+      it('should return ClaudeProvider for claude-sonnet-4-6', () => {
+        const provider = ProviderFactory.getProviderForModel('claude-sonnet-4-6');
         expect(provider).toBeInstanceOf(ClaudeProvider);
       });
 

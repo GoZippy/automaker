@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { TruncatedFilePath } from '@/components/ui/truncated-file-path';
 import type { FileStatus } from '@/types/electron';
+import { parseDiff, type ParsedFileDiff } from '@/lib/diff-utils';
 
 interface WorktreeInfo {
   path: string;
@@ -41,23 +42,6 @@ interface StashChangesDialogProps {
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
   onStashed?: () => void;
-}
-
-interface ParsedDiffHunk {
-  header: string;
-  lines: {
-    type: 'context' | 'addition' | 'deletion' | 'header';
-    content: string;
-    lineNumber?: { old?: number; new?: number };
-  }[];
-}
-
-interface ParsedFileDiff {
-  filePath: string;
-  hunks: ParsedDiffHunk[];
-  isNew?: boolean;
-  isDeleted?: boolean;
-  isRenamed?: boolean;
 }
 
 const getFileIcon = (status: string) => {
@@ -117,101 +101,7 @@ const getStatusBadgeColor = (status: string) => {
   }
 };
 
-/**
- * Parse unified diff format into structured data
- */
-function parseDiff(diffText: string): ParsedFileDiff[] {
-  if (!diffText) return [];
-
-  const files: ParsedFileDiff[] = [];
-  const lines = diffText.split('\n');
-  let currentFile: ParsedFileDiff | null = null;
-  let currentHunk: ParsedDiffHunk | null = null;
-  let oldLineNum = 0;
-  let newLineNum = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Skip trailing empty string produced by a final newline in diffText
-    if (line === '' && i === lines.length - 1) continue;
-
-    if (line.startsWith('diff --git')) {
-      if (currentFile) {
-        if (currentHunk) currentFile.hunks.push(currentHunk);
-        files.push(currentFile);
-      }
-      const match = line.match(/diff --git a\/(.*?) b\/(.*)/);
-      currentFile = {
-        filePath: match ? match[2] : 'unknown',
-        hunks: [],
-      };
-      currentHunk = null;
-      continue;
-    }
-
-    if (line.startsWith('new file mode')) {
-      if (currentFile) currentFile.isNew = true;
-      continue;
-    }
-    if (line.startsWith('deleted file mode')) {
-      if (currentFile) currentFile.isDeleted = true;
-      continue;
-    }
-    if (line.startsWith('rename from') || line.startsWith('rename to')) {
-      if (currentFile) currentFile.isRenamed = true;
-      continue;
-    }
-    if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-      continue;
-    }
-
-    if (line.startsWith('@@')) {
-      if (currentHunk && currentFile) currentFile.hunks.push(currentHunk);
-      const hunkMatch = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      oldLineNum = hunkMatch ? parseInt(hunkMatch[1], 10) : 1;
-      newLineNum = hunkMatch ? parseInt(hunkMatch[2], 10) : 1;
-      currentHunk = {
-        header: line,
-        lines: [{ type: 'header', content: line }],
-      };
-      continue;
-    }
-
-    if (currentHunk) {
-      if (line.startsWith('+')) {
-        currentHunk.lines.push({
-          type: 'addition',
-          content: line.substring(1),
-          lineNumber: { new: newLineNum },
-        });
-        newLineNum++;
-      } else if (line.startsWith('-')) {
-        currentHunk.lines.push({
-          type: 'deletion',
-          content: line.substring(1),
-          lineNumber: { old: oldLineNum },
-        });
-        oldLineNum++;
-      } else if (line.startsWith(' ') || line === '') {
-        currentHunk.lines.push({
-          type: 'context',
-          content: line.substring(1) || '',
-          lineNumber: { old: oldLineNum, new: newLineNum },
-        });
-        oldLineNum++;
-        newLineNum++;
-      }
-    }
-  }
-
-  if (currentFile) {
-    if (currentHunk) currentFile.hunks.push(currentHunk);
-    files.push(currentFile);
-  }
-
-  return files;
-}
+// parseDiff is imported from @/lib/diff-utils
 
 function DiffLine({
   type,
@@ -316,6 +206,8 @@ export function StashChangesDialog({
           // Select all files by default
           if (!cancelled.current)
             setSelectedFiles(new Set(fileList.map((f: FileStatus) => f.path)));
+        } else if (!cancelled.current) {
+          setLoadDiffsError(result.error ?? 'Failed to load diffs');
         }
       } catch (err) {
         console.warn('Failed to load diffs for stash dialog:', err);
@@ -365,7 +257,7 @@ export function StashChangesDialog({
     setExpandedFile((prev) => (prev === filePath ? null : filePath));
   }, []);
 
-  const handleStash = async () => {
+  const handleStash = useCallback(async () => {
     if (!worktree || selectedFiles.size === 0) return;
 
     setIsStashing(true);
@@ -405,14 +297,17 @@ export function StashChangesDialog({
     } finally {
       setIsStashing(false);
     }
-  };
+  }, [worktree, selectedFiles, files.length, message, onOpenChange, onStashed]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isStashing && selectedFiles.size > 0) {
-      e.preventDefault();
-      handleStash();
-    }
-  };
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isStashing && selectedFiles.size > 0) {
+        e.preventDefault();
+        handleStash();
+      }
+    },
+    [isStashing, selectedFiles.size, handleStash]
+  );
 
   if (!worktree) return null;
 
@@ -614,7 +509,13 @@ export function StashChangesDialog({
             <p className="text-xs text-muted-foreground">
               A descriptive message helps identify this stash later. Press{' '}
               <kbd className="px-1 py-0.5 text-[10px] bg-muted rounded border">
-                {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter
+                {typeof navigator !== 'undefined' &&
+                ((navigator as any).userAgentData?.platform || navigator.platform || '').includes(
+                  'Mac'
+                )
+                  ? '⌘'
+                  : 'Ctrl'}
+                +Enter
               </kbd>{' '}
               to stash.
             </p>

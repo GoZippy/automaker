@@ -2259,6 +2259,17 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
+    stageFiles: async (worktreePath: string, files: string[], operation: 'stage' | 'unstage') => {
+      console.log('[Mock] Stage files:', { worktreePath, files, operation });
+      return {
+        success: true,
+        result: {
+          operation,
+          filesCount: files.length,
+        },
+      };
+    },
+
     pull: async (worktreePath: string, remote?: string, stashIfNeeded?: boolean) => {
       const targetRemote = remote || 'origin';
       console.log('[Mock] Pulling latest changes for:', {
@@ -2760,6 +2771,28 @@ function createMockWorktreeAPI(): WorktreeAPI {
         },
       };
     },
+
+    abortOperation: async (worktreePath: string) => {
+      console.log('[Mock] Abort operation:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          operation: 'merge',
+          message: 'Merge aborted successfully',
+        },
+      };
+    },
+
+    continueOperation: async (worktreePath: string) => {
+      console.log('[Mock] Continue operation:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          operation: 'merge',
+          message: 'Merge continued successfully',
+        },
+      };
+    },
   };
 }
 
@@ -2785,6 +2818,17 @@ function createMockGitAPI(): GitAPI {
         success: true,
         diff: `diff --git a/${filePath} b/${filePath}\n+++ new file\n@@ -0,0 +1,5 @@\n+// New content`,
         filePath,
+      };
+    },
+
+    stageFiles: async (projectPath: string, files: string[], operation: 'stage' | 'unstage') => {
+      console.log('[Mock] Git stage files:', { projectPath, files, operation });
+      return {
+        success: true,
+        result: {
+          operation,
+          filesCount: files.length,
+        },
       };
     },
   };

@@ -253,7 +253,7 @@ export const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
  * ```typescript
  * getModelDisplayName("haiku");  // "Claude Haiku"
  * getModelDisplayName("sonnet"); // "Claude Sonnet"
- * getModelDisplayName("claude-opus-4-20250514"); // "claude-opus-4-20250514"
+ * getModelDisplayName("claude-sonnet-4-6"); // "Claude Sonnet 4.6"
  * ```
  */
 export function getModelDisplayName(model: ModelAlias | string): string {
@@ -261,6 +261,11 @@ export function getModelDisplayName(model: ModelAlias | string): string {
     haiku: 'Claude Haiku',
     sonnet: 'Claude Sonnet',
     opus: 'Claude Opus',
+    'claude-haiku': 'Claude Haiku',
+    'claude-sonnet': 'Claude Sonnet',
+    'claude-opus': 'Claude Opus',
+    'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+    'claude-opus-4-6': 'Claude Opus 4.6',
     [CODEX_MODEL_MAP.gpt53Codex]: 'GPT-5.3-Codex',
     [CODEX_MODEL_MAP.gpt53CodexSpark]: 'GPT-5.3-Codex-Spark',
     [CODEX_MODEL_MAP.gpt52Codex]: 'GPT-5.2-Codex',

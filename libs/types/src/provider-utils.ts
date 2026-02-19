@@ -9,7 +9,11 @@
 import type { ModelProvider } from './settings.js';
 import { LEGACY_CURSOR_MODEL_MAP } from './cursor-models.js';
 import { CLAUDE_MODEL_MAP, CODEX_MODEL_MAP } from './model.js';
-import { OPENCODE_MODEL_CONFIG_MAP, LEGACY_OPENCODE_MODEL_MAP } from './opencode-models.js';
+import {
+  OPENCODE_MODEL_CONFIG_MAP,
+  LEGACY_OPENCODE_MODEL_MAP,
+  RETIRED_OPENCODE_MODEL_MAP,
+} from './opencode-models.js';
 import { GEMINI_MODEL_MAP } from './gemini-models.js';
 import { COPILOT_MODEL_MAP } from './copilot-models.js';
 
@@ -51,7 +55,7 @@ export function isCursorModel(model: string | undefined | null): boolean {
 /**
  * Check if a model string represents a Claude model
  *
- * @param model - Model string to check (e.g., "sonnet", "opus", "claude-sonnet-4-20250514")
+ * @param model - Model string to check (e.g., "sonnet", "opus", "claude-sonnet-4-6")
  * @returns true if the model is a Claude model
  */
 export function isClaudeModel(model: string | undefined | null): boolean {
@@ -310,7 +314,10 @@ export function getBareModelId(model: string): string {
 export function normalizeModelString(model: string | undefined | null): string {
   if (!model || typeof model !== 'string') return 'claude-sonnet'; // Default to canonical
 
-  // Already has a canonical prefix - return as-is
+  // Already has a canonical prefix - return as-is (but check for retired opencode models first)
+  if (model.startsWith(PROVIDER_PREFIXES.opencode) && model in RETIRED_OPENCODE_MODEL_MAP) {
+    return RETIRED_OPENCODE_MODEL_MAP[model];
+  }
   if (
     model.startsWith(PROVIDER_PREFIXES.cursor) ||
     model.startsWith(PROVIDER_PREFIXES.codex) ||
@@ -364,7 +371,7 @@ export function normalizeModelString(model: string | undefined | null): string {
  *
  * @example
  * supportsStructuredOutput('sonnet') // true (Claude)
- * supportsStructuredOutput('claude-sonnet-4-20250514') // true (Claude)
+ * supportsStructuredOutput('claude-sonnet-4-6') // true (Claude)
  * supportsStructuredOutput('codex-gpt-5.2') // true (Codex/OpenAI)
  * supportsStructuredOutput('cursor-auto') // false
  * supportsStructuredOutput('gemini-2.5-pro') // false

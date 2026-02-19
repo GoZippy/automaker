@@ -542,6 +542,48 @@ export function WorktreePanel({
     fetchWorktrees({ silent: true });
   }, [fetchWorktrees]);
 
+  // Handle aborting an in-progress merge/rebase/cherry-pick
+  const handleAbortOperation = useCallback(
+    async (worktree: WorktreeInfo) => {
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.abortOperation(worktree.path);
+        if (result.success && result.result) {
+          toast.success(result.result.message || 'Operation aborted successfully');
+          fetchWorktrees({ silent: true });
+        } else {
+          toast.error(result.error || 'Failed to abort operation');
+        }
+      } catch (error) {
+        toast.error('Failed to abort operation', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    },
+    [fetchWorktrees]
+  );
+
+  // Handle continuing an in-progress merge/rebase/cherry-pick after conflict resolution
+  const handleContinueOperation = useCallback(
+    async (worktree: WorktreeInfo) => {
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.continueOperation(worktree.path);
+        if (result.success && result.result) {
+          toast.success(result.result.message || 'Operation continued successfully');
+          fetchWorktrees({ silent: true });
+        } else {
+          toast.error(result.error || 'Failed to continue operation');
+        }
+      } catch (error) {
+        toast.error('Failed to continue operation', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    },
+    [fetchWorktrees]
+  );
+
   // Handle opening the log panel for a specific worktree
   const handleViewDevServerLogs = useCallback((worktree: WorktreeInfo) => {
     setLogPanelWorktree(worktree);
@@ -771,6 +813,8 @@ export function WorktreePanel({
             onStashChanges={handleStashChanges}
             onViewStashes={handleViewStashes}
             onCherryPick={handleCherryPick}
+            onAbortOperation={handleAbortOperation}
+            onContinueOperation={handleContinueOperation}
             hasInitScript={hasInitScript}
           />
         )}
@@ -989,6 +1033,8 @@ export function WorktreePanel({
             onStashChanges={handleStashChanges}
             onViewStashes={handleViewStashes}
             onCherryPick={handleCherryPick}
+            onAbortOperation={handleAbortOperation}
+            onContinueOperation={handleContinueOperation}
           />
 
           {useWorktreesEnabled && (
@@ -1086,6 +1132,8 @@ export function WorktreePanel({
                 onStashChanges={handleStashChanges}
                 onViewStashes={handleViewStashes}
                 onCherryPick={handleCherryPick}
+                onAbortOperation={handleAbortOperation}
+                onContinueOperation={handleContinueOperation}
                 hasInitScript={hasInitScript}
                 hasTestCommand={hasTestCommand}
               />
@@ -1163,6 +1211,8 @@ export function WorktreePanel({
                       onStashChanges={handleStashChanges}
                       onViewStashes={handleViewStashes}
                       onCherryPick={handleCherryPick}
+                      onAbortOperation={handleAbortOperation}
+                      onContinueOperation={handleContinueOperation}
                       hasInitScript={hasInitScript}
                       hasTestCommand={hasTestCommand}
                     />

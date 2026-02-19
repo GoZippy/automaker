@@ -360,10 +360,10 @@ describe('claude-provider.ts', () => {
   });
 
   describe('getAvailableModels', () => {
-    it('should return 4 Claude models', () => {
+    it('should return 5 Claude models', () => {
       const models = provider.getAvailableModels();
 
-      expect(models).toHaveLength(4);
+      expect(models).toHaveLength(5);
     });
 
     it('should include Claude Opus 4.6', () => {
@@ -375,12 +375,12 @@ describe('claude-provider.ts', () => {
       expect(opus?.provider).toBe('anthropic');
     });
 
-    it('should include Claude Sonnet 4', () => {
+    it('should include Claude Sonnet 4.6', () => {
       const models = provider.getAvailableModels();
 
-      const sonnet = models.find((m) => m.id === 'claude-sonnet-4-20250514');
+      const sonnet = models.find((m) => m.id === 'claude-sonnet-4-6');
       expect(sonnet).toBeDefined();
-      expect(sonnet?.name).toBe('Claude Sonnet 4');
+      expect(sonnet?.name).toBe('Claude Sonnet 4.6');
     });
 
     it('should include Claude 3.5 Sonnet', () => {

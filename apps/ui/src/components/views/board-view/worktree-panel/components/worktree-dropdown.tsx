@@ -16,6 +16,7 @@ import {
   Globe,
   GitPullRequest,
   FlaskConical,
+  AlertTriangle,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,8 @@ import {
   truncateBranchName,
   getPRBadgeStyles,
   getChangesBadgeStyles,
+  getConflictBadgeStyles,
+  getConflictTypeLabel,
   getTestStatusStyles,
 } from './worktree-indicator-utils';
 
@@ -114,6 +117,10 @@ export interface WorktreeDropdownProps {
   onViewStashes?: (worktree: WorktreeInfo) => void;
   /** Cherry-pick commits from another branch */
   onCherryPick?: (worktree: WorktreeInfo) => void;
+  /** Abort an in-progress merge/rebase/cherry-pick */
+  onAbortOperation?: (worktree: WorktreeInfo) => void;
+  /** Continue an in-progress merge/rebase/cherry-pick after resolving conflicts */
+  onContinueOperation?: (worktree: WorktreeInfo) => void;
 }
 
 /**
@@ -195,6 +202,8 @@ export function WorktreeDropdown({
   onStashChanges,
   onViewStashes,
   onCherryPick,
+  onAbortOperation,
+  onContinueOperation,
 }: WorktreeDropdownProps) {
   // Find the currently selected worktree to display in the trigger
   const selectedWorktree = worktrees.find((w) => isWorktreeSelected(w));
@@ -320,6 +329,20 @@ export function WorktreeDropdown({
             title="Auto Mode Running"
           >
             <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          </span>
+        )}
+
+        {/* Conflict indicator */}
+        {selectedWorktree?.hasConflicts && (
+          <span
+            className={cn(
+              'inline-flex items-center justify-center h-4 min-w-4 px-1 text-[10px] font-medium rounded border shrink-0',
+              getConflictBadgeStyles()
+            )}
+            title={`${getConflictTypeLabel(selectedWorktree.conflictType)} conflicts detected`}
+          >
+            <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+            {getConflictTypeLabel(selectedWorktree.conflictType)}
           </span>
         )}
 
@@ -487,6 +510,8 @@ export function WorktreeDropdown({
           onStashChanges={onStashChanges}
           onViewStashes={onViewStashes}
           onCherryPick={onCherryPick}
+          onAbortOperation={onAbortOperation}
+          onContinueOperation={onContinueOperation}
           hasInitScript={hasInitScript}
         />
       )}

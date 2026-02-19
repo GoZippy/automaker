@@ -411,7 +411,7 @@ export function CherryPickDialog({
         sourceBranch: selectedBranch,
         targetBranch: conflictInfo.targetBranch,
         targetWorktreePath: conflictInfo.targetWorktreePath,
-        operationType: 'merge',
+        operationType: 'cherry-pick',
       });
       onOpenChange(false);
     }
@@ -461,7 +461,7 @@ export function CherryPickDialog({
                       Cherry-pick the selected commit(s) from{' '}
                       <code className="font-mono bg-muted px-0.5 rounded">{selectedBranch}</code>
                     </li>
-                    <li>Resolve any merge conflicts</li>
+                    <li>Resolve any cherry-pick conflicts</li>
                     <li>Ensure the code compiles and tests pass</li>
                   </ul>
                 </div>

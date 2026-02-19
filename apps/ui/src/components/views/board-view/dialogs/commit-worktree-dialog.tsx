@@ -29,6 +29,7 @@ import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { TruncatedFilePath } from '@/components/ui/truncated-file-path';
 import type { FileStatus } from '@/types/electron';
+import { parseDiff, type ParsedFileDiff } from '@/lib/diff-utils';
 
 interface WorktreeInfo {
   path: string;
@@ -43,23 +44,6 @@ interface CommitWorktreeDialogProps {
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
   onCommitted: () => void;
-}
-
-interface ParsedDiffHunk {
-  header: string;
-  lines: {
-    type: 'context' | 'addition' | 'deletion' | 'header';
-    content: string;
-    lineNumber?: { old?: number; new?: number };
-  }[];
-}
-
-interface ParsedFileDiff {
-  filePath: string;
-  hunks: ParsedDiffHunk[];
-  isNew?: boolean;
-  isDeleted?: boolean;
-  isRenamed?: boolean;
 }
 
 const getFileIcon = (status: string) => {
@@ -119,102 +103,7 @@ const getStatusBadgeColor = (status: string) => {
   }
 };
 
-/**
- * Parse unified diff format into structured data
- */
-function parseDiff(diffText: string): ParsedFileDiff[] {
-  if (!diffText) return [];
-
-  const files: ParsedFileDiff[] = [];
-  const lines = diffText.split('\n');
-  let currentFile: ParsedFileDiff | null = null;
-  let currentHunk: ParsedDiffHunk | null = null;
-  let oldLineNum = 0;
-  let newLineNum = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.startsWith('diff --git')) {
-      if (currentFile) {
-        if (currentHunk) currentFile.hunks.push(currentHunk);
-        files.push(currentFile);
-      }
-      const match = line.match(/diff --git a\/(.*?) b\/(.*)/);
-      currentFile = {
-        filePath: match ? match[2] : 'unknown',
-        hunks: [],
-      };
-      currentHunk = null;
-      continue;
-    }
-
-    if (line.startsWith('new file mode')) {
-      if (currentFile) currentFile.isNew = true;
-      continue;
-    }
-    if (line.startsWith('deleted file mode')) {
-      if (currentFile) currentFile.isDeleted = true;
-      continue;
-    }
-    if (line.startsWith('rename from') || line.startsWith('rename to')) {
-      if (currentFile) currentFile.isRenamed = true;
-      continue;
-    }
-    if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-      continue;
-    }
-
-    if (line.startsWith('@@')) {
-      if (currentHunk && currentFile) currentFile.hunks.push(currentHunk);
-      const hunkMatch = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      oldLineNum = hunkMatch ? parseInt(hunkMatch[1], 10) : 1;
-      newLineNum = hunkMatch ? parseInt(hunkMatch[2], 10) : 1;
-      currentHunk = {
-        header: line,
-        lines: [{ type: 'header', content: line }],
-      };
-      continue;
-    }
-
-    if (currentHunk) {
-      // Skip trailing empty line produced by split('\n') to avoid phantom context line
-      if (line === '' && i === lines.length - 1) {
-        continue;
-      }
-      if (line.startsWith('+')) {
-        currentHunk.lines.push({
-          type: 'addition',
-          content: line.substring(1),
-          lineNumber: { new: newLineNum },
-        });
-        newLineNum++;
-      } else if (line.startsWith('-')) {
-        currentHunk.lines.push({
-          type: 'deletion',
-          content: line.substring(1),
-          lineNumber: { old: oldLineNum },
-        });
-        oldLineNum++;
-      } else if (line.startsWith(' ') || line === '') {
-        currentHunk.lines.push({
-          type: 'context',
-          content: line.substring(1) || '',
-          lineNumber: { old: oldLineNum, new: newLineNum },
-        });
-        oldLineNum++;
-        newLineNum++;
-      }
-    }
-  }
-
-  if (currentFile) {
-    if (currentHunk) currentFile.hunks.push(currentHunk);
-    files.push(currentFile);
-  }
-
-  return files;
-}
+// parseDiff is imported from @/lib/diff-utils
 
 function DiffLine({
   type,
@@ -323,8 +212,20 @@ export function CommitWorktreeDialog({
               const fileList = result.files ?? [];
               if (!cancelled) setFiles(fileList);
               if (!cancelled) setDiffContent(result.diff ?? '');
-              // Select all files by default
-              if (!cancelled) setSelectedFiles(new Set(fileList.map((f) => f.path)));
+              // If any files are already staged, pre-select only staged files
+              // Otherwise select all files by default
+              const stagedFiles = fileList.filter((f) => {
+                const idx = f.indexStatus ?? ' ';
+                return idx !== ' ' && idx !== '?';
+              });
+              if (!cancelled) {
+                if (stagedFiles.length > 0) {
+                  // Also include untracked files that are staged (A status)
+                  setSelectedFiles(new Set(stagedFiles.map((f) => f.path)));
+                } else {
+                  setSelectedFiles(new Set(fileList.map((f) => f.path)));
+                }
+              }
             }
           }
         } catch (err) {
@@ -532,18 +433,14 @@ export function CommitWorktreeDialog({
                   const isChecked = selectedFiles.has(file.path);
                   const isExpanded = expandedFile === file.path;
                   const fileDiff = diffsByFile.get(file.path);
-                  const additions = fileDiff
-                    ? fileDiff.hunks.reduce(
-                        (acc, hunk) => acc + hunk.lines.filter((l) => l.type === 'addition').length,
-                        0
-                      )
-                    : 0;
-                  const deletions = fileDiff
-                    ? fileDiff.hunks.reduce(
-                        (acc, hunk) => acc + hunk.lines.filter((l) => l.type === 'deletion').length,
-                        0
-                      )
-                    : 0;
+                  const additions = fileDiff?.additions ?? 0;
+                  const deletions = fileDiff?.deletions ?? 0;
+                  // Determine staging state from index/worktree status
+                  const idx = file.indexStatus ?? ' ';
+                  const wt = file.workTreeStatus ?? ' ';
+                  const isStaged = idx !== ' ' && idx !== '?';
+                  const isUnstaged = wt !== ' ' && wt !== '?';
+                  const isUntracked = idx === '?' && wt === '?';
 
                   return (
                     <div key={file.path} className="border-b border-border last:border-b-0">
@@ -583,6 +480,16 @@ export function CommitWorktreeDialog({
                           >
                             {getStatusLabel(file.status)}
                           </span>
+                          {isStaged && !isUntracked && (
+                            <span className="text-[10px] px-1 py-0.5 rounded border font-medium flex-shrink-0 bg-green-500/15 text-green-400 border-green-500/30">
+                              Staged
+                            </span>
+                          )}
+                          {isStaged && isUnstaged && (
+                            <span className="text-[10px] px-1 py-0.5 rounded border font-medium flex-shrink-0 bg-amber-500/15 text-amber-400 border-amber-500/30">
+                              Partial
+                            </span>
+                          )}
                           {additions > 0 && (
                             <span className="text-[10px] text-green-400 flex-shrink-0">
                               +{additions}

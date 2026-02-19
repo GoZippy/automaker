@@ -60,11 +60,6 @@ interface MergeRebaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worktree: WorktreeInfo | null;
-  onConfirm: (
-    worktree: WorktreeInfo,
-    remoteBranch: string,
-    strategy: PullStrategy
-  ) => void | Promise<void>;
   onCreateConflictResolutionFeature?: (conflictInfo: MergeConflictInfo) => void;
 }
 
@@ -72,7 +67,6 @@ export function MergeRebaseDialog({
   open,
   onOpenChange,
   worktree,
-  onConfirm,
   onCreateConflictResolutionFeature,
 }: MergeRebaseDialogProps) {
   const [remotes, setRemotes] = useState<RemoteInfo[]>([]);
@@ -222,9 +216,6 @@ export function MergeRebaseDialog({
             strategy: 'rebase',
           });
           setStep('conflict');
-          toast.error('Rebase conflicts detected', {
-            description: 'Choose how to resolve the conflicts below.',
-          });
         } else {
           toast.error('Rebase failed', {
             description: result.error || 'Unknown error',
@@ -245,9 +236,6 @@ export function MergeRebaseDialog({
               strategy: 'merge',
             });
             setStep('conflict');
-            toast.error('Merge conflicts detected', {
-              description: 'Choose how to resolve the conflicts below.',
-            });
           } else {
             toast.success(`Merged ${selectedBranch}`, {
               description: result.result.message || 'Merge completed successfully',
@@ -268,53 +256,30 @@ export function MergeRebaseDialog({
               strategy: 'merge',
             });
             setStep('conflict');
-            toast.error('Merge conflicts detected', {
-              description: 'Choose how to resolve the conflicts below.',
-            });
           } else {
-            // Non-conflict failure - fall back to creating a feature task
-            toast.info('Direct operation failed, creating AI task instead', {
-              description: result.error || 'The operation will be handled by an AI agent.',
+            // Non-conflict failure - show conflict resolution UI so user can choose
+            // how to handle it (resolve manually or with AI) rather than auto-creating a task
+            setConflictState({
+              conflictFiles: [],
+              remoteBranch: selectedBranch,
+              strategy: 'merge',
             });
-            try {
-              await onConfirm(worktree, selectedBranch, selectedStrategy);
-              onOpenChange(false);
-            } catch (err) {
-              logger.error('Failed to create feature task:', err);
-              setStep('select');
-            }
+            setStep('conflict');
           }
         }
       }
     } catch (err) {
       logger.error('Failed to execute operation:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      const hasConflicts =
-        errorMessage.toLowerCase().includes('conflict') || errorMessage.includes('CONFLICT');
 
-      if (hasConflicts) {
-        setConflictState({
-          conflictFiles: [],
-          remoteBranch: selectedBranch,
-          strategy: selectedStrategy,
-        });
-        setStep('conflict');
-      } else {
-        // Fall back to creating a feature task
-        toast.info('Creating AI task to handle the operation', {
-          description: 'The operation will be performed by an AI agent.',
-        });
-        try {
-          await onConfirm(worktree, selectedBranch, selectedStrategy);
-          onOpenChange(false);
-        } catch (confirmErr) {
-          logger.error('Failed to create feature task:', confirmErr);
-          toast.error('Operation failed', { description: errorMessage });
-          setStep('select');
-        }
-      }
+      // Show conflict resolution UI so user can choose how to handle it
+      setConflictState({
+        conflictFiles: [],
+        remoteBranch: selectedBranch,
+        strategy: selectedStrategy,
+      });
+      setStep('conflict');
     }
-  }, [worktree, selectedBranch, selectedStrategy, selectedRemote, onConfirm, onOpenChange]);
+  }, [worktree, selectedBranch, selectedStrategy, selectedRemote, onOpenChange]);
 
   const handleResolveWithAI = useCallback(() => {
     if (!worktree || !conflictState) return;
@@ -329,13 +294,10 @@ export function MergeRebaseDialog({
       };
 
       onCreateConflictResolutionFeature(conflictInfo);
-      onOpenChange(false);
-    } else {
-      // Fallback: create via the onConfirm handler
-      onConfirm(worktree, conflictState.remoteBranch, conflictState.strategy);
-      onOpenChange(false);
     }
-  }, [worktree, conflictState, onCreateConflictResolutionFeature, onConfirm, onOpenChange]);
+
+    onOpenChange(false);
+  }, [worktree, conflictState, onCreateConflictResolutionFeature, onOpenChange]);
 
   const handleResolveManually = useCallback(() => {
     toast.info('Conflict markers left in place', {

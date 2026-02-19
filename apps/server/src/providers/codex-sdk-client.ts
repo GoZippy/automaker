@@ -15,6 +15,9 @@ const SDK_HISTORY_HEADER = 'Current request:\n';
 const DEFAULT_RESPONSE_TEXT = '';
 const SDK_ERROR_DETAILS_LABEL = 'Details:';
 
+type SdkReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+const SDK_REASONING_EFFORTS = new Set<string>(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
 type PromptBlock = {
   type: string;
   text?: string;
@@ -103,9 +106,6 @@ export async function* executeCodexSdkQuery(
     // The model must be passed to startThread/resumeThread so the SDK
     // knows which model to use for the conversation. Without this,
     // the SDK may use a default model that the user doesn't have access to.
-    type SdkReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-    const SDK_REASONING_EFFORTS = new Set<string>(['minimal', 'low', 'medium', 'high', 'xhigh']);
-
     const threadOptions: {
       model?: string;
       modelReasoningEffort?: SdkReasoningEffort;
@@ -118,6 +118,7 @@ export async function* executeCodexSdkQuery(
     // Add reasoning effort to thread options if model supports it
     if (
       options.reasoningEffort &&
+      options.model &&
       supportsReasoningEffort(options.model) &&
       options.reasoningEffort !== 'none' &&
       SDK_REASONING_EFFORTS.has(options.reasoningEffort)

@@ -6,7 +6,12 @@
  * import from here rather than defining their own copy.
  */
 
+import fs from 'fs/promises';
+import path from 'path';
 import { spawnProcess } from '@automaker/platform';
+import { createLogger } from '@automaker/utils';
+
+const logger = createLogger('GitLib');
 
 // ============================================================================
 // Secure Command Execution
@@ -79,4 +84,111 @@ export async function execGitCommand(
 export async function getCurrentBranch(worktreePath: string): Promise<string> {
   const branchOutput = await execGitCommand(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath);
   return branchOutput.trim();
+}
+
+// ============================================================================
+// Index Lock Recovery
+// ============================================================================
+
+/**
+ * Check whether an error message indicates a stale git index lock file.
+ *
+ * Git operations that write to the index (e.g. `git stash push`) will fail
+ * with "could not write index" or "Unable to create ... .lock" when a
+ * `.git/index.lock` file exists from a previously interrupted operation.
+ *
+ * @param errorMessage - The error string from a failed git command
+ * @returns true if the error looks like a stale index lock issue
+ */
+export function isIndexLockError(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes('could not write index') ||
+    (lower.includes('unable to create') && lower.includes('index.lock')) ||
+    lower.includes('index.lock')
+  );
+}
+
+/**
+ * Attempt to remove a stale `.git/index.lock` file for the given worktree.
+ *
+ * Uses `git rev-parse --git-dir` to locate the correct `.git` directory,
+ * which works for both regular repositories and linked worktrees.
+ *
+ * @param worktreePath - Path to the git worktree (or main repo)
+ * @returns true if a lock file was found and removed, false otherwise
+ */
+export async function removeStaleIndexLock(worktreePath: string): Promise<boolean> {
+  try {
+    // Resolve the .git directory (handles worktrees correctly)
+    const gitDirRaw = await execGitCommand(['rev-parse', '--git-dir'], worktreePath);
+    const gitDir = path.resolve(worktreePath, gitDirRaw.trim());
+    const lockFilePath = path.join(gitDir, 'index.lock');
+
+    // Check if the lock file exists
+    try {
+      await fs.access(lockFilePath);
+    } catch {
+      // Lock file does not exist — nothing to remove
+      return false;
+    }
+
+    // Remove the stale lock file
+    await fs.unlink(lockFilePath);
+    logger.info('Removed stale index.lock file', { worktreePath, lockFilePath });
+    return true;
+  } catch (err) {
+    logger.warn('Failed to remove stale index.lock file', {
+      worktreePath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
+/**
+ * Execute a git command with automatic retry when a stale index.lock is detected.
+ *
+ * If the command fails with an error indicating a locked index file, this
+ * helper will attempt to remove the stale `.git/index.lock` and retry the
+ * command exactly once.
+ *
+ * This is particularly useful for `git stash push` which writes to the
+ * index and commonly fails when a previous git operation was interrupted.
+ *
+ * @param args - Array of git command arguments
+ * @param cwd - Working directory to execute the command in
+ * @param env - Optional additional environment variables
+ * @returns Promise resolving to stdout output
+ * @throws The original error if retry also fails, or a non-lock error
+ */
+export async function execGitCommandWithLockRetry(
+  args: string[],
+  cwd: string,
+  env?: Record<string, string>
+): Promise<string> {
+  try {
+    return await execGitCommand(args, cwd, env);
+  } catch (error: unknown) {
+    const err = error as { message?: string; stderr?: string };
+    const errorMessage = err.stderr || err.message || '';
+
+    if (!isIndexLockError(errorMessage)) {
+      throw error;
+    }
+
+    logger.info('Git command failed due to index lock, attempting cleanup and retry', {
+      cwd,
+      args: args.join(' '),
+    });
+
+    const removed = await removeStaleIndexLock(cwd);
+    if (!removed) {
+      // Could not remove the lock file — re-throw the original error
+      throw error;
+    }
+
+    // Retry the command once after removing the lock file
+    return await execGitCommand(args, cwd, env);
+  }
 }

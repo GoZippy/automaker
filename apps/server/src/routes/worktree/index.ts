@@ -63,6 +63,9 @@ import { createCherryPickHandler } from './routes/cherry-pick.js';
 import { createBranchCommitLogHandler } from './routes/branch-commit-log.js';
 import { createGeneratePRDescriptionHandler } from './routes/generate-pr-description.js';
 import { createRebaseHandler } from './routes/rebase.js';
+import { createAbortOperationHandler } from './routes/abort-operation.js';
+import { createContinueOperationHandler } from './routes/continue-operation.js';
+import { createStageFilesHandler } from './routes/stage-files.js';
 import type { SettingsService } from '../../services/settings-service.js';
 
 export function createWorktreeRoutes(
@@ -274,6 +277,30 @@ export function createWorktreeRoutes(
     validatePathParams('worktreePath'),
     requireValidWorktree,
     createRebaseHandler(events)
+  );
+
+  // Abort in-progress merge/rebase/cherry-pick
+  router.post(
+    '/abort-operation',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createAbortOperationHandler(events)
+  );
+
+  // Continue in-progress merge/rebase/cherry-pick after resolving conflicts
+  router.post(
+    '/continue-operation',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createContinueOperationHandler(events)
+  );
+
+  // Stage/unstage files route
+  router.post(
+    '/stage-files',
+    validatePathParams('worktreePath'),
+    requireGitRepoOnly,
+    createStageFilesHandler()
   );
 
   return router;

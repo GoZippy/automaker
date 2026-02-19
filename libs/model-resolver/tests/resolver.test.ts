@@ -42,7 +42,7 @@ describe('model-resolver', () => {
 
     describe('with full Claude model strings', () => {
       it('should pass through full Claude model string unchanged', () => {
-        const fullModel = 'claude-sonnet-4-20250514';
+        const fullModel = 'claude-sonnet-4-6';
         const result = resolveModelString(fullModel);
 
         expect(result).toBe(fullModel);
@@ -243,7 +243,7 @@ describe('model-resolver', () => {
     describe('priority handling', () => {
       it('should prioritize explicit model over all others', () => {
         const explicit = 'claude-opus-4-20241113';
-        const session = 'claude-sonnet-4-20250514';
+        const session = 'claude-sonnet-4-6';
         const defaultModel = 'claude-3-5-haiku-20241022';
 
         const result = getEffectiveModel(explicit, session, defaultModel);
@@ -252,7 +252,7 @@ describe('model-resolver', () => {
       });
 
       it('should use session model when explicit is undefined', () => {
-        const session = 'claude-sonnet-4-20250514';
+        const session = 'claude-sonnet-4-6';
         const defaultModel = 'claude-3-5-haiku-20241022';
 
         const result = getEffectiveModel(undefined, session, defaultModel);
@@ -297,7 +297,7 @@ describe('model-resolver', () => {
 
     describe('with empty strings', () => {
       it('should treat empty explicit string as undefined', () => {
-        const session = 'claude-sonnet-4-20250514';
+        const session = 'claude-sonnet-4-6';
 
         const result = getEffectiveModel('', session);
 
@@ -324,7 +324,7 @@ describe('model-resolver', () => {
 
     describe('integration scenarios', () => {
       it('should handle user overriding session model with alias', () => {
-        const sessionModel = 'claude-sonnet-4-20250514';
+        const sessionModel = 'claude-sonnet-4-6';
         const userChoice = 'opus';
 
         const result = getEffectiveModel(userChoice, sessionModel);
@@ -418,7 +418,7 @@ describe('model-resolver', () => {
       });
 
       it('should pass through full Claude model string', () => {
-        const fullModel = 'claude-sonnet-4-20250514';
+        const fullModel = 'claude-sonnet-4-6';
         const result = resolvePhaseModel(fullModel);
 
         expect(result.model).toBe(fullModel);
