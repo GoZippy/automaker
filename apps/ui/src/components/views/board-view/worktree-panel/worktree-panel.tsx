@@ -101,6 +101,7 @@ export function WorktreePanel({
     hasRemoteBranch,
     trackingRemote,
     getTrackingRemote,
+    remotesWithBranch,
     isLoadingBranches,
     branchFilter,
     setBranchFilter,
@@ -466,20 +467,8 @@ export function WorktreePanel({
 
   const isMobile = useIsMobile();
 
-  // Periodic interval check (30 seconds) to detect branch changes on disk
-  // Reduced polling to lessen repeated worktree list calls while keeping UI reasonably fresh
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      fetchWorktrees({ silent: true });
-    }, 30000);
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [fetchWorktrees]);
+  // NOTE: Periodic polling is handled by React Query's refetchInterval
+  // in hooks/queries/use-worktrees.ts (30s). No separate setInterval needed.
 
   // Prune stale tracking-remote cache entries and remotes cache when worktrees change
   useEffect(() => {
@@ -967,6 +956,7 @@ export function WorktreePanel({
             onSync={handleSyncWithRemoteSelection}
             onSyncWithRemote={handleSyncWithSpecificRemote}
             onSetTracking={handleSetTrackingForRemote}
+            remotesWithBranch={remotesWithBranch}
             onOpenInEditor={handleOpenInEditor}
             onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
             onOpenInExternalTerminal={handleOpenInExternalTerminal}
@@ -1214,6 +1204,7 @@ export function WorktreePanel({
             onSync={handleSyncWithRemoteSelection}
             onSyncWithRemote={handleSyncWithSpecificRemote}
             onSetTracking={handleSetTrackingForRemote}
+            remotesWithBranch={remotesWithBranch}
             remotesCache={remotesCache}
             onOpenInEditor={handleOpenInEditor}
             onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
@@ -1358,6 +1349,7 @@ export function WorktreePanel({
                 terminalScripts={terminalScripts}
                 onRunTerminalScript={handleRunTerminalScript}
                 onEditScripts={handleEditScripts}
+                remotesWithBranch={remotesWithBranch}
               />
             )}
           </div>
@@ -1449,6 +1441,7 @@ export function WorktreePanel({
                       terminalScripts={terminalScripts}
                       onRunTerminalScript={handleRunTerminalScript}
                       onEditScripts={handleEditScripts}
+                      remotesWithBranch={remotesWithBranch}
                     />
                   );
                 })}
