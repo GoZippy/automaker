@@ -33,9 +33,16 @@ import {
 
 const logger = createLogger('SettingsHelper');
 
+/** Default number of agent turns used when no value is configured. */
+export const DEFAULT_MAX_TURNS = 10000;
+
+/** Upper bound for the max-turns clamp; values above this are capped here. */
+export const MAX_ALLOWED_TURNS = 10000;
+
 /**
  * Get the autoLoadClaudeMd setting, with project settings taking precedence over global.
- * Returns false if settings service is not available.
+ * Falls back to global settings and defaults to true when unset.
+ * Returns true if settings service is not available.
  *
  * @param projectPath - Path to the project
  * @param settingsService - Optional settings service instance
@@ -48,8 +55,8 @@ export async function getAutoLoadClaudeMdSetting(
   logPrefix = '[SettingsHelper]'
 ): Promise<boolean> {
   if (!settingsService) {
-    logger.info(`${logPrefix} SettingsService not available, autoLoadClaudeMd disabled`);
-    return false;
+    logger.info(`${logPrefix} SettingsService not available, autoLoadClaudeMd defaulting to true`);
+    return true;
   }
 
   try {
@@ -64,12 +71,90 @@ export async function getAutoLoadClaudeMdSetting(
 
     // Fall back to global settings
     const globalSettings = await settingsService.getGlobalSettings();
-    const result = globalSettings.autoLoadClaudeMd ?? false;
+    const result = globalSettings.autoLoadClaudeMd ?? true;
     logger.info(`${logPrefix} autoLoadClaudeMd from global settings: ${result}`);
     return result;
   } catch (error) {
     logger.error(`${logPrefix} Failed to load autoLoadClaudeMd setting:`, error);
     throw error;
+  }
+}
+
+/**
+ * Get the useClaudeCodeSystemPrompt setting, with project settings taking precedence over global.
+ * Falls back to global settings and defaults to true when unset.
+ * Returns true if settings service is not available.
+ *
+ * @param projectPath - Path to the project
+ * @param settingsService - Optional settings service instance
+ * @param logPrefix - Prefix for log messages (e.g., '[AgentService]')
+ * @returns Promise resolving to the useClaudeCodeSystemPrompt setting value
+ */
+export async function getUseClaudeCodeSystemPromptSetting(
+  projectPath: string,
+  settingsService?: SettingsService | null,
+  logPrefix = '[SettingsHelper]'
+): Promise<boolean> {
+  if (!settingsService) {
+    logger.info(
+      `${logPrefix} SettingsService not available, useClaudeCodeSystemPrompt defaulting to true`
+    );
+    return true;
+  }
+
+  try {
+    // Check project settings first (takes precedence)
+    const projectSettings = await settingsService.getProjectSettings(projectPath);
+    if (projectSettings.useClaudeCodeSystemPrompt !== undefined) {
+      logger.info(
+        `${logPrefix} useClaudeCodeSystemPrompt from project settings: ${projectSettings.useClaudeCodeSystemPrompt}`
+      );
+      return projectSettings.useClaudeCodeSystemPrompt;
+    }
+
+    // Fall back to global settings
+    const globalSettings = await settingsService.getGlobalSettings();
+    const result = globalSettings.useClaudeCodeSystemPrompt ?? true;
+    logger.info(`${logPrefix} useClaudeCodeSystemPrompt from global settings: ${result}`);
+    return result;
+  } catch (error) {
+    logger.error(`${logPrefix} Failed to load useClaudeCodeSystemPrompt setting:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get the default max turns setting from global settings.
+ *
+ * Reads the user's configured `defaultMaxTurns` setting, which controls the maximum
+ * number of agent turns (tool-call round-trips) for feature execution.
+ *
+ * @param settingsService - Settings service instance (may be null)
+ * @param logPrefix - Logging prefix for debugging
+ * @returns The user's configured max turns, or {@link DEFAULT_MAX_TURNS} as default
+ */
+export async function getDefaultMaxTurnsSetting(
+  settingsService?: SettingsService | null,
+  logPrefix = '[SettingsHelper]'
+): Promise<number> {
+  if (!settingsService) {
+    logger.info(
+      `${logPrefix} SettingsService not available, using default maxTurns=${DEFAULT_MAX_TURNS}`
+    );
+    return DEFAULT_MAX_TURNS;
+  }
+
+  try {
+    const globalSettings = await settingsService.getGlobalSettings();
+    const raw = globalSettings.defaultMaxTurns;
+    const result = Number.isFinite(raw) ? (raw as number) : DEFAULT_MAX_TURNS;
+    // Clamp to valid range
+    const clamped = Math.max(1, Math.min(MAX_ALLOWED_TURNS, Math.floor(result)));
+    logger.debug(`${logPrefix} defaultMaxTurns from global settings: ${clamped}`);
+    return clamped;
+  } catch (error) {
+    logger.error(`${logPrefix} Failed to load defaultMaxTurns setting:`, error);
+    return DEFAULT_MAX_TURNS;
   }
 }
 

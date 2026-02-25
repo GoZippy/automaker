@@ -123,9 +123,10 @@ describe('agent-service.ts', () => {
       });
 
       expect(result.success).toBe(true);
-      // First call reads session file, metadata file, and queue state file (3 calls)
+      // First call reads metadata file and session file via ensureSession (2 calls)
+      // Since no metadata or messages exist, a fresh session is created without loading queue state.
       // Second call should reuse in-memory session (no additional calls)
-      expect(fs.readFile).toHaveBeenCalledTimes(3);
+      expect(fs.readFile).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -185,6 +186,125 @@ describe('agent-service.ts', () => {
 
       expect(result.success).toBe(true);
       expect(mockEvents.emit).toHaveBeenCalled();
+    });
+
+    it('should emit tool_result events from provider stream', async () => {
+      const mockProvider = {
+        getName: () => 'gemini',
+        executeQuery: async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_use',
+                  name: 'Read',
+                  tool_use_id: 'tool-1',
+                  input: { file_path: 'README.md' },
+                },
+              ],
+            },
+          };
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tool-1',
+                  content: 'File contents here',
+                },
+              ],
+            },
+          };
+          yield {
+            type: 'result',
+            subtype: 'success',
+          };
+        },
+      };
+
+      vi.mocked(ProviderFactory.getProviderForModel).mockReturnValue(mockProvider as any);
+
+      vi.mocked(promptBuilder.buildPromptWithImages).mockResolvedValue({
+        content: 'Hello',
+        hasImages: false,
+      });
+
+      await service.sendMessage({
+        sessionId: 'session-1',
+        message: 'Hello',
+      });
+
+      expect(mockEvents.emit).toHaveBeenCalledWith(
+        'agent:stream',
+        expect.objectContaining({
+          sessionId: 'session-1',
+          type: 'tool_result',
+          tool: {
+            name: 'Read',
+            input: {
+              toolUseId: 'tool-1',
+              content: 'File contents here',
+            },
+          },
+        })
+      );
+    });
+
+    it('should emit tool_result with unknown tool name for unregistered tool_use_id', async () => {
+      const mockProvider = {
+        getName: () => 'gemini',
+        executeQuery: async function* () {
+          // Yield tool_result WITHOUT a preceding tool_use (unregistered tool_use_id)
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'unregistered-id',
+                  content: 'Some result content',
+                },
+              ],
+            },
+          };
+          yield {
+            type: 'result',
+            subtype: 'success',
+          };
+        },
+      };
+
+      vi.mocked(ProviderFactory.getProviderForModel).mockReturnValue(mockProvider as any);
+
+      vi.mocked(promptBuilder.buildPromptWithImages).mockResolvedValue({
+        content: 'Hello',
+        hasImages: false,
+      });
+
+      await service.sendMessage({
+        sessionId: 'session-1',
+        message: 'Hello',
+      });
+
+      expect(mockEvents.emit).toHaveBeenCalledWith(
+        'agent:stream',
+        expect.objectContaining({
+          sessionId: 'session-1',
+          type: 'tool_result',
+          tool: {
+            name: 'unknown',
+            input: {
+              toolUseId: 'unregistered-id',
+              content: 'Some result content',
+            },
+          },
+        })
+      );
     });
 
     it('should handle images in message', async () => {
@@ -271,10 +391,10 @@ describe('agent-service.ts', () => {
       await service.sendMessage({
         sessionId: 'session-1',
         message: 'Hello',
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
       });
 
-      expect(ProviderFactory.getProviderForModel).toHaveBeenCalledWith('claude-sonnet-4-20250514');
+      expect(ProviderFactory.getProviderForModel).toHaveBeenCalledWith('claude-sonnet-4-6');
     });
 
     it('should save session messages', async () => {
@@ -301,6 +421,36 @@ describe('agent-service.ts', () => {
       });
 
       expect(fs.writeFile).toHaveBeenCalled();
+    });
+
+    it('should include context/history preparation for Gemini requests', async () => {
+      let capturedOptions: any;
+      const mockProvider = {
+        getName: () => 'gemini',
+        executeQuery: async function* (options: any) {
+          capturedOptions = options;
+          yield {
+            type: 'result',
+            subtype: 'success',
+          };
+        },
+      };
+
+      vi.mocked(ProviderFactory.getProviderForModelName).mockReturnValue('gemini');
+      vi.mocked(ProviderFactory.getProviderForModel).mockReturnValue(mockProvider as any);
+      vi.mocked(promptBuilder.buildPromptWithImages).mockResolvedValue({
+        content: 'Hello',
+        hasImages: false,
+      });
+
+      await service.sendMessage({
+        sessionId: 'session-1',
+        message: 'Hello',
+        model: 'gemini-2.5-flash',
+      });
+
+      expect(contextLoader.loadContextFiles).toHaveBeenCalled();
+      expect(capturedOptions).toBeDefined();
     });
   });
 
@@ -330,15 +480,18 @@ describe('agent-service.ts', () => {
         sessionId: 'session-1',
       });
 
-      const history = service.getHistory('session-1');
+      const history = await service.getHistory('session-1');
 
       expect(history).toBeDefined();
       expect(history?.messages).toEqual([]);
     });
 
-    it('should handle non-existent session', () => {
-      const history = service.getHistory('nonexistent');
-      expect(history).toBeDefined(); // Returns error object
+    it('should handle non-existent session', async () => {
+      const history = await service.getHistory('nonexistent');
+      expect(history).toBeDefined();
+      expect(history.success).toBe(false);
+      expect(history.error).toBeDefined();
+      expect(typeof history.error).toBe('string');
     });
   });
 
@@ -356,9 +509,107 @@ describe('agent-service.ts', () => {
 
       await service.clearSession('session-1');
 
-      const history = service.getHistory('session-1');
+      const history = await service.getHistory('session-1');
       expect(history?.messages).toEqual([]);
       expect(fs.writeFile).toHaveBeenCalled();
+    });
+
+    it('should clear sdkSessionId from persisted metadata to prevent stale session errors', async () => {
+      // Setup: Session exists in metadata with an sdkSessionId (simulating
+      // a session that previously communicated with a CLI provider like OpenCode)
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          sdkSessionId: 'stale-opencode-session-id',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+
+      // Start the session (loads from disk metadata)
+      await service.startConversation({
+        sessionId: 'session-1',
+        workingDirectory: '/test/dir',
+      });
+
+      // Clear the session
+      await service.clearSession('session-1');
+
+      // Verify that the LAST writeFile call to sessions-metadata.json
+      // (from clearSdkSessionId) has sdkSessionId removed.
+      // Earlier writes may still include it (e.g., from updateSessionTimestamp).
+      const writeFileCalls = vi.mocked(fs.writeFile).mock.calls;
+      const metadataWriteCalls = writeFileCalls.filter(
+        (call) =>
+          typeof call[0] === 'string' && (call[0] as string).includes('sessions-metadata.json')
+      );
+
+      expect(metadataWriteCalls.length).toBeGreaterThan(0);
+      const lastMetadataWriteCall = metadataWriteCalls[metadataWriteCalls.length - 1];
+      const savedMetadata = JSON.parse(lastMetadataWriteCall[1] as string);
+      expect(savedMetadata['session-1'].sdkSessionId).toBeUndefined();
+    });
+  });
+
+  describe('clearSdkSessionId', () => {
+    it('should remove sdkSessionId from persisted metadata', async () => {
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+          sdkSessionId: 'old-provider-session-id',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('session-1');
+
+      const writeFileCalls = vi.mocked(fs.writeFile).mock.calls;
+      expect(writeFileCalls.length).toBeGreaterThan(0);
+
+      const savedMetadata = JSON.parse(writeFileCalls[0][1] as string);
+      expect(savedMetadata['session-1'].sdkSessionId).toBeUndefined();
+      expect(savedMetadata['session-1'].updatedAt).not.toBe('2024-01-01T00:00:00Z');
+    });
+
+    it('should do nothing if session has no sdkSessionId', async () => {
+      const metadata = {
+        'session-1': {
+          id: 'session-1',
+          name: 'Test Session',
+          workingDirectory: '/test/dir',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      };
+
+      vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(metadata));
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('session-1');
+
+      // writeFile should not have been called since there's no sdkSessionId to clear
+      expect(fs.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('should do nothing if session does not exist in metadata', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue('{}');
+      vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+
+      await service.clearSdkSessionId('nonexistent');
+
+      expect(fs.writeFile).not.toHaveBeenCalled();
     });
   });
 
@@ -431,13 +682,13 @@ describe('agent-service.ts', () => {
 
     it('should set model for existing session', async () => {
       vi.mocked(fs.readFile).mockResolvedValue('{"session-1": {}}');
-      const result = await service.setSessionModel('session-1', 'claude-sonnet-4-20250514');
+      const result = await service.setSessionModel('session-1', 'claude-sonnet-4-6');
 
       expect(result).toBe(true);
     });
 
     it('should return false for non-existent session', async () => {
-      const result = await service.setSessionModel('nonexistent', 'claude-sonnet-4-20250514');
+      const result = await service.setSessionModel('nonexistent', 'claude-sonnet-4-6');
 
       expect(result).toBe(false);
     });
@@ -620,7 +871,7 @@ describe('agent-service.ts', () => {
       const result = await service.addToQueue('session-1', {
         message: 'Test prompt',
         imagePaths: ['/test/image.png'],
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
       });
 
       expect(result.success).toBe(true);
@@ -654,15 +905,15 @@ describe('agent-service.ts', () => {
 
     it('should return queue for session', async () => {
       await service.addToQueue('session-1', { message: 'Test prompt' });
-      const result = service.getQueue('session-1');
+      const result = await service.getQueue('session-1');
 
       expect(result.success).toBe(true);
       expect(result.queue).toBeDefined();
       expect(result.queue?.length).toBe(1);
     });
 
-    it('should return error for non-existent session', () => {
-      const result = service.getQueue('nonexistent');
+    it('should return error for non-existent session', async () => {
+      const result = await service.getQueue('nonexistent');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Session not found');
@@ -686,7 +937,7 @@ describe('agent-service.ts', () => {
     });
 
     it('should remove prompt from queue', async () => {
-      const queueResult = service.getQueue('session-1');
+      const queueResult = await service.getQueue('session-1');
       const promptId = queueResult.queue![0].id;
 
       const result = await service.removeFromQueue('session-1', promptId);
@@ -731,7 +982,7 @@ describe('agent-service.ts', () => {
       const result = await service.clearQueue('session-1');
 
       expect(result.success).toBe(true);
-      const queueResult = service.getQueue('session-1');
+      const queueResult = await service.getQueue('session-1');
       expect(queueResult.queue?.length).toBe(0);
       expect(mockEvents.emit).toHaveBeenCalled();
     });

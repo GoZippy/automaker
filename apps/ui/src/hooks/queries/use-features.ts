@@ -6,7 +6,8 @@
  * automatic caching, deduplication, and background refetching.
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getElectronAPI } from '@/lib/electron';
 import { queryKeys } from '@/lib/query-keys';
 import { STALE_TIMES } from '@/lib/query-client';
@@ -18,6 +19,117 @@ const FEATURES_REFETCH_ON_RECONNECT = false;
 const FEATURES_POLLING_INTERVAL = 30000;
 /** Default polling interval for agent output when WebSocket is inactive */
 const AGENT_OUTPUT_POLLING_INTERVAL = 5000;
+const FEATURES_CACHE_PREFIX = 'automaker:features-cache:';
+
+/**
+ * Bump this version whenever the Feature shape changes so stale localStorage
+ * entries with incompatible schemas are automatically discarded.
+ */
+const FEATURES_CACHE_VERSION = 1;
+
+/** Maximum number of per-project cache entries to keep in localStorage (LRU). */
+const MAX_FEATURES_CACHE_ENTRIES = 10;
+
+interface PersistedFeaturesCache {
+  /** Schema version — mismatched versions are treated as stale and discarded. */
+  schemaVersion: number;
+  timestamp: number;
+  features: Feature[];
+}
+
+function readPersistedFeatures(projectPath: string): PersistedFeaturesCache | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${FEATURES_CACHE_PREFIX}${projectPath}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedFeaturesCache;
+    if (!parsed || !Array.isArray(parsed.features) || typeof parsed.timestamp !== 'number') {
+      return null;
+    }
+    // Reject entries written by an older (or newer) schema version
+    if (parsed.schemaVersion !== FEATURES_CACHE_VERSION) {
+      // Remove the stale entry so it doesn't accumulate
+      window.localStorage.removeItem(`${FEATURES_CACHE_PREFIX}${projectPath}`);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedFeatures(projectPath: string, features: Feature[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload: PersistedFeaturesCache = {
+      schemaVersion: FEATURES_CACHE_VERSION,
+      timestamp: Date.now(),
+      features,
+    };
+    window.localStorage.setItem(`${FEATURES_CACHE_PREFIX}${projectPath}`, JSON.stringify(payload));
+  } catch {
+    // Best effort cache only.
+  }
+  // Run lightweight eviction after every write to keep localStorage bounded
+  evictStaleFeaturesCache();
+}
+
+/**
+ * Scan localStorage for feature-cache entries, sort by timestamp (LRU),
+ * and remove entries beyond MAX_FEATURES_CACHE_ENTRIES so orphaned project
+ * caches don't accumulate indefinitely.
+ */
+function evictStaleFeaturesCache(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // First pass: collect all matching keys without mutating localStorage.
+    // Iterating forward while calling removeItem() shifts indexes and can skip keys.
+    const allKeys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(FEATURES_CACHE_PREFIX)) {
+        allKeys.push(key);
+      }
+    }
+
+    // Second pass: classify collected keys — remove stale/corrupt, keep valid.
+    const validEntries: Array<{ key: string; timestamp: number }> = [];
+    const keysToRemove: string[] = [];
+    for (const key of allKeys) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as { timestamp?: number; schemaVersion?: number };
+        // Evict entries with wrong schema version
+        if (parsed.schemaVersion !== FEATURES_CACHE_VERSION) {
+          keysToRemove.push(key);
+          continue;
+        }
+        validEntries.push({
+          key,
+          timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : 0,
+        });
+      } catch {
+        // Corrupt entry — mark for removal
+        keysToRemove.push(key);
+      }
+    }
+
+    // Remove stale/corrupt entries
+    for (const key of keysToRemove) {
+      window.localStorage.removeItem(key);
+    }
+
+    // Enforce max entries: sort by timestamp (newest first), remove excess oldest
+    if (validEntries.length <= MAX_FEATURES_CACHE_ENTRIES) return;
+    validEntries.sort((a, b) => b.timestamp - a.timestamp);
+    for (let i = MAX_FEATURES_CACHE_ENTRIES; i < validEntries.length; i++) {
+      window.localStorage.removeItem(validEntries[i].key);
+    }
+  } catch {
+    // Best effort — never break the app for cache housekeeping failures.
+  }
+}
 
 /**
  * Fetch all features for a project
@@ -31,6 +143,42 @@ const AGENT_OUTPUT_POLLING_INTERVAL = 5000;
  * ```
  */
 export function useFeatures(projectPath: string | undefined) {
+  // Memoize the persisted cache read so it only runs when projectPath changes,
+  // not on every render. Both initialData and initialDataUpdatedAt reference
+  // the same memoized value to avoid a redundant second localStorage read.
+  const persisted = useMemo(
+    () => (projectPath ? readPersistedFeatures(projectPath) : null),
+    [projectPath]
+  );
+
+  const queryClient = useQueryClient();
+
+  // Subscribe to React Query cache changes for features and sync to localStorage.
+  // This ensures optimistic updates (e.g., status changes to 'verified') are
+  // persisted to localStorage immediately, not just when queryFn runs.
+  // Without this, a page refresh after an optimistic update could show stale
+  // localStorage data where features appear in the wrong column (e.g., verified
+  // features showing up in backlog).
+  const projectPathRef = useRef(projectPath);
+  projectPathRef.current = projectPath;
+  useEffect(() => {
+    if (!projectPath) return;
+    const targetQueryHash = JSON.stringify(queryKeys.features.all(projectPath));
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === 'updated' &&
+        event.action.type === 'success' &&
+        event.query.queryHash === targetQueryHash
+      ) {
+        const features = event.query.state.data as Feature[] | undefined;
+        if (features && projectPathRef.current) {
+          writePersistedFeatures(projectPathRef.current, features);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [projectPath, queryClient]);
+
   return useQuery({
     queryKey: queryKeys.features.all(projectPath ?? ''),
     queryFn: async (): Promise<Feature[]> => {
@@ -40,9 +188,17 @@ export function useFeatures(projectPath: string | undefined) {
       if (!result?.success) {
         throw new Error(result?.error || 'Failed to fetch features');
       }
-      return (result.features ?? []) as Feature[];
+      const features = (result.features ?? []) as Feature[];
+      writePersistedFeatures(projectPath, features);
+      return features;
     },
     enabled: !!projectPath,
+    initialData: () => persisted?.features,
+    // Always treat localStorage cache as stale so React Query immediately
+    // fetches fresh data from the server on page load. This prevents stale
+    // feature statuses (e.g., 'verified' features appearing in backlog)
+    // while still showing cached data instantly for a fast initial render.
+    initialDataUpdatedAt: 0,
     staleTime: STALE_TIMES.FEATURES,
     refetchInterval: createSmartPollingInterval(FEATURES_POLLING_INTERVAL),
     refetchOnWindowFocus: FEATURES_REFETCH_ON_FOCUS,

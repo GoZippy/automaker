@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, startTransition } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ChevronsUpDown, Folder, Plus, FolderOpen } from 'lucide-react';
+import { ChevronsUpDown, Folder, Plus, FolderOpen, LogOut } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn, isMac } from '@/lib/utils';
 import { formatShortcut } from '@/store/app-store';
 import { isElectron, type Project } from '@/lib/electron';
+import { initializeProject } from '@/lib/project-init';
 import { MACOS_ELECTRON_TOP_PADDING_CLASS } from '../constants';
 import { getAuthenticatedImageUrl } from '@/lib/api-fetch';
 import { useAppStore } from '@/store/app-store';
@@ -24,6 +25,7 @@ interface SidebarHeaderProps {
   onNewProject: () => void;
   onOpenFolder: () => void;
   onProjectContextMenu: (project: Project, event: React.MouseEvent) => void;
+  setShowRemoveFromAutomakerDialog: (show: boolean) => void;
 }
 
 export function SidebarHeader({
@@ -32,9 +34,11 @@ export function SidebarHeader({
   onNewProject,
   onOpenFolder,
   onProjectContextMenu,
+  setShowRemoveFromAutomakerDialog,
 }: SidebarHeaderProps) {
   const navigate = useNavigate();
-  const { projects, setCurrentProject } = useAppStore();
+  const projects = useAppStore((s) => s.projects);
+  const setCurrentProject = useAppStore((s) => s.setCurrentProject);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const handleLogoClick = useCallback(() => {
@@ -42,12 +46,29 @@ export function SidebarHeader({
   }, [navigate]);
 
   const handleProjectSelect = useCallback(
-    (project: Project) => {
-      setCurrentProject(project);
-      setDropdownOpen(false);
-      navigate({ to: '/board' });
+    async (project: Project) => {
+      if (project.id === currentProject?.id) {
+        setDropdownOpen(false);
+        navigate({ to: '/board' });
+        return;
+      }
+      try {
+        // Ensure .automaker directory structure exists before switching
+        await initializeProject(project.path);
+      } catch (error) {
+        console.error('Failed to initialize project during switch:', error);
+        // Continue with switch even if initialization fails -
+        // the project may already be initialized
+      }
+
+      // Batch project switch + navigation to prevent multi-render cascades.
+      startTransition(() => {
+        setCurrentProject(project);
+        setDropdownOpen(false);
+        navigate({ to: '/board' });
+      });
     },
-    [setCurrentProject, navigate]
+    [currentProject?.id, setCurrentProject, navigate]
   );
 
   const getIconComponent = (project: Project): LucideIcon => {
@@ -228,6 +249,22 @@ export function SidebarHeader({
                   <FolderOpen className="w-4 h-4 mr-2" />
                   <span>Open Project</span>
                 </DropdownMenuItem>
+                {currentProject && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        setShowRemoveFromAutomakerDialog(true);
+                      }}
+                      className="cursor-pointer text-muted-foreground focus:text-foreground"
+                      data-testid="collapsed-remove-from-automaker-dropdown-item"
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      <span>Remove from Automaker</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </>
@@ -371,6 +408,18 @@ export function SidebarHeader({
               >
                 <FolderOpen className="w-4 h-4 mr-2" />
                 <span>Open Project</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => {
+                  setDropdownOpen(false);
+                  setShowRemoveFromAutomakerDialog(true);
+                }}
+                className="cursor-pointer text-muted-foreground focus:text-foreground"
+                data-testid="remove-from-automaker-dropdown-item"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                <span>Remove from Automaker</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

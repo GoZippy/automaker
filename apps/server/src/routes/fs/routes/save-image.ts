@@ -12,10 +12,9 @@ import { sanitizeFilename } from '@automaker/utils';
 export function createSaveImageHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { data, filename, mimeType, projectPath } = req.body as {
+      const { data, filename, projectPath } = req.body as {
         data: string;
         filename: string;
-        mimeType: string;
         projectPath: string;
       };
 

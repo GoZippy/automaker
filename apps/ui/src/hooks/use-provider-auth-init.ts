@@ -1,18 +1,32 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { useSetupStore, type ClaudeAuthMethod, type CodexAuthMethod } from '@/store/setup-store';
+import {
+  useSetupStore,
+  type ClaudeAuthMethod,
+  type CodexAuthMethod,
+  type ZaiAuthMethod,
+} from '@/store/setup-store';
+import type { GeminiAuthStatus } from '@automaker/types';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { createLogger } from '@automaker/utils/logger';
 
 const logger = createLogger('ProviderAuthInit');
 
 /**
- * Hook to initialize Claude and Codex authentication statuses on app startup.
+ * Hook to initialize Claude, Codex, z.ai, and Gemini authentication statuses on app startup.
  * This ensures that usage tracking information is available in the board header
  * without needing to visit the settings page first.
  */
 export function useProviderAuthInit() {
-  const { setClaudeAuthStatus, setCodexAuthStatus, claudeAuthStatus, codexAuthStatus } =
-    useSetupStore();
+  // IMPORTANT: Use individual selectors instead of bare useSetupStore() to prevent
+  // re-rendering on every setup store mutation. The bare call subscribes to the ENTIRE
+  // store, which during initialization causes cascading re-renders as multiple status
+  // setters fire in rapid succession. With enough rapid mutations, React hits the
+  // maximum update depth limit (error #185).
+  const setClaudeAuthStatus = useSetupStore((s) => s.setClaudeAuthStatus);
+  const setCodexAuthStatus = useSetupStore((s) => s.setCodexAuthStatus);
+  const setZaiAuthStatus = useSetupStore((s) => s.setZaiAuthStatus);
+  const setGeminiCliStatus = useSetupStore((s) => s.setGeminiCliStatus);
+  const setGeminiAuthStatus = useSetupStore((s) => s.setGeminiAuthStatus);
   const initialized = useRef(false);
 
   const refreshStatuses = useCallback(async () => {
@@ -88,15 +102,125 @@ export function useProviderAuthInit() {
     } catch (error) {
       logger.error('Failed to init Codex auth status:', error);
     }
-  }, [setClaudeAuthStatus, setCodexAuthStatus]);
+
+    // 3. z.ai Auth Status
+    try {
+      const result = await api.zai.getStatus();
+      if (result.success || result.available !== undefined) {
+        const available = !!result.available;
+        const hasApiKey = !!(result.hasApiKey ?? result.available);
+        const hasEnvApiKey = !!(result.hasEnvApiKey ?? false);
+
+        let method: ZaiAuthMethod = 'none';
+        if (hasEnvApiKey) {
+          method = 'api_key_env';
+        } else if (hasApiKey || available) {
+          method = 'api_key';
+        }
+
+        setZaiAuthStatus({
+          authenticated: available,
+          method,
+          hasApiKey,
+          hasEnvApiKey,
+        });
+      } else {
+        // Non-success path - set default unauthenticated status
+        setZaiAuthStatus({
+          authenticated: false,
+          method: 'none',
+          hasApiKey: false,
+          hasEnvApiKey: false,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to init z.ai auth status:', error);
+      // Set default status on error to prevent stale state
+      setZaiAuthStatus({
+        authenticated: false,
+        method: 'none',
+        hasApiKey: false,
+        hasEnvApiKey: false,
+      });
+    }
+
+    // 4. Gemini Auth Status
+    try {
+      const result = await api.setup.getGeminiStatus();
+
+      // Always set CLI status if any CLI info is available
+      if (
+        result.installed !== undefined ||
+        result.version !== undefined ||
+        result.path !== undefined
+      ) {
+        setGeminiCliStatus({
+          installed: result.installed ?? false,
+          version: result.version,
+          path: result.path,
+        });
+      }
+
+      // Always set auth status regardless of result.success
+      if (result.success && result.auth) {
+        const auth = result.auth;
+        const validMethods: GeminiAuthStatus['method'][] = [
+          'google_login',
+          'api_key',
+          'vertex_ai',
+          'none',
+        ];
+
+        const method = validMethods.includes(auth.method as GeminiAuthStatus['method'])
+          ? (auth.method as GeminiAuthStatus['method'])
+          : ((auth.authenticated ? 'google_login' : 'none') as GeminiAuthStatus['method']);
+
+        setGeminiAuthStatus({
+          authenticated: auth.authenticated,
+          method,
+          hasApiKey: auth.hasApiKey ?? false,
+          hasEnvApiKey: auth.hasEnvApiKey ?? false,
+        });
+      } else {
+        // result.success is false or result.auth is missing — set default unauthenticated status
+        setGeminiAuthStatus({
+          authenticated: false,
+          method: 'none',
+          hasApiKey: false,
+          hasEnvApiKey: false,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to init Gemini auth status:', error);
+      // Set default status on error to prevent infinite retries
+      setGeminiAuthStatus({
+        authenticated: false,
+        method: 'none',
+        hasApiKey: false,
+        hasEnvApiKey: false,
+      });
+    }
+  }, [
+    setClaudeAuthStatus,
+    setCodexAuthStatus,
+    setZaiAuthStatus,
+    setGeminiCliStatus,
+    setGeminiAuthStatus,
+  ]);
 
   useEffect(() => {
-    // Only initialize once per session if not already set
-    if (initialized.current || (claudeAuthStatus !== null && codexAuthStatus !== null)) {
+    // Skip if already initialized in this session
+    if (initialized.current) {
       return;
     }
     initialized.current = true;
 
+    // Always call refreshStatuses() to background re-validate on app restart,
+    // even when statuses are pre-populated from persisted storage (cache case).
     void refreshStatuses();
-  }, [refreshStatuses, claudeAuthStatus, codexAuthStatus]);
+    // Only depend on the callback ref. The status values were previously included
+    // but they are outputs of refreshStatuses(), not inputs — including them caused
+    // cascading re-renders during initialization that triggered React error #185
+    // (maximum update depth exceeded) on first run.
+  }, [refreshStatuses]);
 }

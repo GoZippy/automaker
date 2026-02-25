@@ -36,11 +36,29 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
 fi
 
 # Port configuration
-DEFAULT_WEB_PORT=3007
-DEFAULT_SERVER_PORT=3008
+# Defaults can be overridden via AUTOMAKER_WEB_PORT and AUTOMAKER_SERVER_PORT env vars
+
+# Validate env-provided ports early (before colors are available)
+if [ -n "$AUTOMAKER_WEB_PORT" ]; then
+    if ! [[ "$AUTOMAKER_WEB_PORT" =~ ^[0-9]+$ ]] || [ "$AUTOMAKER_WEB_PORT" -lt 1 ] || [ "$AUTOMAKER_WEB_PORT" -gt 65535 ]; then
+        echo "Error: AUTOMAKER_WEB_PORT must be a number between 1-65535, got '$AUTOMAKER_WEB_PORT'"
+        exit 1
+    fi
+fi
+if [ -n "$AUTOMAKER_SERVER_PORT" ]; then
+    if ! [[ "$AUTOMAKER_SERVER_PORT" =~ ^[0-9]+$ ]] || [ "$AUTOMAKER_SERVER_PORT" -lt 1 ] || [ "$AUTOMAKER_SERVER_PORT" -gt 65535 ]; then
+        echo "Error: AUTOMAKER_SERVER_PORT must be a number between 1-65535, got '$AUTOMAKER_SERVER_PORT'"
+        exit 1
+    fi
+fi
+
+DEFAULT_WEB_PORT=${AUTOMAKER_WEB_PORT:-3007}
+DEFAULT_SERVER_PORT=${AUTOMAKER_SERVER_PORT:-3008}
 PORT_SEARCH_MAX_ATTEMPTS=100
 WEB_PORT=$DEFAULT_WEB_PORT
 SERVER_PORT=$DEFAULT_SERVER_PORT
+TEST_WEB_PORT=${TEST_PORT:-3107}
+TEST_SERVER_PORT=${TEST_SERVER_PORT:-3108}
 
 # Port validation function
 # Returns 0 if valid, 1 if invalid (with error message printed)
@@ -136,6 +154,9 @@ EXAMPLES:
   start-automaker.sh docker       # Launch Docker dev container
   start-automaker.sh --version    # Show version
 
+  AUTOMAKER_WEB_PORT=4000 AUTOMAKER_SERVER_PORT=4001 start-automaker.sh web
+                                  # Launch web mode on custom ports
+
 KEYBOARD SHORTCUTS (in menu):
   Up/Down arrows   Navigate between options
   Enter            Select highlighted option
@@ -145,6 +166,10 @@ KEYBOARD SHORTCUTS (in menu):
 HISTORY:
   Your last selected mode is remembered in: ~/.automaker_launcher_history
   Use --no-history to disable this feature
+
+ENVIRONMENT VARIABLES:
+  AUTOMAKER_WEB_PORT     Override default web/UI port (default: 3007)
+  AUTOMAKER_SERVER_PORT  Override default API server port (default: 3008)
 
 PLATFORMS:
   Linux, macOS, Windows (Git Bash, WSL, MSYS2, Cygwin)
@@ -1161,7 +1186,8 @@ case $MODE in
         if [ -f .env ]; then
             export $(grep -v '^#' .env | xargs)
         fi
-        export TEST_PORT="$WEB_PORT"
+        export TEST_PORT="$TEST_WEB_PORT"
+        export TEST_SERVER_PORT="$TEST_SERVER_PORT"
         export VITE_SERVER_URL="http://${APP_HOST}:$SERVER_PORT"
         export PORT="$SERVER_PORT"
         export DATA_DIR="$SCRIPT_DIR/data"
@@ -1252,7 +1278,8 @@ case $MODE in
         ;;
     electron)
         # Set environment variables for Electron (it starts its own server)
-        export TEST_PORT="$WEB_PORT"
+        export TEST_PORT="$TEST_WEB_PORT"
+        export TEST_SERVER_PORT="$TEST_SERVER_PORT"
         export PORT="$SERVER_PORT"
         export VITE_SERVER_URL="http://localhost:$SERVER_PORT"
         export CORS_ORIGIN="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT"

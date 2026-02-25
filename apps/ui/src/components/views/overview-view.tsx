@@ -243,7 +243,7 @@ export function OverviewView() {
   );
 
   return (
-    <div className="flex-1 flex flex-col h-screen content-bg" data-testid="overview-view">
+    <div className="flex-1 flex flex-col h-full content-bg" data-testid="overview-view">
       {/* Header */}
       <header className="shrink-0 border-b border-border bg-glass backdrop-blur-md">
         {/* Electron titlebar drag region */}

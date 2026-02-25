@@ -118,6 +118,7 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
     echo "=== Checking OpenCode CLI installation ===" && \
     ls -la /home/automaker/.local/bin/ && \
     (which opencode && opencode --version) || echo "opencode installed (may need auth setup)"
+
 USER root
 
 # Add PATH to profile so it's available in all interactive shells (for login shells)
@@ -146,6 +147,15 @@ COPY --from=server-builder /app/apps/server/package*.json ./apps/server/
 
 # Copy node_modules (includes symlinks to libs)
 COPY --from=server-builder /app/node_modules ./node_modules
+
+# Install Playwright Chromium browser for AI agent verification tests
+# This adds ~300MB to the image but enables automated testing mode out of the box
+# Using the locally installed playwright ensures we use the pinned version from package-lock.json
+USER automaker
+RUN ./node_modules/.bin/playwright install chromium && \
+    echo "=== Playwright Chromium installed ===" && \
+    ls -la /home/automaker/.cache/ms-playwright/
+USER root
 
 # Create data and projects directories
 RUN mkdir -p /data /projects && chown automaker:automaker /data /projects
@@ -199,9 +209,10 @@ COPY libs ./libs
 COPY apps/ui ./apps/ui
 
 # Build packages in dependency order, then build UI
-# VITE_SERVER_URL tells the UI where to find the API server
-# Use ARG to allow overriding at build time: --build-arg VITE_SERVER_URL=http://api.example.com
-ARG VITE_SERVER_URL=http://localhost:3008
+# When VITE_SERVER_URL is empty, the UI uses relative URLs (e.g., /api/...) which nginx proxies
+# to the server container. This avoids CORS issues entirely in Docker Compose setups.
+# Override at build time if needed: --build-arg VITE_SERVER_URL=http://api.example.com
+ARG VITE_SERVER_URL=
 ENV VITE_SKIP_ELECTRON=true
 ENV VITE_SERVER_URL=${VITE_SERVER_URL}
 RUN npm run build:packages && npm run build --workspace=apps/ui

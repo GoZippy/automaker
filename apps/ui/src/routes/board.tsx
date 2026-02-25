@@ -1,6 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { BoardView } from '@/components/views/board-view';
 
-export const Route = createFileRoute('/board')({
-  component: BoardView,
-});
+// Component is lazy-loaded via board.lazy.tsx for code splitting.
+// Board is the most-visited landing route, but lazy loading still benefits
+// initial load because the board component and its dependencies are only
+// downloaded when the user actually navigates to /board (vs being bundled
+// into the entry chunk). TanStack Router's autoCodeSplitting handles the
+// dynamic import automatically when a .lazy.tsx file exists.
+export const Route = createFileRoute('/board')({});

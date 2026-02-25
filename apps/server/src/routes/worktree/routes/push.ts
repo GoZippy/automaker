@@ -1,24 +1,24 @@
 /**
  * POST /push endpoint - Push a worktree branch to remote
  *
+ * Git business logic is delegated to push-service.ts.
+ *
  * Note: Git repository validation (isGitRepo, hasCommits) is handled by
  * the requireValidWorktree middleware in index.ts
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { getErrorMessage, logError } from '../common.js';
-
-const execAsync = promisify(exec);
+import { performPush } from '../../../services/push-service.js';
 
 export function createPushHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath, force, remote } = req.body as {
+      const { worktreePath, force, remote, autoResolve } = req.body as {
         worktreePath: string;
         force?: boolean;
         remote?: string;
+        autoResolve?: boolean;
       };
 
       if (!worktreePath) {
@@ -29,34 +29,28 @@ export function createPushHandler() {
         return;
       }
 
-      // Get branch name
-      const { stdout: branchOutput } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-        cwd: worktreePath,
-      });
-      const branchName = branchOutput.trim();
+      const result = await performPush(worktreePath, { remote, force, autoResolve });
 
-      // Use specified remote or default to 'origin'
-      const targetRemote = remote || 'origin';
-
-      // Push the branch
-      const forceFlag = force ? '--force' : '';
-      try {
-        await execAsync(`git push -u ${targetRemote} ${branchName} ${forceFlag}`, {
-          cwd: worktreePath,
+      if (!result.success) {
+        const statusCode = isClientError(result.error ?? '') ? 400 : 500;
+        res.status(statusCode).json({
+          success: false,
+          error: result.error,
+          diverged: result.diverged,
+          hasConflicts: result.hasConflicts,
+          conflictFiles: result.conflictFiles,
         });
-      } catch {
-        // Try setting upstream
-        await execAsync(`git push --set-upstream ${targetRemote} ${branchName} ${forceFlag}`, {
-          cwd: worktreePath,
-        });
+        return;
       }
 
       res.json({
         success: true,
         result: {
-          branch: branchName,
-          pushed: true,
-          message: `Successfully pushed ${branchName} to ${targetRemote}`,
+          branch: result.branch,
+          pushed: result.pushed,
+          diverged: result.diverged,
+          autoResolved: result.autoResolved,
+          message: result.message,
         },
       });
     } catch (error) {
@@ -64,4 +58,16 @@ export function createPushHandler() {
       res.status(500).json({ success: false, error: getErrorMessage(error) });
     }
   };
+}
+
+/**
+ * Determine whether an error message represents a client error (400)
+ * vs a server error (500).
+ */
+function isClientError(errorMessage: string): boolean {
+  return (
+    errorMessage.includes('detached HEAD') ||
+    errorMessage.includes('rejected') ||
+    errorMessage.includes('diverged')
+  );
 }

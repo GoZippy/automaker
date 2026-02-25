@@ -33,7 +33,7 @@ export function ViewWorktreeChangesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full h-full max-w-full max-h-full sm:w-[90vw] sm:max-w-[900px] sm:max-h-[100vh] sm:h-auto sm:rounded-xl rounded-none flex flex-col">
+      <DialogContent className="w-full h-full max-w-full max-h-full sm:w-[90vw] sm:max-w-[900px] sm:max-h-[85dvh] sm:h-auto sm:rounded-xl rounded-none flex flex-col dialog-fullscreen-mobile">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="w-5 h-5" />
@@ -48,16 +48,21 @@ export function ViewWorktreeChangesDialog({
                 {worktree.changedFilesCount > 1 ? 's' : ''} changed)
               </span>
             )}
+            <span className="ml-1 text-xs text-muted-foreground">
+              — Use the Stage/Unstage buttons to prepare files for commit.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 sm:min-h-[600px] sm:max-h-[60vh]  overflow-y-auto scrollbar-visible -mx-6 -mb-6">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-visible -mx-6 -mb-6">
           <div className="h-full px-6 pb-6">
             <GitDiffPanel
               projectPath={projectPath}
               featureId={worktree.branch}
               useWorktrees={true}
               compact={false}
+              enableStaging={true}
+              worktreePath={worktree.path}
               className="mt-4"
             />
           </div>

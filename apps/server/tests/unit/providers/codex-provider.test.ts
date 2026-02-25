@@ -170,6 +170,30 @@ describe('codex-provider.ts', () => {
       expect(call.args).toContain('--json');
     });
 
+    it('uses exec resume when sdkSessionId is provided', async () => {
+      vi.mocked(spawnJSONLProcess).mockReturnValue((async function* () {})());
+
+      await collectAsyncGenerator(
+        provider.executeQuery({
+          prompt: 'Continue',
+          model: 'gpt-5.2',
+          cwd: '/tmp',
+          sdkSessionId: 'codex-session-123',
+          outputFormat: { type: 'json_schema', schema: { type: 'object', properties: {} } },
+          codexSettings: { additionalDirs: ['/extra/dir'] },
+        })
+      );
+
+      const call = vi.mocked(spawnJSONLProcess).mock.calls[0][0];
+      expect(call.args[0]).toBe('exec');
+      expect(call.args[1]).toBe('resume');
+      expect(call.args).toContain('codex-session-123');
+      expect(call.args).toContain('--json');
+      // Resume queries must not include --output-schema or --add-dir
+      expect(call.args).not.toContain('--output-schema');
+      expect(call.args).not.toContain('--add-dir');
+    });
+
     it('overrides approval policy when MCP auto-approval is enabled', async () => {
       // Note: With full-permissions always on (--dangerously-bypass-approvals-and-sandbox),
       // approval policy is bypassed, not configured via --config
@@ -247,6 +271,12 @@ describe('codex-provider.ts', () => {
 
     it('uses the SDK when no tools are requested and an API key is present', async () => {
       process.env[OPENAI_API_KEY_ENV] = 'sk-test';
+      // Override auth indicators so CLI-native auth doesn't take priority over API key
+      vi.mocked(getCodexAuthIndicators).mockResolvedValue({
+        hasAuthFile: false,
+        hasOAuthToken: false,
+        hasApiKey: false,
+      });
       codexRunMock.mockResolvedValue({ finalResponse: 'Hello from SDK' });
 
       const results = await collectAsyncGenerator<ProviderMessage>(
@@ -264,6 +294,12 @@ describe('codex-provider.ts', () => {
 
     it('uses the SDK when API key is present, even for tool requests (to avoid OAuth issues)', async () => {
       process.env[OPENAI_API_KEY_ENV] = 'sk-test';
+      // Override auth indicators so CLI-native auth doesn't take priority over API key
+      vi.mocked(getCodexAuthIndicators).mockResolvedValue({
+        hasAuthFile: false,
+        hasOAuthToken: false,
+        hasApiKey: false,
+      });
       vi.mocked(spawnJSONLProcess).mockReturnValue((async function* () {})());
 
       await collectAsyncGenerator(
@@ -308,8 +344,10 @@ describe('codex-provider.ts', () => {
       );
 
       const call = vi.mocked(spawnJSONLProcess).mock.calls[0][0];
-      // High reasoning effort should have 3x the default timeout (90000ms)
-      expect(call.timeout).toBe(DEFAULT_TIMEOUT_MS * REASONING_TIMEOUT_MULTIPLIERS.high);
+      // High reasoning effort should have 3x the CLI base timeout (120000ms)
+      // CODEX_CLI_TIMEOUT_MS = 120000, multiplier for 'high' = 3.0 → 360000ms
+      const CODEX_CLI_TIMEOUT_MS = 120000;
+      expect(call.timeout).toBe(CODEX_CLI_TIMEOUT_MS * REASONING_TIMEOUT_MULTIPLIERS.high);
     });
 
     it('passes extended timeout for xhigh reasoning effort', async () => {
@@ -345,8 +383,10 @@ describe('codex-provider.ts', () => {
       );
 
       const call = vi.mocked(spawnJSONLProcess).mock.calls[0][0];
-      // No reasoning effort should use the default timeout
-      expect(call.timeout).toBe(DEFAULT_TIMEOUT_MS);
+      // No reasoning effort should use the CLI base timeout (2 minutes)
+      // CODEX_CLI_TIMEOUT_MS = 120000ms, no multiplier applied
+      const CODEX_CLI_TIMEOUT_MS = 120000;
+      expect(call.timeout).toBe(CODEX_CLI_TIMEOUT_MS);
     });
   });
 

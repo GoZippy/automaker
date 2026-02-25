@@ -19,7 +19,7 @@ export function createQueueListHandler(agentService: AgentService) {
         return;
       }
 
-      const result = agentService.getQueue(sessionId);
+      const result = await agentService.getQueue(sessionId);
       res.json(result);
     } catch (error) {
       logError(error, 'List queue failed');

@@ -15,6 +15,9 @@ const SDK_HISTORY_HEADER = 'Current request:\n';
 const DEFAULT_RESPONSE_TEXT = '';
 const SDK_ERROR_DETAILS_LABEL = 'Details:';
 
+type SdkReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+const SDK_REASONING_EFFORTS = new Set<string>(['minimal', 'low', 'medium', 'high', 'xhigh']);
+
 type PromptBlock = {
   type: string;
   text?: string;
@@ -99,37 +102,51 @@ export async function* executeCodexSdkQuery(
     const apiKey = resolveApiKey();
     const codex = new Codex({ apiKey });
 
+    // Build thread options with model
+    // The model must be passed to startThread/resumeThread so the SDK
+    // knows which model to use for the conversation. Without this,
+    // the SDK may use a default model that the user doesn't have access to.
+    const threadOptions: {
+      model?: string;
+      modelReasoningEffort?: SdkReasoningEffort;
+    } = {};
+
+    if (options.model) {
+      threadOptions.model = options.model;
+    }
+
+    // Add reasoning effort to thread options if model supports it
+    if (
+      options.reasoningEffort &&
+      options.model &&
+      supportsReasoningEffort(options.model) &&
+      options.reasoningEffort !== 'none' &&
+      SDK_REASONING_EFFORTS.has(options.reasoningEffort)
+    ) {
+      threadOptions.modelReasoningEffort = options.reasoningEffort as SdkReasoningEffort;
+    }
+
     // Resume existing thread or start new one
     let thread;
     if (options.sdkSessionId) {
       try {
-        thread = codex.resumeThread(options.sdkSessionId);
+        thread = codex.resumeThread(options.sdkSessionId, threadOptions);
       } catch {
         // If resume fails, start a new thread
-        thread = codex.startThread();
+        thread = codex.startThread(threadOptions);
       }
     } else {
-      thread = codex.startThread();
+      thread = codex.startThread(threadOptions);
     }
 
     const promptText = buildPromptText(options, systemPrompt);
 
-    // Build run options with reasoning effort if supported
+    // Build run options
     const runOptions: {
       signal?: AbortSignal;
-      reasoning?: { effort: string };
     } = {
       signal: options.abortController?.signal,
     };
-
-    // Add reasoning effort if model supports it and reasoningEffort is specified
-    if (
-      options.reasoningEffort &&
-      supportsReasoningEffort(options.model) &&
-      options.reasoningEffort !== 'none'
-    ) {
-      runOptions.reasoning = { effort: options.reasoningEffort };
-    }
 
     // Run the query
     const result = await thread.run(promptText, runOptions);
@@ -160,10 +177,42 @@ export async function* executeCodexSdkQuery(
   } catch (error) {
     const errorInfo = classifyError(error);
     const userMessage = getUserFriendlyErrorMessage(error);
-    const combinedMessage = buildSdkErrorMessage(errorInfo.message, userMessage);
+    let combinedMessage = buildSdkErrorMessage(errorInfo.message, userMessage);
+
+    // Enhance error messages with actionable tips for common Codex issues
+    // Normalize inputs to avoid crashes from nullish values
+    const errorLower = (errorInfo?.message ?? '').toLowerCase();
+    const modelLabel = options?.model ?? '<unknown model>';
+
+    if (
+      errorLower.includes('does not exist') ||
+      errorLower.includes('model_not_found') ||
+      errorLower.includes('invalid_model')
+    ) {
+      // Model not found - provide helpful guidance
+      combinedMessage +=
+        `\n\nTip: The model '${modelLabel}' may not be available on your OpenAI plan. ` +
+        `Some models (like gpt-5.3-codex) require a ChatGPT Pro/Plus subscription and OAuth login via 'codex login'. ` +
+        `Try using a different model (e.g., gpt-5.1 or gpt-5.2), or authenticate with 'codex login' instead of an API key.`;
+    } else if (
+      errorLower.includes('stream disconnected') ||
+      errorLower.includes('stream ended') ||
+      errorLower.includes('connection reset') ||
+      errorLower.includes('socket hang up')
+    ) {
+      // Stream disconnection - provide helpful guidance
+      combinedMessage +=
+        `\n\nTip: The connection to OpenAI was interrupted. This can happen due to:\n` +
+        `- Network instability\n` +
+        `- The model not being available on your plan (try 'codex login' for OAuth authentication)\n` +
+        `- Server-side timeouts for long-running requests\n` +
+        `Try again, or switch to a different model.`;
+    }
+
     console.error('[CodexSDK] executeQuery() error during execution:', {
       type: errorInfo.type,
       message: errorInfo.message,
+      model: options.model,
       isRateLimit: errorInfo.isRateLimit,
       retryAfter: errorInfo.retryAfter,
       stack: error instanceof Error ? error.stack : undefined,

@@ -5,11 +5,10 @@
  * with the provider architecture.
  */
 
-import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { BaseProvider } from './base-provider.js';
 import { classifyError, getUserFriendlyErrorMessage, createLogger } from '@automaker/utils';
-
-const logger = createLogger('ClaudeProvider');
+import { getClaudeAuthIndicators } from '@automaker/platform';
 import {
   getThinkingTokenBudget,
   validateBareModelId,
@@ -17,6 +16,14 @@ import {
   type ClaudeCompatibleProvider,
   type Credentials,
 } from '@automaker/types';
+import type {
+  ExecuteOptions,
+  ProviderMessage,
+  InstallationStatus,
+  ModelDefinition,
+} from './types.js';
+
+const logger = createLogger('ClaudeProvider');
 
 /**
  * ProviderConfig - Union type for provider configuration
@@ -25,29 +32,11 @@ import {
  * Both share the same connection settings structure.
  */
 type ProviderConfig = ClaudeApiProfile | ClaudeCompatibleProvider;
-import type {
-  ExecuteOptions,
-  ProviderMessage,
-  InstallationStatus,
-  ModelDefinition,
-} from './types.js';
 
-// Explicit allowlist of environment variables to pass to the SDK.
-// Only these vars are passed - nothing else from process.env leaks through.
-const ALLOWED_ENV_VARS = [
-  // Authentication
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  // Endpoint configuration
-  'ANTHROPIC_BASE_URL',
-  'API_TIMEOUT_MS',
-  // Model mappings
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  // Traffic control
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-  // System vars (always from process.env)
+// System vars are always passed from process.env regardless of profile.
+// Includes filesystem, locale, and temp directory vars that the Claude CLI
+// needs internally for config resolution and temp file creation.
+const SYSTEM_ENV_VARS = [
   'PATH',
   'HOME',
   'SHELL',
@@ -55,10 +44,12 @@ const ALLOWED_ENV_VARS = [
   'USER',
   'LANG',
   'LC_ALL',
+  'TMPDIR',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
 ];
-
-// System vars are always passed from process.env regardless of profile
-const SYSTEM_ENV_VARS = ['PATH', 'HOME', 'SHELL', 'TERM', 'USER', 'LANG', 'LC_ALL'];
 
 /**
  * Check if the config is a ClaudeCompatibleProvider (new system)
@@ -204,7 +195,7 @@ export class ClaudeProvider extends BaseProvider {
       model,
       cwd,
       systemPrompt,
-      maxTurns = 20,
+      maxTurns = 1000,
       allowedTools,
       abortController,
       conversationHistory,
@@ -219,8 +210,11 @@ export class ClaudeProvider extends BaseProvider {
     // claudeCompatibleProvider takes precedence over claudeApiProfile
     const providerConfig = claudeCompatibleProvider || claudeApiProfile;
 
-    // Convert thinking level to token budget
-    const maxThinkingTokens = getThinkingTokenBudget(thinkingLevel);
+    // Build thinking configuration
+    // Adaptive thinking (Opus 4.6): don't set maxThinkingTokens, model uses adaptive by default
+    // Manual thinking (Haiku/Sonnet): use budget_tokens
+    const maxThinkingTokens =
+      thinkingLevel === 'adaptive' ? undefined : getThinkingTokenBudget(thinkingLevel);
 
     // Build Claude SDK options
     const sdkOptions: Options = {
@@ -234,6 +228,8 @@ export class ClaudeProvider extends BaseProvider {
       env: buildEnv(providerConfig, credentials),
       // Pass through allowedTools if provided by caller (decided by sdk-options.ts)
       ...(allowedTools && { allowedTools }),
+      // Restrict available built-in tools if specified (tools: [] disables all tools)
+      ...(options.tools && { tools: options.tools }),
       // AUTONOMOUS MODE: Always bypass permissions for fully autonomous operation
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -255,14 +251,14 @@ export class ClaudeProvider extends BaseProvider {
     };
 
     // Build prompt payload
-    let promptPayload: string | AsyncIterable<any>;
+    let promptPayload: string | AsyncIterable<SDKUserMessage>;
 
     if (Array.isArray(prompt)) {
       // Multi-part prompt (with images)
       promptPayload = (async function* () {
-        const multiPartPrompt = {
+        const multiPartPrompt: SDKUserMessage = {
           type: 'user' as const,
-          session_id: '',
+          session_id: sdkSessionId || '',
           message: {
             role: 'user' as const,
             content: prompt,
@@ -314,12 +310,16 @@ export class ClaudeProvider extends BaseProvider {
         ? `${userMessage}\n\nTip: If you're running multiple features in auto-mode, consider reducing concurrency (maxConcurrency setting) to avoid hitting rate limits.`
         : userMessage;
 
-      const enhancedError = new Error(message);
-      (enhancedError as any).originalError = error;
-      (enhancedError as any).type = errorInfo.type;
+      const enhancedError = new Error(message) as Error & {
+        originalError: unknown;
+        type: string;
+        retryAfter?: number;
+      };
+      enhancedError.originalError = error;
+      enhancedError.type = errorInfo.type;
 
       if (errorInfo.isRateLimit) {
-        (enhancedError as any).retryAfter = errorInfo.retryAfter;
+        enhancedError.retryAfter = errorInfo.retryAfter;
       }
 
       throw enhancedError;
@@ -331,13 +331,37 @@ export class ClaudeProvider extends BaseProvider {
    */
   async detectInstallation(): Promise<InstallationStatus> {
     // Claude SDK is always available since it's a dependency
-    const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+    // Check all four supported auth methods, mirroring the logic in buildEnv():
+    // 1. ANTHROPIC_API_KEY environment variable
+    // 2. ANTHROPIC_AUTH_TOKEN environment variable
+    // 3. credentials?.apiKeys?.anthropic (credentials file, checked via platform indicators)
+    // 4. Claude Max CLI OAuth (SDK handles this automatically; detected via getClaudeAuthIndicators)
+    const hasEnvApiKey = !!process.env.ANTHROPIC_API_KEY;
+    const hasEnvAuthToken = !!process.env.ANTHROPIC_AUTH_TOKEN;
+
+    // Check credentials file and CLI OAuth indicators (same sources used by buildEnv)
+    let hasCredentialsApiKey = false;
+    let hasCliOAuth = false;
+    try {
+      const indicators = await getClaudeAuthIndicators();
+      hasCredentialsApiKey = !!indicators.credentials?.hasApiKey;
+      hasCliOAuth = !!(
+        indicators.credentials?.hasOAuthToken ||
+        indicators.hasStatsCacheWithActivity ||
+        (indicators.hasSettingsFile && indicators.hasProjectsSessions)
+      );
+    } catch {
+      // If we can't check indicators, fall back to env vars only
+    }
+
+    const hasApiKey = hasEnvApiKey || hasCredentialsApiKey;
+    const authenticated = hasEnvApiKey || hasEnvAuthToken || hasCredentialsApiKey || hasCliOAuth;
 
     const status: InstallationStatus = {
       installed: true,
       method: 'sdk',
       hasApiKey,
-      authenticated: hasApiKey,
+      authenticated,
     };
 
     return status;
@@ -349,17 +373,29 @@ export class ClaudeProvider extends BaseProvider {
   getAvailableModels(): ModelDefinition[] {
     const models = [
       {
-        id: 'claude-opus-4-5-20251101',
-        name: 'Claude Opus 4.5',
-        modelString: 'claude-opus-4-5-20251101',
+        id: 'claude-opus-4-6',
+        name: 'Claude Opus 4.6',
+        modelString: 'claude-opus-4-6',
         provider: 'anthropic',
-        description: 'Most capable Claude model',
+        description: 'Most capable Claude model with adaptive thinking',
         contextWindow: 200000,
-        maxOutputTokens: 16000,
+        maxOutputTokens: 128000,
         supportsVision: true,
         supportsTools: true,
         tier: 'premium' as const,
         default: true,
+      },
+      {
+        id: 'claude-sonnet-4-6',
+        name: 'Claude Sonnet 4.6',
+        modelString: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        description: 'Balanced performance and cost with enhanced reasoning',
+        contextWindow: 200000,
+        maxOutputTokens: 64000,
+        supportsVision: true,
+        supportsTools: true,
+        tier: 'standard' as const,
       },
       {
         id: 'claude-sonnet-4-20250514',

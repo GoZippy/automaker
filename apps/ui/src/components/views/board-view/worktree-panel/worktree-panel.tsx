@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
 import { GitBranch, Plus, RefreshCw } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
@@ -9,6 +10,7 @@ import { useIsMobile } from '@/hooks/use-media-query';
 import { useWorktreeInitScript, useProjectSettings } from '@/hooks/queries';
 import { useTestRunnerEvents } from '@/hooks/use-test-runners';
 import { useTestRunnersStore } from '@/store/test-runners-store';
+import { DEFAULT_TERMINAL_SCRIPTS } from '@/components/views/project-settings-view/terminal-scripts-constants';
 import type {
   TestRunnerStartedEvent,
   TestRunnerOutputEvent,
@@ -24,21 +26,33 @@ import {
 } from './hooks';
 import {
   WorktreeTab,
+  WorktreeDropdown,
   DevServerLogsPanel,
   WorktreeMobileDropdown,
   WorktreeActionsDropdown,
   BranchSwitchDropdown,
-  WorktreeDropdown,
 } from './components';
 import { useAppStore } from '@/store/app-store';
-import { ViewWorktreeChangesDialog, PushToRemoteDialog, MergeWorktreeDialog } from '../dialogs';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import {
+  ViewWorktreeChangesDialog,
+  ViewCommitsDialog,
+  PushToRemoteDialog,
+  MergeWorktreeDialog,
+  DiscardWorktreeChangesDialog,
+  SelectRemoteDialog,
+  StashChangesDialog,
+  ViewStashesDialog,
+  CherryPickDialog,
+  GitPullDialog,
+} from '../dialogs';
+import { StashConfirmDialog } from '../dialogs/stash-confirm-dialog';
+import type { SelectRemoteOperation } from '../dialogs';
 import { TestLogsPanel } from '@/components/ui/test-logs-panel';
-import { Undo2 } from 'lucide-react';
 import { getElectronAPI } from '@/lib/electron';
 
-/** Threshold for switching from tabs to dropdown layout (number of worktrees) */
-const WORKTREE_DROPDOWN_THRESHOLD = 3;
+// Stable empty array to avoid creating a new [] reference on every render
+// when pinnedWorktreeBranchesByProject[projectPath] is undefined
+const EMPTY_BRANCHES: string[] = [];
 
 export function WorktreePanel({
   projectPath,
@@ -46,10 +60,15 @@ export function WorktreePanel({
   onDeleteWorktree,
   onCommit,
   onCreatePR,
+  onChangePRNumber,
   onCreateBranch,
   onAddressPRComments,
+  onAutoAddressPRComments,
   onResolveConflicts,
   onCreateMergeConflictResolutionFeature,
+  onBranchSwitchConflict,
+  onStashPopConflict,
+  onStashApplyConflict,
   onBranchDeletedDuringMerge,
   onRemovedWorktrees,
   runningFeatureIds = [],
@@ -82,37 +101,146 @@ export function WorktreePanel({
     aheadCount,
     behindCount,
     hasRemoteBranch,
+    getTrackingRemote,
+    remotesWithBranch,
     isLoadingBranches,
     branchFilter,
     setBranchFilter,
     resetBranchFilter,
     fetchBranches,
+    pruneStaleEntries,
     gitRepoStatus,
   } = useBranches();
 
   const {
     isPulling,
     isPushing,
+    isSyncing,
     isSwitching,
     isActivating,
     handleSwitchBranch,
-    handlePull,
+    handlePull: _handlePull,
     handlePush,
+    handleSync,
+    handleSetTracking,
     handleOpenInIntegratedTerminal,
+    handleRunTerminalScript,
     handleOpenInEditor,
     handleOpenInExternalTerminal,
-  } = useWorktreeActions();
+    pendingSwitch,
+    confirmPendingSwitch,
+    cancelPendingSwitch,
+  } = useWorktreeActions({
+    onBranchSwitchConflict: onBranchSwitchConflict,
+    onStashPopConflict: onStashPopConflict,
+  });
 
   const { hasRunningFeatures } = useRunningFeatures({
     runningFeatureIds,
     features,
   });
 
+  // Pinned worktrees count from store
+  const pinnedWorktreesCount = useAppStore(
+    (state) => state.pinnedWorktreesCountByProject[projectPath] ?? 0
+  );
+  const pinnedWorktreeBranchesRaw = useAppStore(
+    (state) => state.pinnedWorktreeBranchesByProject[projectPath]
+  );
+  const pinnedWorktreeBranches = pinnedWorktreeBranchesRaw ?? EMPTY_BRANCHES;
+  const setPinnedWorktreeBranches = useAppStore((state) => state.setPinnedWorktreeBranches);
+  const swapPinnedWorktreeBranch = useAppStore((state) => state.swapPinnedWorktreeBranch);
+
+  // Resolve pinned worktrees from explicit branch assignments
+  // Shows exactly pinnedWorktreesCount slots, each with a specific worktree.
+  // Main worktree is always slot 0. Other slots can be swapped by the user.
+  const pinnedWorktrees = useMemo(() => {
+    const mainWt = worktrees.find((w) => w.isMain);
+    const otherWts = worktrees.filter((w) => !w.isMain);
+
+    // Slot 0 is always main worktree
+    const result: WorktreeInfo[] = mainWt ? [mainWt] : [];
+
+    // pinnedWorktreesCount represents only non-main worktrees; main is always shown separately
+    const otherSlotCount = Math.max(0, pinnedWorktreesCount);
+
+    if (otherSlotCount > 0 && otherWts.length > 0) {
+      // Use explicit branch assignments if available
+      const assignedBranches = pinnedWorktreeBranches;
+      const usedBranches = new Set<string>();
+
+      for (let i = 0; i < otherSlotCount; i++) {
+        const assignedBranch = assignedBranches[i];
+        let wt: WorktreeInfo | undefined;
+
+        // Try to find the explicitly assigned worktree
+        if (assignedBranch) {
+          wt = otherWts.find((w) => w.branch === assignedBranch && !usedBranches.has(w.branch));
+        }
+
+        // Fall back to next available worktree if assigned one doesn't exist
+        if (!wt) {
+          wt = otherWts.find((w) => !usedBranches.has(w.branch));
+        }
+
+        if (wt) {
+          result.push(wt);
+          usedBranches.add(wt.branch);
+        }
+      }
+    }
+
+    return result;
+  }, [worktrees, pinnedWorktreesCount, pinnedWorktreeBranches]);
+
+  // All non-main worktrees available for swapping into slots
+  const availableWorktreesForSwap = useMemo(() => {
+    return worktrees.filter((w) => !w.isMain);
+  }, [worktrees]);
+
+  // Handle swapping a worktree in a specific slot
+  const handleSwapWorktreeSlot = useCallback(
+    (slotIndex: number, newBranch: string) => {
+      swapPinnedWorktreeBranch(projectPath, slotIndex, newBranch);
+    },
+    [projectPath, swapPinnedWorktreeBranch]
+  );
+
+  // Initialize pinned branch assignments when worktrees change
+  // This ensures new worktrees get default slot assignments
+  // Read store state directly inside the effect to avoid a dependency cycle
+  // (the effect writes to the same state it would otherwise depend on)
+  useEffect(() => {
+    const mainWt = worktrees.find((w) => w.isMain);
+    const otherWts = worktrees.filter((w) => !w.isMain);
+    const otherSlotCount = Math.max(0, pinnedWorktreesCount);
+
+    const storedBranches = useAppStore.getState().pinnedWorktreeBranchesByProject[projectPath];
+    if (otherSlotCount > 0 && otherWts.length > 0) {
+      const existing = storedBranches ?? [];
+      if (existing.length < otherSlotCount) {
+        const used = new Set(existing.filter(Boolean));
+        const filled = [...existing];
+        for (const wt of otherWts) {
+          if (filled.length >= otherSlotCount) break;
+          if (!used.has(wt.branch)) {
+            filled.push(wt.branch);
+            used.add(wt.branch);
+          }
+        }
+        if (filled.length > 0) {
+          setPinnedWorktreeBranches(projectPath, filled);
+        }
+      }
+    }
+  }, [worktrees, pinnedWorktreesCount, projectPath, setPinnedWorktreeBranches]);
+
   // Auto-mode state management using the store
   // Use separate selectors to avoid creating new object references on each render
   const autoModeByWorktree = useAppStore((state) => state.autoModeByWorktree);
   const currentProject = useAppStore((state) => state.currentProject);
-
+  const setAutoModeRunning = useAppStore((state) => state.setAutoModeRunning);
+  const getMaxConcurrencyForWorktree = useAppStore((state) => state.getMaxConcurrencyForWorktree);
   // Helper to generate worktree key for auto-mode (inlined to avoid selector issues)
   const getAutoModeWorktreeKey = useCallback(
     (projectId: string, branchName: string | null): string => {
@@ -137,8 +265,6 @@ export function WorktreePanel({
     async (worktree: WorktreeInfo) => {
       if (!currentProject) return;
 
-      // Import the useAutoMode to get start/stop functions
-      // Since useAutoMode is a hook, we'll use the API client directly
       const api = getHttpApiClient();
       const branchName = worktree.isMain ? null : worktree.branch;
       const isRunning = isAutoModeRunningForWorktree(worktree);
@@ -147,14 +273,17 @@ export function WorktreePanel({
         if (isRunning) {
           const result = await api.autoMode.stop(projectPath, branchName);
           if (result.success) {
+            setAutoModeRunning(currentProject.id, branchName, false);
             const desc = branchName ? `worktree ${branchName}` : 'main branch';
             toast.success(`Auto Mode stopped for ${desc}`);
           } else {
             toast.error(result.error || 'Failed to stop Auto Mode');
           }
         } else {
-          const result = await api.autoMode.start(projectPath, branchName);
+          const maxConcurrency = getMaxConcurrencyForWorktree(currentProject.id, branchName);
+          const result = await api.autoMode.start(projectPath, branchName, maxConcurrency);
           if (result.success) {
+            setAutoModeRunning(currentProject.id, branchName, true, maxConcurrency);
             const desc = branchName ? `worktree ${branchName}` : 'main branch';
             toast.success(`Auto Mode started for ${desc}`);
           } else {
@@ -166,7 +295,13 @@ export function WorktreePanel({
         console.error('Auto mode toggle error:', error);
       }
     },
-    [currentProject, projectPath, isAutoModeRunningForWorktree]
+    [
+      currentProject,
+      projectPath,
+      isAutoModeRunningForWorktree,
+      setAutoModeRunning,
+      getMaxConcurrencyForWorktree,
+    ]
   );
 
   // Check if init script exists for the project using React Query
@@ -176,6 +311,21 @@ export function WorktreePanel({
   // Check if test command is configured in project settings
   const { data: projectSettings } = useProjectSettings(projectPath);
   const hasTestCommand = !!projectSettings?.testCommand;
+
+  // Get terminal quick scripts from project settings (or fall back to defaults)
+  const terminalScripts = useMemo(() => {
+    const configured = projectSettings?.terminalScripts;
+    if (configured && configured.length > 0) {
+      return configured;
+    }
+    return DEFAULT_TERMINAL_SCRIPTS;
+  }, [projectSettings?.terminalScripts]);
+
+  // Navigate to project settings to edit scripts
+  const navigate = useNavigate();
+  const handleEditScripts = useCallback(() => {
+    navigate({ to: '/project-settings', search: { section: 'commands-scripts' } });
+  }, [navigate]);
 
   // Test runner state management
   // Use the test runners store to get global state for all worktrees
@@ -365,6 +515,10 @@ export function WorktreePanel({
   const [viewChangesDialogOpen, setViewChangesDialogOpen] = useState(false);
   const [viewChangesWorktree, setViewChangesWorktree] = useState<WorktreeInfo | null>(null);
 
+  // View commits dialog state
+  const [viewCommitsDialogOpen, setViewCommitsDialogOpen] = useState(false);
+  const [viewCommitsWorktree, setViewCommitsWorktree] = useState<WorktreeInfo | null>(null);
+
   // Discard changes confirmation dialog state
   const [discardChangesDialogOpen, setDiscardChangesDialogOpen] = useState(false);
   const [discardChangesWorktree, setDiscardChangesWorktree] = useState<WorktreeInfo | null>(null);
@@ -377,26 +531,54 @@ export function WorktreePanel({
   const [pushToRemoteDialogOpen, setPushToRemoteDialogOpen] = useState(false);
   const [pushToRemoteWorktree, setPushToRemoteWorktree] = useState<WorktreeInfo | null>(null);
 
-  // Merge branch dialog state
+  // Integrate branch dialog state
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeWorktree, setMergeWorktree] = useState<WorktreeInfo | null>(null);
 
+  // Select remote dialog state (for pull/push with multiple remotes)
+  const [selectRemoteDialogOpen, setSelectRemoteDialogOpen] = useState(false);
+  const [selectRemoteWorktree, setSelectRemoteWorktree] = useState<WorktreeInfo | null>(null);
+  const [selectRemoteOperation, setSelectRemoteOperation] = useState<SelectRemoteOperation>('pull');
+
+  // Stash dialog states
+  const [stashChangesDialogOpen, setStashChangesDialogOpen] = useState(false);
+  const [stashChangesWorktree, setStashChangesWorktree] = useState<WorktreeInfo | null>(null);
+  const [viewStashesDialogOpen, setViewStashesDialogOpen] = useState(false);
+  const [viewStashesWorktree, setViewStashesWorktree] = useState<WorktreeInfo | null>(null);
+
+  // Cherry-pick dialog states
+  const [cherryPickDialogOpen, setCherryPickDialogOpen] = useState(false);
+  const [cherryPickWorktree, setCherryPickWorktree] = useState<WorktreeInfo | null>(null);
+
+  // Pull dialog states
+  const [pullDialogOpen, setPullDialogOpen] = useState(false);
+  const [pullDialogWorktree, setPullDialogWorktree] = useState<WorktreeInfo | null>(null);
+  const [pullDialogRemote, setPullDialogRemote] = useState<string | undefined>(undefined);
+
+  // Remotes cache: maps worktree path -> list of remotes (fetched when dropdown opens)
+  const [remotesCache, setRemotesCache] = useState<
+    Record<string, Array<{ name: string; url: string }>>
+  >({});
+
   const isMobile = useIsMobile();
 
-  // Periodic interval check (30 seconds) to detect branch changes on disk
-  // Reduced polling to lessen repeated worktree list calls while keeping UI reasonably fresh
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      fetchWorktrees({ silent: true });
-    }, 30000);
+  // NOTE: Periodic polling is handled by React Query's refetchInterval
+  // in hooks/queries/use-worktrees.ts (30s). No separate setInterval needed.
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+  // Prune stale tracking-remote cache entries and remotes cache when worktrees change
+  useEffect(() => {
+    const activePaths = new Set(worktrees.map((w) => w.path));
+    pruneStaleEntries(activePaths);
+    setRemotesCache((prev) => {
+      const next: typeof prev = {};
+      for (const key of Object.keys(prev)) {
+        if (activePaths.has(key)) {
+          next[key] = prev[key];
+        }
       }
-    };
-  }, [fetchWorktrees]);
+      return next;
+    });
+  }, [worktrees, pruneStaleEntries]);
 
   const isWorktreeSelected = (worktree: WorktreeInfo) => {
     return worktree.isMain
@@ -414,6 +596,23 @@ export function WorktreePanel({
   const handleActionsDropdownOpenChange = (worktree: WorktreeInfo) => (open: boolean) => {
     if (open) {
       fetchBranches(worktree.path);
+      // Fetch remotes for the submenu when the dropdown opens, but only if not already cached
+      if (!remotesCache[worktree.path]) {
+        const api = getHttpApiClient();
+        api.worktree
+          .listRemotes(worktree.path)
+          .then((result) => {
+            if (result.success && result.result) {
+              setRemotesCache((prev) => ({
+                ...prev,
+                [worktree.path]: result.result!.remotes.map((r) => ({ name: r.name, url: r.url })),
+              }));
+            }
+          })
+          .catch((err) => {
+            console.warn('Failed to fetch remotes for worktree:', err);
+          });
+      }
     }
   };
 
@@ -449,35 +648,91 @@ export function WorktreePanel({
     setViewChangesDialogOpen(true);
   }, []);
 
+  const handleViewCommits = useCallback((worktree: WorktreeInfo) => {
+    setViewCommitsWorktree(worktree);
+    setViewCommitsDialogOpen(true);
+  }, []);
+
   const handleDiscardChanges = useCallback((worktree: WorktreeInfo) => {
     setDiscardChangesWorktree(worktree);
     setDiscardChangesDialogOpen(true);
   }, []);
 
-  const handleConfirmDiscardChanges = useCallback(async () => {
-    if (!discardChangesWorktree) return;
+  const handleDiscardCompleted = useCallback(() => {
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees]);
 
-    try {
-      const api = getHttpApiClient();
-      const result = await api.worktree.discardChanges(discardChangesWorktree.path);
+  // Handle stash changes dialog
+  const handleStashChanges = useCallback((worktree: WorktreeInfo) => {
+    setStashChangesWorktree(worktree);
+    setStashChangesDialogOpen(true);
+  }, []);
 
-      if (result.success) {
-        toast.success('Changes discarded', {
-          description: `Discarded changes in ${discardChangesWorktree.branch}`,
-        });
-        // Refresh worktrees to update the changes status
-        fetchWorktrees({ silent: true });
-      } else {
-        toast.error('Failed to discard changes', {
-          description: result.error || 'Unknown error',
+  const handleStashCompleted = useCallback(() => {
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees]);
+
+  // Handle view stashes dialog
+  const handleViewStashes = useCallback((worktree: WorktreeInfo) => {
+    setViewStashesWorktree(worktree);
+    setViewStashesDialogOpen(true);
+  }, []);
+
+  const handleStashApplied = useCallback(() => {
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees]);
+
+  // Handle cherry-pick dialog
+  const handleCherryPick = useCallback((worktree: WorktreeInfo) => {
+    setCherryPickWorktree(worktree);
+    setCherryPickDialogOpen(true);
+  }, []);
+
+  const handleCherryPicked = useCallback(() => {
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees]);
+
+  // Handle aborting an in-progress merge/rebase/cherry-pick
+  const handleAbortOperation = useCallback(
+    async (worktree: WorktreeInfo) => {
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.abortOperation(worktree.path);
+        if (result.success && result.result) {
+          toast.success(result.result.message || 'Operation aborted successfully');
+          fetchWorktrees({ silent: true });
+        } else {
+          toast.error(result.error || 'Failed to abort operation');
+        }
+      } catch (error) {
+        toast.error('Failed to abort operation', {
+          description: error instanceof Error ? error.message : 'Unknown error',
         });
       }
-    } catch (error) {
-      toast.error('Failed to discard changes', {
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }, [discardChangesWorktree, fetchWorktrees]);
+    },
+    [fetchWorktrees]
+  );
+
+  // Handle continuing an in-progress merge/rebase/cherry-pick after conflict resolution
+  const handleContinueOperation = useCallback(
+    async (worktree: WorktreeInfo) => {
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.continueOperation(worktree.path);
+        if (result.success && result.result) {
+          toast.success(result.result.message || 'Operation continued successfully');
+          fetchWorktrees({ silent: true });
+        } else {
+          toast.error(result.error || 'Failed to continue operation');
+        }
+      } catch (error) {
+        toast.error('Failed to continue operation', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    },
+    [fetchWorktrees]
+  );
 
   // Handle opening the log panel for a specific worktree
   const handleViewDevServerLogs = useCallback((worktree: WorktreeInfo) => {
@@ -496,6 +751,181 @@ export function WorktreePanel({
     setPushToRemoteWorktree(worktree);
     setPushToRemoteDialogOpen(true);
   }, []);
+
+  // Keep a ref to pullDialogWorktree so handlePullCompleted can access the current
+  // value without including it in the dependency array. If pullDialogWorktree were
+  // a dep of handlePullCompleted, changing it would recreate the callback, which
+  // would propagate into GitPullDialog's onPulled prop and ultimately re-trigger
+  // the pull-check effect inside the dialog (causing the flow to run twice).
+  const pullDialogWorktreeRef = useRef(pullDialogWorktree);
+  useEffect(() => {
+    pullDialogWorktreeRef.current = pullDialogWorktree;
+  }, [pullDialogWorktree]);
+
+  // Handle pull completed - refresh branches and worktrees
+  const handlePullCompleted = useCallback(() => {
+    // Refresh branch data (ahead/behind counts, tracking) and worktree list
+    // after GitPullDialog completes the pull operation
+    if (pullDialogWorktreeRef.current) {
+      fetchBranches(pullDialogWorktreeRef.current.path);
+    }
+    fetchWorktrees({ silent: true });
+  }, [fetchWorktrees, fetchBranches]);
+
+  // Wrapper for onCommit that works with the pull dialog's simpler WorktreeInfo.
+  // Uses the full pullDialogWorktree when available (via ref to avoid making it
+  // a dep that would cascade into handleSuccessfulPull → checkForLocalChanges recreations).
+  const handleCommitMerge = useCallback(
+    (_simpleWorktree: { path: string; branch: string; isMain: boolean }) => {
+      // Prefer the full worktree object we already have (from ref)
+      if (pullDialogWorktreeRef.current) {
+        onCommit(pullDialogWorktreeRef.current);
+      }
+    },
+    [onCommit]
+  );
+
+  // Handle pull with remote selection when multiple remotes exist
+  // Now opens the pull dialog which handles stash management and conflict resolution
+  // If the branch has a tracked remote, pull from it directly (skip the remote selection dialog)
+  const handlePullWithRemoteSelection = useCallback(
+    async (worktree: WorktreeInfo) => {
+      // If the branch already tracks a remote, pull from it directly — no dialog needed
+      const tracked = getTrackingRemote(worktree.path);
+      if (tracked) {
+        setPullDialogRemote(tracked);
+        setPullDialogWorktree(worktree);
+        setPullDialogOpen(true);
+        return;
+      }
+
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.listRemotes(worktree.path);
+
+        if (result.success && result.result && result.result.remotes.length > 1) {
+          // Multiple remotes and no tracking remote - show selection dialog
+          setSelectRemoteWorktree(worktree);
+          setSelectRemoteOperation('pull');
+          setSelectRemoteDialogOpen(true);
+        } else if (result.success && result.result && result.result.remotes.length === 1) {
+          // Exactly one remote - open pull dialog directly with that remote
+          const remoteName = result.result.remotes[0].name;
+          setPullDialogRemote(remoteName);
+          setPullDialogWorktree(worktree);
+          setPullDialogOpen(true);
+        } else {
+          // No remotes - open pull dialog with default
+          setPullDialogRemote(undefined);
+          setPullDialogWorktree(worktree);
+          setPullDialogOpen(true);
+        }
+      } catch {
+        // If listing remotes fails, open pull dialog with default
+        setPullDialogRemote(undefined);
+        setPullDialogWorktree(worktree);
+        setPullDialogOpen(true);
+      }
+    },
+    [getTrackingRemote]
+  );
+
+  // Handle push with remote selection when multiple remotes exist
+  // If the branch has a tracked remote, push to it directly (skip the remote selection dialog)
+  const handlePushWithRemoteSelection = useCallback(
+    async (worktree: WorktreeInfo) => {
+      // If the branch already tracks a remote, push to it directly — no dialog needed
+      const tracked = getTrackingRemote(worktree.path);
+      if (tracked) {
+        handlePush(worktree, tracked);
+        return;
+      }
+
+      try {
+        const api = getHttpApiClient();
+        const result = await api.worktree.listRemotes(worktree.path);
+
+        if (result.success && result.result && result.result.remotes.length > 1) {
+          // Multiple remotes and no tracking remote - show selection dialog
+          setSelectRemoteWorktree(worktree);
+          setSelectRemoteOperation('push');
+          setSelectRemoteDialogOpen(true);
+        } else if (result.success && result.result && result.result.remotes.length === 1) {
+          // Exactly one remote - use it directly
+          const remoteName = result.result.remotes[0].name;
+          handlePush(worktree, remoteName);
+        } else {
+          // No remotes - proceed with default behavior
+          handlePush(worktree);
+        }
+      } catch {
+        // If listing remotes fails, fall back to default behavior
+        handlePush(worktree);
+      }
+    },
+    [handlePush, getTrackingRemote]
+  );
+
+  // Handle confirming remote selection for pull/push
+  const handleConfirmSelectRemote = useCallback(
+    async (worktree: WorktreeInfo, remote: string) => {
+      if (selectRemoteOperation === 'pull') {
+        // Open the pull dialog — let GitPullDialog manage the pull operation
+        // via its useEffect and onPulled callback (handlePullCompleted)
+        setPullDialogRemote(remote);
+        setPullDialogWorktree(worktree);
+        setPullDialogOpen(true);
+      } else {
+        await handlePush(worktree, remote);
+        fetchBranches(worktree.path);
+        fetchWorktrees({ silent: true });
+      }
+    },
+    [selectRemoteOperation, handlePush, fetchBranches, fetchWorktrees]
+  );
+
+  // Handle pull with a specific remote selected from the submenu (bypasses the remote selection dialog)
+  const handlePullWithSpecificRemote = useCallback((worktree: WorktreeInfo, remote: string) => {
+    // Open the pull dialog — let GitPullDialog manage the pull operation
+    // via its useEffect and onPulled callback (handlePullCompleted)
+    setPullDialogRemote(remote);
+    setPullDialogWorktree(worktree);
+    setPullDialogOpen(true);
+  }, []);
+
+  // Handle push to a specific remote selected from the submenu (bypasses the remote selection dialog)
+  const handlePushWithSpecificRemote = useCallback(
+    async (worktree: WorktreeInfo, remote: string) => {
+      await handlePush(worktree, remote);
+      fetchBranches(worktree.path);
+      fetchWorktrees({ silent: true });
+    },
+    [handlePush, fetchBranches, fetchWorktrees]
+  );
+
+  // Handle sync (pull + push) with optional remote selection
+  const handleSyncWithRemoteSelection = useCallback(
+    (worktree: WorktreeInfo) => {
+      handleSync(worktree);
+    },
+    [handleSync]
+  );
+
+  // Handle sync with a specific remote selected from the submenu
+  const handleSyncWithSpecificRemote = useCallback(
+    (worktree: WorktreeInfo, remote: string) => {
+      handleSync(worktree, remote);
+    },
+    [handleSync]
+  );
+
+  // Handle set tracking branch for a specific remote
+  const handleSetTrackingForRemote = useCallback(
+    (worktree: WorktreeInfo, remote: string) => {
+      handleSetTracking(worktree, remote);
+    },
+    [handleSetTracking]
+  );
 
   // Handle confirming the push to remote dialog
   const handleConfirmPushToRemote = useCallback(
@@ -527,20 +957,19 @@ export function WorktreePanel({
     setMergeDialogOpen(true);
   }, []);
 
-  // Handle merge completion - refresh worktrees and reassign features if branch was deleted
-  const handleMerged = useCallback(
-    (mergedWorktree: WorktreeInfo, deletedBranch: boolean) => {
+  // Handle integration completion - refresh worktrees and reassign features if branch was deleted
+  const handleIntegrated = useCallback(
+    (integratedWorktree: WorktreeInfo, deletedBranch: boolean) => {
       fetchWorktrees();
       // If the branch was deleted, notify parent to reassign features to main
       if (deletedBranch && onBranchDeletedDuringMerge) {
-        onBranchDeletedDuringMerge(mergedWorktree.branch);
+        onBranchDeletedDuringMerge(integratedWorktree.branch);
       }
     },
     [fetchWorktrees, onBranchDeletedDuringMerge]
   );
 
   const mainWorktree = worktrees.find((w) => w.isMain);
-  const nonMainWorktrees = worktrees.filter((w) => !w.isMain);
 
   // Mobile view: single dropdown for all worktrees
   if (isMobile) {
@@ -585,29 +1014,42 @@ export function WorktreePanel({
             aheadCount={aheadCount}
             behindCount={behindCount}
             hasRemoteBranch={hasRemoteBranch}
+            trackingRemote={getTrackingRemote(selectedWorktree.path)}
             isPulling={isPulling}
             isPushing={isPushing}
             isStartingDevServer={isStartingDevServer}
             isDevServerRunning={isDevServerRunning(selectedWorktree)}
             devServerInfo={getDevServerInfo(selectedWorktree)}
             gitRepoStatus={gitRepoStatus}
+            isLoadingGitStatus={isLoadingBranches}
             isAutoModeRunning={isAutoModeRunningForWorktree(selectedWorktree)}
             hasTestCommand={hasTestCommand}
             isStartingTests={isStartingTests}
             isTestRunning={isTestRunningForWorktree(selectedWorktree)}
             testSessionInfo={getTestSessionInfo(selectedWorktree)}
+            remotes={remotesCache[selectedWorktree.path]}
             onOpenChange={handleActionsDropdownOpenChange(selectedWorktree)}
-            onPull={handlePull}
-            onPush={handlePush}
+            onPull={handlePullWithRemoteSelection}
+            onPush={handlePushWithRemoteSelection}
             onPushNewBranch={handlePushNewBranch}
+            onPullWithRemote={handlePullWithSpecificRemote}
+            onPushWithRemote={handlePushWithSpecificRemote}
+            isSyncing={isSyncing}
+            onSync={handleSyncWithRemoteSelection}
+            onSyncWithRemote={handleSyncWithSpecificRemote}
+            onSetTracking={handleSetTrackingForRemote}
+            remotesWithBranch={remotesWithBranch}
             onOpenInEditor={handleOpenInEditor}
             onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
             onOpenInExternalTerminal={handleOpenInExternalTerminal}
             onViewChanges={handleViewChanges}
+            onViewCommits={handleViewCommits}
             onDiscardChanges={handleDiscardChanges}
             onCommit={onCommit}
             onCreatePR={onCreatePR}
+            onChangePRNumber={onChangePRNumber}
             onAddressPRComments={onAddressPRComments}
+            onAutoAddressPRComments={onAutoAddressPRComments}
             onResolveConflicts={onResolveConflicts}
             onMerge={handleMerge}
             onDeleteWorktree={onDeleteWorktree}
@@ -620,7 +1062,15 @@ export function WorktreePanel({
             onStartTests={handleStartTests}
             onStopTests={handleStopTests}
             onViewTestLogs={handleViewTestLogs}
+            onStashChanges={handleStashChanges}
+            onViewStashes={handleViewStashes}
+            onCherryPick={handleCherryPick}
+            onAbortOperation={handleAbortOperation}
+            onContinueOperation={handleContinueOperation}
             hasInitScript={hasInitScript}
+            terminalScripts={terminalScripts}
+            onRunTerminalScript={handleRunTerminalScript}
+            onEditScripts={handleEditScripts}
           />
         )}
 
@@ -662,17 +1112,70 @@ export function WorktreePanel({
           projectPath={projectPath}
         />
 
-        {/* Discard Changes Confirmation Dialog */}
-        <ConfirmDialog
+        {/* View Commits Dialog */}
+        <ViewCommitsDialog
+          open={viewCommitsDialogOpen}
+          onOpenChange={setViewCommitsDialogOpen}
+          worktree={viewCommitsWorktree}
+        />
+
+        {/* Discard Changes Dialog */}
+        <DiscardWorktreeChangesDialog
           open={discardChangesDialogOpen}
           onOpenChange={setDiscardChangesDialogOpen}
-          onConfirm={handleConfirmDiscardChanges}
-          title="Discard Changes"
-          description={`Are you sure you want to discard all changes in "${discardChangesWorktree?.branch}"? This will reset staged changes, discard modifications to tracked files, and remove untracked files. This action cannot be undone.`}
-          icon={Undo2}
-          iconClassName="text-destructive"
-          confirmText="Discard Changes"
-          confirmVariant="destructive"
+          worktree={discardChangesWorktree}
+          onDiscarded={handleDiscardCompleted}
+        />
+
+        {/* Stash Changes Dialog */}
+        <StashChangesDialog
+          open={stashChangesDialogOpen}
+          onOpenChange={setStashChangesDialogOpen}
+          worktree={stashChangesWorktree}
+          onStashed={handleStashCompleted}
+        />
+
+        {/* Stash Confirm Dialog for Branch Switching */}
+        <StashConfirmDialog
+          open={!!pendingSwitch}
+          onOpenChange={(isOpen) => {
+            if (!isOpen) cancelPendingSwitch();
+          }}
+          operationDescription={
+            pendingSwitch ? `switch to branch '${pendingSwitch.branchName}'` : ''
+          }
+          changesInfo={pendingSwitch?.changesInfo ?? null}
+          onConfirm={confirmPendingSwitch}
+          isLoading={isSwitching}
+        />
+
+        {/* View Stashes Dialog */}
+        <ViewStashesDialog
+          open={viewStashesDialogOpen}
+          onOpenChange={setViewStashesDialogOpen}
+          worktree={viewStashesWorktree}
+          onStashApplied={handleStashApplied}
+          onStashApplyConflict={onStashApplyConflict}
+        />
+
+        {/* Cherry Pick Dialog */}
+        <CherryPickDialog
+          open={cherryPickDialogOpen}
+          onOpenChange={setCherryPickDialogOpen}
+          worktree={cherryPickWorktree}
+          onCherryPicked={handleCherryPicked}
+          onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
+        />
+
+        {/* Git Pull Dialog */}
+        <GitPullDialog
+          open={pullDialogOpen}
+          onOpenChange={setPullDialogOpen}
+          worktree={pullDialogWorktree}
+          remote={pullDialogRemote}
+          onPulled={handlePullCompleted}
+          onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
+          onCommitMerge={handleCommitMerge}
         />
 
         {/* Dev Server Logs Panel */}
@@ -692,13 +1195,22 @@ export function WorktreePanel({
           onConfirm={handleConfirmPushToRemote}
         />
 
-        {/* Merge Branch Dialog */}
+        {/* Select Remote Dialog (for pull/push with multiple remotes) */}
+        <SelectRemoteDialog
+          open={selectRemoteDialogOpen}
+          onOpenChange={setSelectRemoteDialogOpen}
+          worktree={selectRemoteWorktree}
+          operation={selectRemoteOperation}
+          onConfirm={handleConfirmSelectRemote}
+        />
+
+        {/* Integrate Branch Dialog */}
         <MergeWorktreeDialog
           open={mergeDialogOpen}
           onOpenChange={setMergeDialogOpen}
           projectPath={projectPath}
           worktree={mergeWorktree}
-          onMerged={handleMerged}
+          onIntegrated={handleIntegrated}
           onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
         />
 
@@ -716,65 +1228,146 @@ export function WorktreePanel({
     );
   }
 
-  // Use dropdown layout when worktree count meets or exceeds the threshold
-  const useDropdownLayout = worktrees.length >= WORKTREE_DROPDOWN_THRESHOLD;
+  // Desktop view: pinned worktrees as individual tabs (each slot can be swapped)
 
-  // Desktop view: full tabs layout or dropdown layout depending on worktree count
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-glass/50 backdrop-blur-sm">
-      <GitBranch className="w-4 h-4 text-muted-foreground" />
-      <span className="text-sm text-muted-foreground mr-2">
-        {useDropdownLayout ? 'Worktree:' : 'Branch:'}
-      </span>
+    <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-border bg-glass/50 backdrop-blur-sm">
+      <GitBranch className="w-4 h-4 text-muted-foreground shrink-0" />
+      <span className="text-sm text-muted-foreground mr-2 shrink-0">Worktree:</span>
 
-      {/* Dropdown layout for 3+ worktrees */}
-      {useDropdownLayout ? (
-        <>
-          <WorktreeDropdown
-            worktrees={worktrees}
-            isWorktreeSelected={isWorktreeSelected}
-            hasRunningFeatures={hasRunningFeatures}
+      {/* When only 1 pinned slot (main only) and there are other worktrees,
+          use a compact dropdown to switch between them without highlighting main */}
+      {pinnedWorktreesCount === 0 && availableWorktreesForSwap.length > 0 ? (
+        <WorktreeDropdown
+          worktrees={worktrees}
+          isWorktreeSelected={isWorktreeSelected}
+          hasRunningFeatures={hasRunningFeatures}
+          isActivating={isActivating}
+          branchCardCounts={branchCardCounts}
+          isDevServerRunning={isDevServerRunning}
+          getDevServerInfo={getDevServerInfo}
+          isAutoModeRunningForWorktree={isAutoModeRunningForWorktree}
+          isTestRunningForWorktree={isTestRunningForWorktree}
+          getTestSessionInfo={getTestSessionInfo}
+          onSelectWorktree={handleSelectWorktree}
+          branches={branches}
+          filteredBranches={filteredBranches}
+          branchFilter={branchFilter}
+          isLoadingBranches={isLoadingBranches}
+          isSwitching={isSwitching}
+          onBranchDropdownOpenChange={handleBranchDropdownOpenChange}
+          onBranchFilterChange={setBranchFilter}
+          onSwitchBranch={handleSwitchBranch}
+          onCreateBranch={onCreateBranch}
+          isPulling={isPulling}
+          isPushing={isPushing}
+          isStartingDevServer={isStartingDevServer}
+          aheadCount={aheadCount}
+          behindCount={behindCount}
+          hasRemoteBranch={hasRemoteBranch}
+          getTrackingRemote={getTrackingRemote}
+          gitRepoStatus={gitRepoStatus}
+          hasTestCommand={hasTestCommand}
+          isStartingTests={isStartingTests}
+          hasInitScript={hasInitScript}
+          onActionsDropdownOpenChange={handleActionsDropdownOpenChange}
+          onPull={handlePullWithRemoteSelection}
+          onPush={handlePushWithRemoteSelection}
+          onPushNewBranch={handlePushNewBranch}
+          onPullWithRemote={handlePullWithSpecificRemote}
+          onPushWithRemote={handlePushWithSpecificRemote}
+          remotesCache={remotesCache}
+          onOpenInEditor={handleOpenInEditor}
+          onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
+          onOpenInExternalTerminal={handleOpenInExternalTerminal}
+          onViewChanges={handleViewChanges}
+          onViewCommits={handleViewCommits}
+          onDiscardChanges={handleDiscardChanges}
+          onCommit={onCommit}
+          onCreatePR={onCreatePR}
+          onChangePRNumber={onChangePRNumber}
+          onAddressPRComments={onAddressPRComments}
+          onAutoAddressPRComments={onAutoAddressPRComments}
+          onResolveConflicts={onResolveConflicts}
+          onMerge={handleMerge}
+          onDeleteWorktree={onDeleteWorktree}
+          onStartDevServer={handleStartDevServer}
+          onStopDevServer={handleStopDevServer}
+          onOpenDevServerUrl={handleOpenDevServerUrl}
+          onViewDevServerLogs={handleViewDevServerLogs}
+          onRunInitScript={handleRunInitScript}
+          onToggleAutoMode={handleToggleAutoMode}
+          onStartTests={handleStartTests}
+          onStopTests={handleStopTests}
+          onViewTestLogs={handleViewTestLogs}
+          onStashChanges={handleStashChanges}
+          onViewStashes={handleViewStashes}
+          onCherryPick={handleCherryPick}
+          onAbortOperation={handleAbortOperation}
+          onContinueOperation={handleContinueOperation}
+          terminalScripts={terminalScripts}
+          onRunTerminalScript={handleRunTerminalScript}
+          onEditScripts={handleEditScripts}
+          highlightTrigger={false}
+        />
+      ) : pinnedWorktreesCount === 0 ? (
+        /* Only main worktree, no others exist - render main tab without highlight */
+        mainWorktree && (
+          <WorktreeTab
+            worktree={mainWorktree}
+            cardCount={branchCardCounts?.[mainWorktree.branch]}
+            hasChanges={mainWorktree.hasChanges}
+            changedFilesCount={mainWorktree.changedFilesCount}
+            isSelected={false}
+            isRunning={hasRunningFeatures(mainWorktree)}
             isActivating={isActivating}
-            branchCardCounts={branchCardCounts}
-            isDevServerRunning={isDevServerRunning}
-            getDevServerInfo={getDevServerInfo}
-            isAutoModeRunningForWorktree={isAutoModeRunningForWorktree}
-            isTestRunningForWorktree={isTestRunningForWorktree}
-            getTestSessionInfo={getTestSessionInfo}
-            onSelectWorktree={handleSelectWorktree}
-            // Branch switching props
+            isDevServerRunning={isDevServerRunning(mainWorktree)}
+            devServerInfo={getDevServerInfo(mainWorktree)}
             branches={branches}
             filteredBranches={filteredBranches}
             branchFilter={branchFilter}
             isLoadingBranches={isLoadingBranches}
             isSwitching={isSwitching}
-            onBranchDropdownOpenChange={handleBranchDropdownOpenChange}
-            onBranchFilterChange={setBranchFilter}
-            onSwitchBranch={handleSwitchBranch}
-            onCreateBranch={onCreateBranch}
-            // Action dropdown props
             isPulling={isPulling}
             isPushing={isPushing}
             isStartingDevServer={isStartingDevServer}
             aheadCount={aheadCount}
             behindCount={behindCount}
             hasRemoteBranch={hasRemoteBranch}
+            trackingRemote={getTrackingRemote(mainWorktree.path)}
             gitRepoStatus={gitRepoStatus}
-            hasTestCommand={hasTestCommand}
+            isAutoModeRunning={isAutoModeRunningForWorktree(mainWorktree)}
             isStartingTests={isStartingTests}
-            hasInitScript={hasInitScript}
-            onActionsDropdownOpenChange={handleActionsDropdownOpenChange}
-            onPull={handlePull}
-            onPush={handlePush}
+            isTestRunning={isTestRunningForWorktree(mainWorktree)}
+            testSessionInfo={getTestSessionInfo(mainWorktree)}
+            onSelectWorktree={handleSelectWorktree}
+            onBranchDropdownOpenChange={handleBranchDropdownOpenChange(mainWorktree)}
+            onActionsDropdownOpenChange={handleActionsDropdownOpenChange(mainWorktree)}
+            onBranchFilterChange={setBranchFilter}
+            onSwitchBranch={handleSwitchBranch}
+            onCreateBranch={onCreateBranch}
+            onPull={handlePullWithRemoteSelection}
+            onPush={handlePushWithRemoteSelection}
             onPushNewBranch={handlePushNewBranch}
+            onPullWithRemote={handlePullWithSpecificRemote}
+            onPushWithRemote={handlePushWithSpecificRemote}
+            isSyncing={isSyncing}
+            onSync={handleSyncWithRemoteSelection}
+            onSyncWithRemote={handleSyncWithSpecificRemote}
+            onSetTracking={handleSetTrackingForRemote}
+            remotesWithBranch={remotesWithBranch}
+            remotes={remotesCache[mainWorktree.path]}
             onOpenInEditor={handleOpenInEditor}
             onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
             onOpenInExternalTerminal={handleOpenInExternalTerminal}
             onViewChanges={handleViewChanges}
+            onViewCommits={handleViewCommits}
             onDiscardChanges={handleDiscardChanges}
             onCommit={onCommit}
             onCreatePR={onCreatePR}
+            onChangePRNumber={onChangePRNumber}
             onAddressPRComments={onAddressPRComments}
+            onAutoAddressPRComments={onAutoAddressPRComments}
             onResolveConflicts={onResolveConflicts}
             onMerge={handleMerge}
             onDeleteWorktree={onDeleteWorktree}
@@ -787,206 +1380,143 @@ export function WorktreePanel({
             onStartTests={handleStartTests}
             onStopTests={handleStopTests}
             onViewTestLogs={handleViewTestLogs}
+            onStashChanges={handleStashChanges}
+            onViewStashes={handleViewStashes}
+            onCherryPick={handleCherryPick}
+            onAbortOperation={handleAbortOperation}
+            onContinueOperation={handleContinueOperation}
+            hasInitScript={hasInitScript}
+            hasTestCommand={hasTestCommand}
+            terminalScripts={terminalScripts}
+            onRunTerminalScript={handleRunTerminalScript}
+            onEditScripts={handleEditScripts}
           />
-
-          {useWorktreesEnabled && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                onClick={onCreateWorktree}
-                title="Create new worktree"
-              >
-                <Plus className="w-4 h-4" />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                onClick={async () => {
-                  const removedWorktrees = await fetchWorktrees();
-                  if (removedWorktrees && removedWorktrees.length > 0 && onRemovedWorktrees) {
-                    onRemovedWorktrees(removedWorktrees);
-                  }
-                }}
-                disabled={isLoading}
-                title="Refresh worktrees"
-              >
-                {isLoading ? <Spinner size="xs" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              </Button>
-            </>
-          )}
-        </>
+        )
       ) : (
-        /* Standard tabs layout for 1-2 worktrees */
+        /* Multiple pinned slots - show individual tabs */
+        pinnedWorktrees.map((worktree, index) => {
+          const hasOtherWorktrees = worktrees.length > 1;
+          const effectiveIsSelected =
+            isWorktreeSelected(worktree) && (hasOtherWorktrees || !worktree.isMain);
+
+          // Slot index for swap (0-based, excluding main which is always slot 0)
+          const slotIndex = worktree.isMain ? -1 : index - (pinnedWorktrees[0]?.isMain ? 1 : 0);
+
+          return (
+            <WorktreeTab
+              key={worktree.path}
+              worktree={worktree}
+              cardCount={branchCardCounts?.[worktree.branch]}
+              hasChanges={worktree.hasChanges}
+              changedFilesCount={worktree.changedFilesCount}
+              isSelected={effectiveIsSelected}
+              isRunning={hasRunningFeatures(worktree)}
+              isActivating={isActivating}
+              isDevServerRunning={isDevServerRunning(worktree)}
+              devServerInfo={getDevServerInfo(worktree)}
+              branches={branches}
+              filteredBranches={filteredBranches}
+              branchFilter={branchFilter}
+              isLoadingBranches={isLoadingBranches}
+              isSwitching={isSwitching}
+              isPulling={isPulling}
+              isPushing={isPushing}
+              isStartingDevServer={isStartingDevServer}
+              aheadCount={aheadCount}
+              behindCount={behindCount}
+              hasRemoteBranch={hasRemoteBranch}
+              trackingRemote={getTrackingRemote(worktree.path)}
+              gitRepoStatus={gitRepoStatus}
+              isAutoModeRunning={isAutoModeRunningForWorktree(worktree)}
+              isStartingTests={isStartingTests}
+              isTestRunning={isTestRunningForWorktree(worktree)}
+              testSessionInfo={getTestSessionInfo(worktree)}
+              onSelectWorktree={handleSelectWorktree}
+              onBranchDropdownOpenChange={handleBranchDropdownOpenChange(worktree)}
+              onActionsDropdownOpenChange={handleActionsDropdownOpenChange(worktree)}
+              onBranchFilterChange={setBranchFilter}
+              onSwitchBranch={handleSwitchBranch}
+              onCreateBranch={onCreateBranch}
+              onPull={handlePullWithRemoteSelection}
+              onPush={handlePushWithRemoteSelection}
+              onPushNewBranch={handlePushNewBranch}
+              onPullWithRemote={handlePullWithSpecificRemote}
+              onPushWithRemote={handlePushWithSpecificRemote}
+              remotes={remotesCache[worktree.path]}
+              onOpenInEditor={handleOpenInEditor}
+              onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
+              onOpenInExternalTerminal={handleOpenInExternalTerminal}
+              onViewChanges={handleViewChanges}
+              onViewCommits={handleViewCommits}
+              onDiscardChanges={handleDiscardChanges}
+              onCommit={onCommit}
+              onCreatePR={onCreatePR}
+              onChangePRNumber={onChangePRNumber}
+              onAddressPRComments={onAddressPRComments}
+              onAutoAddressPRComments={onAutoAddressPRComments}
+              onResolveConflicts={onResolveConflicts}
+              onMerge={handleMerge}
+              onDeleteWorktree={onDeleteWorktree}
+              onStartDevServer={handleStartDevServer}
+              onStopDevServer={handleStopDevServer}
+              onOpenDevServerUrl={handleOpenDevServerUrl}
+              onViewDevServerLogs={handleViewDevServerLogs}
+              onRunInitScript={handleRunInitScript}
+              onToggleAutoMode={handleToggleAutoMode}
+              onStartTests={handleStartTests}
+              onStopTests={handleStopTests}
+              onViewTestLogs={handleViewTestLogs}
+              onStashChanges={handleStashChanges}
+              onViewStashes={handleViewStashes}
+              onCherryPick={handleCherryPick}
+              onAbortOperation={handleAbortOperation}
+              onContinueOperation={handleContinueOperation}
+              hasInitScript={hasInitScript}
+              hasTestCommand={hasTestCommand}
+              terminalScripts={terminalScripts}
+              onRunTerminalScript={handleRunTerminalScript}
+              onEditScripts={handleEditScripts}
+              availableWorktreesForSwap={!worktree.isMain ? availableWorktreesForSwap : undefined}
+              slotIndex={slotIndex >= 0 ? slotIndex : undefined}
+              onSwapWorktree={slotIndex >= 0 ? handleSwapWorktreeSlot : undefined}
+              pinnedBranches={pinnedWorktrees.map((w) => w.branch)}
+              isSyncing={isSyncing}
+              onSync={handleSyncWithRemoteSelection}
+              onSyncWithRemote={handleSyncWithSpecificRemote}
+              onSetTracking={handleSetTrackingForRemote}
+            />
+          );
+        })
+      )}
+
+      {/* Create and refresh buttons */}
+      {useWorktreesEnabled && (
         <>
-          <div className="flex items-center gap-2">
-            {mainWorktree && (
-              <WorktreeTab
-                key={mainWorktree.path}
-                worktree={mainWorktree}
-                cardCount={branchCardCounts?.[mainWorktree.branch]}
-                hasChanges={mainWorktree.hasChanges}
-                changedFilesCount={mainWorktree.changedFilesCount}
-                isSelected={isWorktreeSelected(mainWorktree)}
-                isRunning={hasRunningFeatures(mainWorktree)}
-                isActivating={isActivating}
-                isDevServerRunning={isDevServerRunning(mainWorktree)}
-                devServerInfo={getDevServerInfo(mainWorktree)}
-                branches={branches}
-                filteredBranches={filteredBranches}
-                branchFilter={branchFilter}
-                isLoadingBranches={isLoadingBranches}
-                isSwitching={isSwitching}
-                isPulling={isPulling}
-                isPushing={isPushing}
-                isStartingDevServer={isStartingDevServer}
-                aheadCount={aheadCount}
-                behindCount={behindCount}
-                hasRemoteBranch={hasRemoteBranch}
-                gitRepoStatus={gitRepoStatus}
-                isAutoModeRunning={isAutoModeRunningForWorktree(mainWorktree)}
-                isStartingTests={isStartingTests}
-                isTestRunning={isTestRunningForWorktree(mainWorktree)}
-                testSessionInfo={getTestSessionInfo(mainWorktree)}
-                onSelectWorktree={handleSelectWorktree}
-                onBranchDropdownOpenChange={handleBranchDropdownOpenChange(mainWorktree)}
-                onActionsDropdownOpenChange={handleActionsDropdownOpenChange(mainWorktree)}
-                onBranchFilterChange={setBranchFilter}
-                onSwitchBranch={handleSwitchBranch}
-                onCreateBranch={onCreateBranch}
-                onPull={handlePull}
-                onPush={handlePush}
-                onPushNewBranch={handlePushNewBranch}
-                onOpenInEditor={handleOpenInEditor}
-                onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
-                onOpenInExternalTerminal={handleOpenInExternalTerminal}
-                onViewChanges={handleViewChanges}
-                onDiscardChanges={handleDiscardChanges}
-                onCommit={onCommit}
-                onCreatePR={onCreatePR}
-                onAddressPRComments={onAddressPRComments}
-                onResolveConflicts={onResolveConflicts}
-                onMerge={handleMerge}
-                onDeleteWorktree={onDeleteWorktree}
-                onStartDevServer={handleStartDevServer}
-                onStopDevServer={handleStopDevServer}
-                onOpenDevServerUrl={handleOpenDevServerUrl}
-                onViewDevServerLogs={handleViewDevServerLogs}
-                onRunInitScript={handleRunInitScript}
-                onToggleAutoMode={handleToggleAutoMode}
-                onStartTests={handleStartTests}
-                onStopTests={handleStopTests}
-                onViewTestLogs={handleViewTestLogs}
-                hasInitScript={hasInitScript}
-                hasTestCommand={hasTestCommand}
-              />
-            )}
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={onCreateWorktree}
+            title="Create new worktree"
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
 
-          {/* Worktrees section - only show if enabled and not using dropdown layout */}
-          {useWorktreesEnabled && (
-            <>
-              <div className="w-px h-5 bg-border mx-2" />
-              <GitBranch className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground mr-2">Worktrees:</span>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                {nonMainWorktrees.map((worktree) => {
-                  const cardCount = branchCardCounts?.[worktree.branch];
-                  return (
-                    <WorktreeTab
-                      key={worktree.path}
-                      worktree={worktree}
-                      cardCount={cardCount}
-                      hasChanges={worktree.hasChanges}
-                      changedFilesCount={worktree.changedFilesCount}
-                      isSelected={isWorktreeSelected(worktree)}
-                      isRunning={hasRunningFeatures(worktree)}
-                      isActivating={isActivating}
-                      isDevServerRunning={isDevServerRunning(worktree)}
-                      devServerInfo={getDevServerInfo(worktree)}
-                      branches={branches}
-                      filteredBranches={filteredBranches}
-                      branchFilter={branchFilter}
-                      isLoadingBranches={isLoadingBranches}
-                      isSwitching={isSwitching}
-                      isPulling={isPulling}
-                      isPushing={isPushing}
-                      isStartingDevServer={isStartingDevServer}
-                      aheadCount={aheadCount}
-                      behindCount={behindCount}
-                      hasRemoteBranch={hasRemoteBranch}
-                      gitRepoStatus={gitRepoStatus}
-                      isAutoModeRunning={isAutoModeRunningForWorktree(worktree)}
-                      isStartingTests={isStartingTests}
-                      isTestRunning={isTestRunningForWorktree(worktree)}
-                      testSessionInfo={getTestSessionInfo(worktree)}
-                      onSelectWorktree={handleSelectWorktree}
-                      onBranchDropdownOpenChange={handleBranchDropdownOpenChange(worktree)}
-                      onActionsDropdownOpenChange={handleActionsDropdownOpenChange(worktree)}
-                      onBranchFilterChange={setBranchFilter}
-                      onSwitchBranch={handleSwitchBranch}
-                      onCreateBranch={onCreateBranch}
-                      onPull={handlePull}
-                      onPush={handlePush}
-                      onPushNewBranch={handlePushNewBranch}
-                      onOpenInEditor={handleOpenInEditor}
-                      onOpenInIntegratedTerminal={handleOpenInIntegratedTerminal}
-                      onOpenInExternalTerminal={handleOpenInExternalTerminal}
-                      onViewChanges={handleViewChanges}
-                      onDiscardChanges={handleDiscardChanges}
-                      onCommit={onCommit}
-                      onCreatePR={onCreatePR}
-                      onAddressPRComments={onAddressPRComments}
-                      onResolveConflicts={onResolveConflicts}
-                      onMerge={handleMerge}
-                      onDeleteWorktree={onDeleteWorktree}
-                      onStartDevServer={handleStartDevServer}
-                      onStopDevServer={handleStopDevServer}
-                      onOpenDevServerUrl={handleOpenDevServerUrl}
-                      onViewDevServerLogs={handleViewDevServerLogs}
-                      onRunInitScript={handleRunInitScript}
-                      onToggleAutoMode={handleToggleAutoMode}
-                      onStartTests={handleStartTests}
-                      onStopTests={handleStopTests}
-                      onViewTestLogs={handleViewTestLogs}
-                      hasInitScript={hasInitScript}
-                      hasTestCommand={hasTestCommand}
-                    />
-                  );
-                })}
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={onCreateWorktree}
-                  title="Create new worktree"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={async () => {
-                    const removedWorktrees = await fetchWorktrees();
-                    if (removedWorktrees && removedWorktrees.length > 0 && onRemovedWorktrees) {
-                      onRemovedWorktrees(removedWorktrees);
-                    }
-                  }}
-                  disabled={isLoading}
-                  title="Refresh worktrees"
-                >
-                  {isLoading ? <Spinner size="xs" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                </Button>
-              </div>
-            </>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={async () => {
+              const removedWorktrees = await fetchWorktrees();
+              if (removedWorktrees && removedWorktrees.length > 0 && onRemovedWorktrees) {
+                onRemovedWorktrees(removedWorktrees);
+              }
+            }}
+            disabled={isLoading}
+            title="Refresh worktrees"
+          >
+            {isLoading ? <Spinner size="xs" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          </Button>
         </>
       )}
 
@@ -998,17 +1528,19 @@ export function WorktreePanel({
         projectPath={projectPath}
       />
 
-      {/* Discard Changes Confirmation Dialog */}
-      <ConfirmDialog
+      {/* View Commits Dialog */}
+      <ViewCommitsDialog
+        open={viewCommitsDialogOpen}
+        onOpenChange={setViewCommitsDialogOpen}
+        worktree={viewCommitsWorktree}
+      />
+
+      {/* Discard Changes Dialog */}
+      <DiscardWorktreeChangesDialog
         open={discardChangesDialogOpen}
         onOpenChange={setDiscardChangesDialogOpen}
-        onConfirm={handleConfirmDiscardChanges}
-        title="Discard Changes"
-        description={`Are you sure you want to discard all changes in "${discardChangesWorktree?.branch}"? This will reset staged changes, discard modifications to tracked files, and remove untracked files. This action cannot be undone.`}
-        icon={Undo2}
-        iconClassName="text-destructive"
-        confirmText="Discard Changes"
-        confirmVariant="destructive"
+        worktree={discardChangesWorktree}
+        onDiscarded={handleDiscardCompleted}
       />
 
       {/* Dev Server Logs Panel */}
@@ -1028,13 +1560,22 @@ export function WorktreePanel({
         onConfirm={handleConfirmPushToRemote}
       />
 
-      {/* Merge Branch Dialog */}
+      {/* Select Remote Dialog (for pull/push with multiple remotes) */}
+      <SelectRemoteDialog
+        open={selectRemoteDialogOpen}
+        onOpenChange={setSelectRemoteDialogOpen}
+        worktree={selectRemoteWorktree}
+        operation={selectRemoteOperation}
+        onConfirm={handleConfirmSelectRemote}
+      />
+
+      {/* Integrate Branch Dialog */}
       <MergeWorktreeDialog
         open={mergeDialogOpen}
         onOpenChange={setMergeDialogOpen}
         projectPath={projectPath}
         worktree={mergeWorktree}
-        onMerged={handleMerged}
+        onIntegrated={handleIntegrated}
         onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
       />
 
@@ -1047,6 +1588,55 @@ export function WorktreePanel({
         onStopTests={
           testLogsPanelWorktree ? () => handleStopTests(testLogsPanelWorktree) : undefined
         }
+      />
+
+      {/* Stash Changes Dialog */}
+      <StashChangesDialog
+        open={stashChangesDialogOpen}
+        onOpenChange={setStashChangesDialogOpen}
+        worktree={stashChangesWorktree}
+        onStashed={handleStashCompleted}
+      />
+
+      {/* Stash Confirm Dialog for Branch Switching */}
+      <StashConfirmDialog
+        open={!!pendingSwitch}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) cancelPendingSwitch();
+        }}
+        operationDescription={pendingSwitch ? `switch to branch '${pendingSwitch.branchName}'` : ''}
+        changesInfo={pendingSwitch?.changesInfo ?? null}
+        onConfirm={confirmPendingSwitch}
+        isLoading={isSwitching}
+      />
+
+      {/* View Stashes Dialog */}
+      <ViewStashesDialog
+        open={viewStashesDialogOpen}
+        onOpenChange={setViewStashesDialogOpen}
+        worktree={viewStashesWorktree}
+        onStashApplied={handleStashApplied}
+        onStashApplyConflict={onStashApplyConflict}
+      />
+
+      {/* Cherry Pick Dialog */}
+      <CherryPickDialog
+        open={cherryPickDialogOpen}
+        onOpenChange={setCherryPickDialogOpen}
+        worktree={cherryPickWorktree}
+        onCherryPicked={handleCherryPicked}
+        onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
+      />
+
+      {/* Git Pull Dialog */}
+      <GitPullDialog
+        open={pullDialogOpen}
+        onOpenChange={setPullDialogOpen}
+        worktree={pullDialogWorktree}
+        remote={pullDialogRemote}
+        onPulled={handlePullCompleted}
+        onCommitMerge={handleCommitMerge}
+        onCreateConflictResolutionFeature={onCreateMergeConflictResolutionFeature}
       />
     </div>
   );

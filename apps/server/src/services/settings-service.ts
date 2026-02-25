@@ -31,6 +31,7 @@ import type {
   WorktreeInfo,
   PhaseModelConfig,
   PhaseModelEntry,
+  FeatureTemplate,
   ClaudeApiProfile,
   ClaudeCompatibleProvider,
   ProviderModel,
@@ -40,6 +41,7 @@ import {
   DEFAULT_CREDENTIALS,
   DEFAULT_PROJECT_SETTINGS,
   DEFAULT_PHASE_MODELS,
+  DEFAULT_FEATURE_TEMPLATES,
   SETTINGS_VERSION,
   CREDENTIALS_VERSION,
   PROJECT_SETTINGS_VERSION,
@@ -139,6 +141,11 @@ export class SettingsService {
     // Migrate model IDs to canonical format
     const migratedModelSettings = this.migrateModelSettings(settings);
 
+    // Merge built-in feature templates: ensure all built-in templates exist in user settings.
+    // User customizations (enabled/disabled state, order overrides) are preserved.
+    // New built-in templates added in code updates are injected for existing users.
+    const mergedFeatureTemplates = this.mergeBuiltInTemplates(settings.featureTemplates);
+
     // Apply any missing defaults (for backwards compatibility)
     let result: GlobalSettings = {
       ...DEFAULT_GLOBAL_SETTINGS,
@@ -149,6 +156,7 @@ export class SettingsService {
         ...settings.keyboardShortcuts,
       },
       phaseModels: migratedPhaseModels,
+      featureTemplates: mergedFeatureTemplates,
     };
 
     // Version-based migrations
@@ -248,6 +256,32 @@ export class SettingsService {
     }
 
     return result;
+  }
+
+  /**
+   * Merge built-in feature templates with user's stored templates.
+   *
+   * Ensures new built-in templates added in code updates are available to existing users
+   * without overwriting their customizations (e.g., enabled/disabled state, custom order).
+   * Built-in templates missing from stored settings are appended with their defaults.
+   *
+   * @param storedTemplates - Templates from user's settings file (may be undefined for new installs)
+   * @returns Merged template list with all built-in templates present
+   */
+  private mergeBuiltInTemplates(storedTemplates: FeatureTemplate[] | undefined): FeatureTemplate[] {
+    if (!storedTemplates) {
+      return DEFAULT_FEATURE_TEMPLATES;
+    }
+
+    const storedIds = new Set(storedTemplates.map((t) => t.id));
+    const missingBuiltIns = DEFAULT_FEATURE_TEMPLATES.filter((t) => !storedIds.has(t.id));
+
+    if (missingBuiltIns.length === 0) {
+      return storedTemplates;
+    }
+
+    // Append missing built-in templates after existing ones
+    return [...storedTemplates, ...missingBuiltIns];
   }
 
   /**
@@ -573,6 +607,17 @@ export class SettingsService {
     ignoreEmptyArrayOverwrite('claudeApiProfiles');
     // Note: claudeCompatibleProviders intentionally NOT guarded - users should be able to delete all providers
 
+    // Check for explicit permission to clear eventHooks (escape hatch for intentional clearing)
+    const allowEmptyEventHooks =
+      (sanitizedUpdates as Record<string, unknown>).__allowEmptyEventHooks === true;
+    // Remove the flag so it doesn't get persisted
+    delete (sanitizedUpdates as Record<string, unknown>).__allowEmptyEventHooks;
+
+    // Only guard eventHooks if explicit permission wasn't granted
+    if (!allowEmptyEventHooks) {
+      ignoreEmptyArrayOverwrite('eventHooks');
+    }
+
     // Empty object overwrite guard
     const ignoreEmptyObjectOverwrite = <K extends keyof GlobalSettings>(key: K): void => {
       const nextVal = sanitizedUpdates[key] as unknown;
@@ -729,6 +774,7 @@ export class SettingsService {
     anthropic: { configured: boolean; masked: string };
     google: { configured: boolean; masked: string };
     openai: { configured: boolean; masked: string };
+    zai: { configured: boolean; masked: string };
   }> {
     const credentials = await this.getCredentials();
 
@@ -749,6 +795,10 @@ export class SettingsService {
       openai: {
         configured: !!credentials.apiKeys.openai,
         masked: maskKey(credentials.apiKeys.openai),
+      },
+      zai: {
+        configured: !!credentials.apiKeys.zai,
+        masked: maskKey(credentials.apiKeys.zai),
       },
     };
   }
@@ -1018,6 +1068,7 @@ export class SettingsService {
             anthropic: apiKeys.anthropic || '',
             google: apiKeys.google || '',
             openai: apiKeys.openai || '',
+            zai: '',
           },
         });
         migratedCredentials = true;

@@ -56,7 +56,7 @@ import {
 import { createSettingsRoutes } from './routes/settings/index.js';
 import { AgentService } from './services/agent-service.js';
 import { FeatureLoader } from './services/feature-loader.js';
-import { AutoModeService } from './services/auto-mode-service.js';
+import { AutoModeServiceCompat } from './services/auto-mode/index.js';
 import { getTerminalService } from './services/terminal-service.js';
 import { SettingsService } from './services/settings-service.js';
 import { createSpecRegenerationRoutes } from './routes/app-spec/index.js';
@@ -66,6 +66,10 @@ import { createCodexRoutes } from './routes/codex/index.js';
 import { CodexUsageService } from './services/codex-usage-service.js';
 import { CodexAppServerService } from './services/codex-app-server-service.js';
 import { CodexModelCacheService } from './services/codex-model-cache-service.js';
+import { createZaiRoutes } from './routes/zai/index.js';
+import { ZaiUsageService } from './services/zai-usage-service.js';
+import { createGeminiRoutes } from './routes/gemini/index.js';
+import { GeminiUsageService } from './services/gemini-usage-service.js';
 import { createGitHubRoutes } from './routes/github/index.js';
 import { createContextRoutes } from './routes/context/index.js';
 import { createBacklogPlanRoutes } from './routes/backlog-plan/index.js';
@@ -121,20 +125,56 @@ const BOX_CONTENT_WIDTH = 67;
 // The Claude Agent SDK can use either ANTHROPIC_API_KEY or Claude Code CLI authentication
 (async () => {
   const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+  const hasEnvOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  logger.debug('[CREDENTIAL_CHECK] Starting credential detection...');
+  logger.debug('[CREDENTIAL_CHECK] Environment variables:', {
+    hasAnthropicKey,
+    hasEnvOAuthToken,
+  });
 
   if (hasAnthropicKey) {
     logger.info('✓ ANTHROPIC_API_KEY detected');
     return;
   }
 
+  if (hasEnvOAuthToken) {
+    logger.info('✓ CLAUDE_CODE_OAUTH_TOKEN detected');
+    return;
+  }
+
   // Check for Claude Code CLI authentication
+  // Store indicators outside the try block so we can use them in the warning message
+  let cliAuthIndicators: Awaited<ReturnType<typeof getClaudeAuthIndicators>> | null = null;
+
   try {
-    const indicators = await getClaudeAuthIndicators();
+    cliAuthIndicators = await getClaudeAuthIndicators();
+    const indicators = cliAuthIndicators;
+
+    // Log detailed credential detection results
+    const { checks, ...indicatorSummary } = indicators;
+    logger.debug('[CREDENTIAL_CHECK] Claude CLI auth indicators:', indicatorSummary);
+
+    logger.debug('[CREDENTIAL_CHECK] File check details:', checks);
+
     const hasCliAuth =
       indicators.hasStatsCacheWithActivity ||
       (indicators.hasSettingsFile && indicators.hasProjectsSessions) ||
       (indicators.hasCredentialsFile &&
         (indicators.credentials?.hasOAuthToken || indicators.credentials?.hasApiKey));
+
+    logger.debug('[CREDENTIAL_CHECK] Auth determination:', {
+      hasCliAuth,
+      reason: hasCliAuth
+        ? indicators.hasStatsCacheWithActivity
+          ? 'stats cache with activity'
+          : indicators.hasSettingsFile && indicators.hasProjectsSessions
+            ? 'settings file + project sessions'
+            : indicators.credentials?.hasOAuthToken
+              ? 'credentials file with OAuth token'
+              : 'credentials file with API key'
+        : 'no valid credentials found',
+    });
 
     if (hasCliAuth) {
       logger.info('✓ Claude Code CLI authentication detected');
@@ -145,7 +185,7 @@ const BOX_CONTENT_WIDTH = 67;
     logger.warn('Error checking for Claude Code CLI authentication:', error);
   }
 
-  // No authentication found - show warning
+  // No authentication found - show warning with paths that were checked
   const wHeader = '⚠️  WARNING: No Claude authentication configured'.padEnd(BOX_CONTENT_WIDTH);
   const w1 = 'The Claude Agent SDK requires authentication to function.'.padEnd(BOX_CONTENT_WIDTH);
   const w2 = 'Options:'.padEnd(BOX_CONTENT_WIDTH);
@@ -158,6 +198,33 @@ const BOX_CONTENT_WIDTH = 67;
     BOX_CONTENT_WIDTH
   );
 
+  // Build paths checked summary from the indicators (if available)
+  let pathsCheckedInfo = '';
+  if (cliAuthIndicators) {
+    const pathsChecked: string[] = [];
+
+    // Collect paths that were checked (paths are always populated strings)
+    pathsChecked.push(`Settings: ${cliAuthIndicators.checks.settingsFile.path}`);
+    pathsChecked.push(`Stats cache: ${cliAuthIndicators.checks.statsCache.path}`);
+    pathsChecked.push(`Projects dir: ${cliAuthIndicators.checks.projectsDir.path}`);
+    for (const credFile of cliAuthIndicators.checks.credentialFiles) {
+      pathsChecked.push(`Credentials: ${credFile.path}`);
+    }
+
+    if (pathsChecked.length > 0) {
+      pathsCheckedInfo = `
+║                                                                     ║
+║  ${'Paths checked:'.padEnd(BOX_CONTENT_WIDTH)}║
+${pathsChecked
+  .map((p) => {
+    const maxLen = BOX_CONTENT_WIDTH - 4;
+    const display = p.length > maxLen ? '...' + p.slice(-(maxLen - 3)) : p;
+    return `║    ${display.padEnd(maxLen)}  ║`;
+  })
+  .join('\n')}`;
+    }
+  }
+
   logger.warn(`
 ╔═════════════════════════════════════════════════════════════════════╗
 ║  ${wHeader}║
@@ -169,7 +236,7 @@ const BOX_CONTENT_WIDTH = 67;
 ║  ${w3}║
 ║  ${w4}║
 ║  ${w5}║
-║  ${w6}║
+║  ${w6}║${pathsCheckedInfo}
 ║                                                                     ║
 ╚═════════════════════════════════════════════════════════════════════╝
 `);
@@ -200,6 +267,26 @@ app.use(
 // CORS configuration
 // When using credentials (cookies), origin cannot be '*'
 // We dynamically allow the requesting origin for local development
+
+// Check if origin is a local/private network address
+function isLocalOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    const hostname = url.hostname;
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '[::1]' ||
+      hostname === '0.0.0.0' ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -210,35 +297,25 @@ app.use(
       }
 
       // If CORS_ORIGIN is set, use it (can be comma-separated list)
-      const allowedOrigins = process.env.CORS_ORIGIN?.split(',').map((o) => o.trim());
-      if (allowedOrigins && allowedOrigins.length > 0 && allowedOrigins[0] !== '*') {
-        if (allowedOrigins.includes(origin)) {
-          callback(null, origin);
-        } else {
-          callback(new Error('Not allowed by CORS'));
+      const allowedOrigins = process.env.CORS_ORIGIN?.split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+      if (allowedOrigins && allowedOrigins.length > 0) {
+        if (allowedOrigins.includes('*')) {
+          callback(null, true);
+          return;
         }
-        return;
-      }
-
-      // For local development, allow all localhost/loopback origins (any port)
-      try {
-        const url = new URL(origin);
-        const hostname = url.hostname;
-
-        if (
-          hostname === 'localhost' ||
-          hostname === '127.0.0.1' ||
-          hostname === '::1' ||
-          hostname === '0.0.0.0' ||
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          hostname.startsWith('172.')
-        ) {
+        if (allowedOrigins.includes(origin)) {
           callback(null, origin);
           return;
         }
-      } catch (err) {
-        // Ignore URL parsing errors
+        // Fall through to local network check below
+      }
+
+      // Allow all localhost/loopback/private network origins (any port)
+      if (isLocalOrigin(origin)) {
+        callback(null, origin);
+        return;
       }
 
       // Reject other origins by default for security
@@ -258,11 +335,15 @@ const events: EventEmitter = createEventEmitter();
 const settingsService = new SettingsService(DATA_DIR);
 const agentService = new AgentService(DATA_DIR, events, settingsService);
 const featureLoader = new FeatureLoader();
-const autoModeService = new AutoModeService(events, settingsService);
+
+// Auto-mode services: compatibility layer provides old interface while using new architecture
+const autoModeService = new AutoModeServiceCompat(events, settingsService, featureLoader);
 const claudeUsageService = new ClaudeUsageService();
 const codexAppServerService = new CodexAppServerService();
 const codexModelCacheService = new CodexModelCacheService(DATA_DIR, codexAppServerService);
 const codexUsageService = new CodexUsageService(codexAppServerService);
+const zaiUsageService = new ZaiUsageService();
+const geminiUsageService = new GeminiUsageService();
 const mcpTestService = new MCPTestService(settingsService);
 const ideationService = new IdeationService(events, settingsService, featureLoader);
 
@@ -303,23 +384,76 @@ eventHookService.initialize(events, settingsService, eventHistoryService, featur
     logger.warn('Failed to check for legacy settings migration:', err);
   }
 
-  // Apply logging settings from saved settings
+  // Fetch global settings once and reuse for logging config and feature reconciliation
+  let globalSettings: Awaited<ReturnType<typeof settingsService.getGlobalSettings>> | null = null;
   try {
-    const settings = await settingsService.getGlobalSettings();
-    if (settings.serverLogLevel && LOG_LEVEL_MAP[settings.serverLogLevel] !== undefined) {
-      setLogLevel(LOG_LEVEL_MAP[settings.serverLogLevel]);
-      logger.info(`Server log level set to: ${settings.serverLogLevel}`);
+    globalSettings = await settingsService.getGlobalSettings();
+  } catch {
+    logger.warn('Failed to load global settings, using defaults');
+  }
+
+  // Apply logging settings from saved settings
+  if (globalSettings) {
+    try {
+      if (
+        globalSettings.serverLogLevel &&
+        LOG_LEVEL_MAP[globalSettings.serverLogLevel] !== undefined
+      ) {
+        setLogLevel(LOG_LEVEL_MAP[globalSettings.serverLogLevel]);
+        logger.info(`Server log level set to: ${globalSettings.serverLogLevel}`);
+      }
+      // Apply request logging setting (default true if not set)
+      const enableRequestLog = globalSettings.enableRequestLogging ?? true;
+      setRequestLoggingEnabled(enableRequestLog);
+      logger.info(`HTTP request logging: ${enableRequestLog ? 'enabled' : 'disabled'}`);
+    } catch {
+      logger.warn('Failed to apply logging settings, using defaults');
     }
-    // Apply request logging setting (default true if not set)
-    const enableRequestLog = settings.enableRequestLogging ?? true;
-    setRequestLoggingEnabled(enableRequestLog);
-    logger.info(`HTTP request logging: ${enableRequestLog ? 'enabled' : 'disabled'}`);
-  } catch (err) {
-    logger.warn('Failed to load logging settings, using defaults');
   }
 
   await agentService.initialize();
   logger.info('Agent service initialized');
+
+  // Reconcile feature states on startup
+  // After any type of restart (clean, forced, crash), features may be stuck in
+  // transient states (in_progress, interrupted, pipeline_*) that don't match reality.
+  // Reconcile them back to resting states before the UI is served.
+  if (globalSettings) {
+    try {
+      if (globalSettings.projects && globalSettings.projects.length > 0) {
+        let totalReconciled = 0;
+        for (const project of globalSettings.projects) {
+          const count = await autoModeService.reconcileFeatureStates(project.path);
+          totalReconciled += count;
+        }
+        if (totalReconciled > 0) {
+          logger.info(
+            `[STARTUP] Reconciled ${totalReconciled} feature(s) across ${globalSettings.projects.length} project(s)`
+          );
+        } else {
+          logger.info('[STARTUP] Feature state reconciliation complete - no stale states found');
+        }
+
+        // Resume interrupted features in the background after reconciliation.
+        // This uses the saved execution state to identify features that were running
+        // before the restart (their statuses have been reset to ready/backlog by
+        // reconciliation above). Running in background so it doesn't block startup.
+        if (totalReconciled > 0) {
+          for (const project of globalSettings.projects) {
+            autoModeService.resumeInterruptedFeatures(project.path).catch((err) => {
+              logger.warn(
+                `[STARTUP] Failed to resume interrupted features for ${project.path}:`,
+                err
+              );
+            });
+          }
+          logger.info('[STARTUP] Initiated background resume of interrupted features');
+        }
+      }
+    } catch (err) {
+      logger.warn('[STARTUP] Failed to reconcile feature states:', err);
+    }
+  }
 
   // Bootstrap Codex model cache in background (don't block server startup)
   void codexModelCacheService.getModels().catch((err) => {
@@ -371,6 +505,8 @@ app.use('/api/terminal', createTerminalRoutes());
 app.use('/api/settings', createSettingsRoutes(settingsService));
 app.use('/api/claude', createClaudeRoutes(claudeUsageService));
 app.use('/api/codex', createCodexRoutes(codexUsageService, codexModelCacheService));
+app.use('/api/zai', createZaiRoutes(zaiUsageService, settingsService));
+app.use('/api/gemini', createGeminiRoutes(geminiUsageService, events));
 app.use('/api/github', createGitHubRoutes(events, settingsService));
 app.use('/api/context', createContextRoutes(settingsService));
 app.use('/api/backlog-plan', createBacklogPlanRoutes(events, settingsService));
@@ -473,7 +609,7 @@ wss.on('connection', (ws: WebSocket) => {
       logger.info('Sending event to client:', {
         type,
         messageLength: message.length,
-        sessionId: (payload as any)?.sessionId,
+        sessionId: (payload as Record<string, unknown>)?.sessionId,
       });
       ws.send(message);
     } else {
@@ -539,8 +675,15 @@ terminalWss.on('connection', (ws: WebSocket, req: import('http').IncomingMessage
   // Check if session exists
   const session = terminalService.getSession(sessionId);
   if (!session) {
-    logger.info(`Session ${sessionId} not found`);
-    ws.close(4004, 'Session not found');
+    logger.warn(
+      `Terminal session ${sessionId} not found. ` +
+        `The session may have exited, been deleted, or was never created. ` +
+        `Active terminal sessions: ${terminalService.getSessionCount()}`
+    );
+    ws.close(
+      4004,
+      'Session not found. The terminal session may have expired or been closed. Please create a new terminal.'
+    );
     return;
   }
 

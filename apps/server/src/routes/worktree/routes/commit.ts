@@ -6,18 +6,20 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { getErrorMessage, logError } from '../common.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export function createCommitHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath, message } = req.body as {
+      const { worktreePath, message, files } = req.body as {
         worktreePath: string;
         message: string;
+        files?: string[];
       };
 
       if (!worktreePath || !message) {
@@ -44,11 +46,21 @@ export function createCommitHandler() {
         return;
       }
 
-      // Stage all changes
-      await execAsync('git add -A', { cwd: worktreePath });
+      // Stage changes - either specific files or all changes
+      if (files && files.length > 0) {
+        // Reset any previously staged changes first
+        await execFileAsync('git', ['reset', 'HEAD'], { cwd: worktreePath }).catch(() => {
+          // Ignore errors from reset (e.g., if nothing is staged)
+        });
+        // Stage only the selected files (args array avoids shell injection)
+        await execFileAsync('git', ['add', ...files], { cwd: worktreePath });
+      } else {
+        // Stage all changes (original behavior)
+        await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+      }
 
-      // Create commit
-      await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+      // Create commit (pass message as arg to avoid shell injection)
+      await execFileAsync('git', ['commit', '-m', message], {
         cwd: worktreePath,
       });
 

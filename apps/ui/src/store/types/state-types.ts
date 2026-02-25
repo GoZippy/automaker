@@ -2,8 +2,6 @@ import type { Project, TrashedProject } from '@/lib/electron';
 import type {
   ModelAlias,
   PlanningMode,
-  ThinkingLevel,
-  ReasoningEffort,
   ModelProvider,
   CursorModelId,
   CodexModelId,
@@ -23,6 +21,9 @@ import type {
   ClaudeApiProfile,
   ClaudeCompatibleProvider,
   SidebarStyle,
+  ThinkingLevel,
+  ReasoningEffort,
+  FeatureTemplate,
 } from '@automaker/types';
 
 import type {
@@ -33,10 +34,10 @@ import type {
   BackgroundSettings,
 } from './ui-types';
 import type { ApiKeys } from './settings-types';
-import type { ChatMessage, ChatSession, FeatureImage } from './chat-types';
+import type { ChatMessage, ChatSession } from './chat-types';
 import type { TerminalState, TerminalPanelContent, PersistedTerminalState } from './terminal-types';
 import type { Feature, ProjectAnalysis } from './project-types';
-import type { ClaudeUsage, CodexUsage } from './usage-types';
+import type { ClaudeUsage, CodexUsage, ZaiUsage, GeminiUsage } from './usage-types';
 
 /** State for worktree init script execution */
 export interface InitScriptState {
@@ -83,6 +84,8 @@ export interface AppState {
 
   // Agent Session state (per-project, keyed by project path)
   lastSelectedSessionByProject: Record<string, string>; // projectPath -> sessionId
+  // Agent model selection (per-session, keyed by sessionId)
+  agentModelBySession: Record<string, PhaseModelEntry>; // sessionId -> model selection
 
   // Theme
   theme: ThemeMode;
@@ -129,6 +132,7 @@ export interface AppState {
   enableDependencyBlocking: boolean; // When true, show blocked badges and warnings for features with incomplete dependencies (default: true)
   skipVerificationInAutoMode: boolean; // When true, auto-mode grabs features even if dependencies are not verified (only checks they're not running)
   enableAiCommitMessages: boolean; // When true, auto-generate commit messages using AI when opening commit dialog
+  mergePostAction: 'commit' | 'manual' | null; // User's preferred action after a clean merge (null = ask every time)
   planUseSelectedWorktreeBranch: boolean; // When true, Plan dialog creates features on the currently selected worktree branch
   addFeatureUseSelectedWorktreeBranch: boolean; // When true, Add Feature dialog defaults to custom mode with selected worktree branch
 
@@ -177,6 +181,13 @@ export interface AppState {
   phaseModels: PhaseModelConfig;
   favoriteModels: string[];
 
+  // Default thinking/reasoning levels for two-stage model selector primary button
+  defaultThinkingLevel: ThinkingLevel;
+  defaultReasoningEffort: ReasoningEffort;
+
+  // Default max turns for agent execution (1-2000)
+  defaultMaxTurns: number;
+
   // Cursor CLI Settings (global)
   enabledCursorModels: CursorModelId[]; // Which Cursor models are available in feature modal
   cursorDefaultModel: CursorModelId; // Default Cursor model selection
@@ -189,6 +200,8 @@ export interface AppState {
   codexApprovalPolicy: 'untrusted' | 'on-failure' | 'on-request' | 'never'; // Approval policy
   codexEnableWebSearch: boolean; // Enable web search capability
   codexEnableImages: boolean; // Enable image processing
+  codexAdditionalDirs: string[]; // Additional directories with write access (--add-dir flags)
+  codexThreadId: string | undefined; // Last thread ID for session resumption
 
   // OpenCode CLI Settings (global)
   // Static OpenCode settings are persisted via SETTINGS_FIELDS_TO_SYNC
@@ -222,6 +235,7 @@ export interface AppState {
 
   // Claude Agent SDK Settings
   autoLoadClaudeMd: boolean; // Auto-load CLAUDE.md files using SDK's settingSources option
+  useClaudeCodeSystemPrompt: boolean; // Use Claude Code's built-in system prompt as the base
   skipSandboxWarning: boolean; // Skip the sandbox environment warning dialog on startup
 
   // MCP Servers
@@ -229,6 +243,12 @@ export interface AppState {
 
   // Editor Configuration
   defaultEditorCommand: string | null; // Default editor for "Open In" action
+
+  // File Editor Settings
+  editorFontSize: number; // Font size for file editor (default: 13)
+  editorFontFamily: string; // Font family for file editor (default: 'default' = use theme mono font)
+  editorAutoSave: boolean; // Enable auto-save for file editor (default: false)
+  editorAutoSaveDelay: number; // Auto-save delay in milliseconds (default: 1000)
 
   // Terminal Configuration
   defaultTerminalId: string | null; // Default external terminal for "Open In Terminal" action (null = integrated)
@@ -246,6 +266,9 @@ export interface AppState {
 
   // Event Hooks
   eventHooks: EventHook[]; // Event hooks for custom commands or webhooks
+
+  // Feature Templates
+  featureTemplates: FeatureTemplate[]; // Feature templates for quick task creation
 
   // Claude-Compatible Providers (new system)
   claudeCompatibleProviders: ClaudeCompatibleProvider[]; // Providers that expose models to dropdowns
@@ -297,6 +320,14 @@ export interface AppState {
   codexUsage: CodexUsage | null;
   codexUsageLastUpdated: number | null;
 
+  // z.ai Usage Tracking
+  zaiUsage: ZaiUsage | null;
+  zaiUsageLastUpdated: number | null;
+
+  // Gemini Usage Tracking
+  geminiUsage: GeminiUsage | null;
+  geminiUsageLastUpdated: number | null;
+
   // Codex Models (dynamically fetched)
   codexModels: Array<{
     id: string;
@@ -334,6 +365,21 @@ export interface AppState {
   // Use Worktrees Override (per-project, keyed by project path)
   // undefined = use global setting, true/false = project-specific override
   useWorktreesByProject: Record<string, boolean | undefined>;
+
+  // Worktree Copy Files (per-project, keyed by project path)
+  // List of relative file paths to copy from project root into new worktrees
+  worktreeCopyFilesByProject: Record<string, string[]>;
+
+  // Worktree Display Settings (per-project, keyed by project path)
+  // Number of worktrees always visible (pinned) without expanding a dropdown (default: 1)
+  pinnedWorktreesCountByProject: Record<string, number>;
+  // Explicit list of branch names assigned to pinned slots (ordered)
+  // When set, these branches are shown in the pinned slots instead of using default ordering
+  pinnedWorktreeBranchesByProject: Record<string, string[]>;
+  // Minimum number of worktrees before the list collapses into a dropdown (default: 3)
+  worktreeDropdownThresholdByProject: Record<string, number>;
+  // Always use dropdown layout regardless of worktree count (default: false)
+  alwaysUseWorktreeDropdownByProject: Record<string, boolean>;
 
   // UI State (previously in localStorage, now synced via API)
   /** Whether worktree panel is collapsed in board view */
@@ -412,6 +458,8 @@ export interface AppActions {
   // Feature actions
   setFeatures: (features: Feature[]) => void;
   updateFeature: (id: string, updates: Partial<Feature>) => void;
+  /** Apply the same updates to multiple features in a single store mutation. */
+  batchUpdateFeatures: (ids: string[], updates: Partial<Feature>) => void;
   addFeature: (feature: Omit<Feature, 'id'> & Partial<Pick<Feature, 'id'>>) => Feature;
   removeFeature: (id: string) => void;
   moveFeature: (id: string, newStatus: Feature['status']) => void;
@@ -476,6 +524,7 @@ export interface AppActions {
   setEnableDependencyBlocking: (enabled: boolean) => void;
   setSkipVerificationInAutoMode: (enabled: boolean) => Promise<void>;
   setEnableAiCommitMessages: (enabled: boolean) => Promise<void>;
+  setMergePostAction: (action: 'commit' | 'manual' | null) => Promise<void>;
   setPlanUseSelectedWorktreeBranch: (enabled: boolean) => Promise<void>;
   setAddFeatureUseSelectedWorktreeBranch: (enabled: boolean) => Promise<void>;
 
@@ -536,6 +585,9 @@ export interface AppActions {
   setPhaseModels: (models: Partial<PhaseModelConfig>) => Promise<void>;
   resetPhaseModels: () => Promise<void>;
   toggleFavoriteModel: (modelId: string) => void;
+  setDefaultThinkingLevel: (level: ThinkingLevel) => void;
+  setDefaultReasoningEffort: (effort: ReasoningEffort) => void;
+  setDefaultMaxTurns: (maxTurns: number) => void;
 
   // Cursor CLI Settings actions
   setEnabledCursorModels: (models: CursorModelId[]) => void;
@@ -584,10 +636,17 @@ export interface AppActions {
 
   // Claude Agent SDK Settings actions
   setAutoLoadClaudeMd: (enabled: boolean) => Promise<void>;
+  setUseClaudeCodeSystemPrompt: (enabled: boolean) => Promise<void>;
   setSkipSandboxWarning: (skip: boolean) => Promise<void>;
 
   // Editor Configuration actions
   setDefaultEditorCommand: (command: string | null) => void;
+
+  // File Editor Settings actions
+  setEditorFontSize: (size: number) => void;
+  setEditorFontFamily: (fontFamily: string) => void;
+  setEditorAutoSave: (enabled: boolean) => void;
+  setEditorAutoSaveDelay: (delay: number) => void;
 
   // Terminal Configuration actions
   setDefaultTerminalId: (terminalId: string | null) => void;
@@ -596,7 +655,14 @@ export interface AppActions {
   setPromptCustomization: (customization: PromptCustomization) => Promise<void>;
 
   // Event Hook actions
-  setEventHooks: (hooks: EventHook[]) => void;
+  setEventHooks: (hooks: EventHook[]) => Promise<void>;
+
+  // Feature Template actions
+  setFeatureTemplates: (templates: FeatureTemplate[]) => Promise<void>;
+  addFeatureTemplate: (template: FeatureTemplate) => Promise<void>;
+  updateFeatureTemplate: (id: string, updates: Partial<FeatureTemplate>) => Promise<void>;
+  deleteFeatureTemplate: (id: string) => Promise<void>;
+  reorderFeatureTemplates: (templateIds: string[]) => Promise<void>;
 
   // Claude-Compatible Provider actions (new system)
   addClaudeCompatibleProvider: (provider: ClaudeCompatibleProvider) => Promise<void>;
@@ -629,6 +695,9 @@ export interface AppActions {
   // Agent Session actions
   setLastSelectedSession: (projectPath: string, sessionId: string | null) => void;
   getLastSelectedSession: (projectPath: string) => string | null;
+  // Agent model selection actions
+  setAgentModelForSession: (sessionId: string, model: PhaseModelEntry) => void;
+  getAgentModelForSession: (sessionId: string) => PhaseModelEntry | null;
 
   // Board Background actions
   setBoardBackground: (projectPath: string, imagePath: string | null) => void;
@@ -674,6 +743,8 @@ export interface AppActions {
   setTerminalMaxSessions: (maxSessions: number) => void;
   setTerminalLastActiveProjectPath: (projectPath: string | null) => void;
   setOpenTerminalMode: (mode: 'newTab' | 'split') => void;
+  setTerminalBackgroundColor: (color: string | null) => void;
+  setTerminalForegroundColor: (color: string | null) => void;
   addTerminalTab: (name?: string) => string;
   removeTerminalTab: (tabId: string) => void;
   setActiveTerminalTab: (tabId: string) => void;
@@ -750,6 +821,21 @@ export interface AppActions {
   getProjectUseWorktrees: (projectPath: string) => boolean | undefined; // undefined = using global
   getEffectiveUseWorktrees: (projectPath: string) => boolean; // Returns actual value (project or global fallback)
 
+  // Worktree Copy Files actions (per-project)
+  setWorktreeCopyFiles: (projectPath: string, files: string[]) => void;
+  getWorktreeCopyFiles: (projectPath: string) => string[];
+
+  // Worktree Display Settings actions (per-project)
+  setPinnedWorktreesCount: (projectPath: string, count: number) => void;
+  getPinnedWorktreesCount: (projectPath: string) => number;
+  setPinnedWorktreeBranches: (projectPath: string, branches: string[]) => void;
+  getPinnedWorktreeBranches: (projectPath: string) => string[];
+  swapPinnedWorktreeBranch: (projectPath: string, slotIndex: number, newBranch: string) => void;
+  setWorktreeDropdownThreshold: (projectPath: string, threshold: number) => void;
+  getWorktreeDropdownThreshold: (projectPath: string) => number;
+  setAlwaysUseWorktreeDropdown: (projectPath: string, always: boolean) => void;
+  getAlwaysUseWorktreeDropdown: (projectPath: string) => boolean;
+
   // UI State actions (previously in localStorage, now synced via API)
   setWorktreePanelCollapsed: (collapsed: boolean) => void;
   setLastProjectDir: (dir: string) => void;
@@ -763,6 +849,12 @@ export interface AppActions {
 
   // Codex Usage Tracking actions
   setCodexUsage: (usage: CodexUsage | null) => void;
+
+  // z.ai Usage Tracking actions
+  setZaiUsage: (usage: ZaiUsage | null) => void;
+
+  // Gemini Usage Tracking actions
+  setGeminiUsage: (usage: GeminiUsage | null, lastUpdated?: number) => void;
 
   // Codex Models actions
   fetchCodexModels: (forceRefresh?: boolean) => Promise<void>;

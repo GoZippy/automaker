@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Feature, ThinkingLevel, ReasoningEffort, ParsedTask } from '@/store/app-store';
 import { getProviderFromModel } from '@/lib/utils';
 import { parseAgentContext, formatModelName, DEFAULT_MODEL } from '@/lib/agent-context-parser';
@@ -10,6 +11,7 @@ import { getElectronAPI } from '@/lib/electron';
 import { SummaryDialog } from './summary-dialog';
 import { getProviderIconForModel } from '@/components/ui/provider-icon';
 import { useFeature, useAgentOutput } from '@/hooks/queries';
+import { queryKeys } from '@/lib/query-keys';
 
 /**
  * Formats thinking level for compact display
@@ -22,6 +24,7 @@ function formatThinkingLevel(level: ThinkingLevel | undefined): string {
     medium: 'Med',
     high: 'High',
     ultrathink: 'Ultra',
+    adaptive: 'Adaptive',
   };
   return labels[level];
 }
@@ -47,7 +50,7 @@ interface AgentInfoPanelProps {
   projectPath: string;
   contextContent?: string;
   summary?: string;
-  isCurrentAutoTask?: boolean;
+  isActivelyRunning?: boolean;
 }
 
 export const AgentInfoPanel = memo(function AgentInfoPanel({
@@ -55,8 +58,9 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
   projectPath,
   contextContent,
   summary,
-  isCurrentAutoTask,
+  isActivelyRunning,
 }: AgentInfoPanelProps) {
+  const queryClient = useQueryClient();
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const [isTodosExpanded, setIsTodosExpanded] = useState(false);
   // Track real-time task status updates from WebSocket events
@@ -106,7 +110,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
   // - If not receiving WebSocket events but in_progress: use normal interval (3s)
   // - Otherwise: no polling
   const pollingInterval = useMemo((): number | false => {
-    if (!(isCurrentAutoTask || feature.status === 'in_progress')) {
+    if (!(isActivelyRunning || feature.status === 'in_progress')) {
       return false;
     }
     // If receiving WebSocket events, use longer polling interval as fallback
@@ -115,7 +119,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
     }
     // Default polling interval
     return 3000;
-  }, [isCurrentAutoTask, feature.status, isReceivingWsEvents]);
+  }, [isActivelyRunning, feature.status, isReceivingWsEvents]);
 
   // Fetch fresh feature data for planSpec (store data can be stale for task progress)
   const { data: freshFeature } = useFeature(projectPath, feature.id, {
@@ -128,6 +132,25 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
     enabled: shouldFetchData && !contextContent,
     pollingInterval,
   });
+
+  // On mount, ensure feature and agent output queries are fresh.
+  // This handles the worktree switch scenario where cards unmount when filtered out
+  // and remount when the user switches back. Without this, the React Query cache
+  // may serve stale data (or no data) for the individual feature query, causing
+  // the todo list to appear empty until the next polling cycle.
+  useEffect(() => {
+    if (shouldFetchData && projectPath && feature.id && !contextContent) {
+      // Invalidate both the single feature and agent output queries to trigger immediate refetch
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.features.single(projectPath, feature.id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.features.agentOutput(projectPath, feature.id),
+      });
+    }
+    // Only run on mount (feature.id and projectPath identify this specific card instance)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature.id, projectPath]);
 
   // Parse agent output into agentInfo
   const agentInfo = useMemo(() => {
@@ -152,6 +175,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
 
   // Derive effective todos from planSpec.tasks when available, fallback to agentInfo.todos
   // Uses freshPlanSpec (from API) for accurate progress, with taskStatusMap for real-time updates
+  const isFeatureFinished = feature.status === 'waiting_approval' || feature.status === 'verified';
   const effectiveTodos = useMemo(() => {
     // Use freshPlanSpec if available (fetched from API), fallback to store's feature.planSpec
     const planSpec = freshPlanSpec?.tasks?.length ? freshPlanSpec : feature.planSpec;
@@ -162,6 +186,20 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
       const currentTaskId = planSpec.currentTaskId;
 
       return planSpec.tasks.map((task: ParsedTask, index: number) => {
+        // When feature is finished (waiting_approval/verified), finalize task display:
+        // - in_progress tasks → completed (agent was working on them when it finished)
+        // - pending tasks stay pending (they were never started)
+        // - completed tasks stay completed
+        // This matches server-side behavior in feature-state-manager.ts
+        if (isFeatureFinished) {
+          const finalStatus =
+            task.status === 'in_progress' || task.status === 'failed' ? 'completed' : task.status;
+          return {
+            content: task.description,
+            status: (finalStatus || 'completed') as 'pending' | 'in_progress' | 'completed',
+          };
+        }
+
         // Use real-time status from WebSocket events if available
         const realtimeStatus = taskStatusMap.get(task.id);
 
@@ -198,6 +236,7 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
     feature.planSpec?.currentTaskId,
     agentInfo?.todos,
     taskStatusMap,
+    isFeatureFinished,
   ]);
 
   // Listen to WebSocket events for real-time task status updates
@@ -288,9 +327,11 @@ export const AgentInfoPanel = memo(function AgentInfoPanel({
 
   // Agent Info Panel for non-backlog cards
   // Show panel if we have agentInfo OR planSpec.tasks (for spec/full mode)
+  // OR if the feature has effective todos from any source (handles initial mount after worktree switch)
+  // OR if the feature is actively running (ensures panel stays visible during execution)
   // Note: hasPlanSpecTasks is already defined above and includes freshPlanSpec
   // (The backlog case was already handled above and returned early)
-  if (agentInfo || hasPlanSpecTasks) {
+  if (agentInfo || hasPlanSpecTasks || effectiveTodos.length > 0 || isActivelyRunning) {
     return (
       <>
         <div className="mb-3 space-y-2 overflow-hidden">

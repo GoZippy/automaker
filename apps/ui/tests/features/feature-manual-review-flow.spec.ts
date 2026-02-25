@@ -21,9 +21,14 @@ import {
   getKanbanColumn,
   authenticateForTests,
   handleLoginScreenIfPresent,
+  API_BASE_URL,
 } from '../utils';
 
 const TEST_TEMP_DIR = createTempDirPath('manual-review-test');
+
+// Generate deterministic projectId once at test module load so both
+// setupRealProject and the route interceptor use the same ID
+const TEST_PROJECT_ID = `project-manual-review-${Date.now()}`;
 
 test.describe('Feature Manual Review Flow', () => {
   let projectPath: string;
@@ -71,34 +76,45 @@ test.describe('Feature Manual Review Flow', () => {
   });
 
   test('should manually verify a feature in waiting_approval column', async ({ page }) => {
-    // Set up the project in localStorage
-    await setupRealProject(page, projectPath, projectName, { setAsCurrent: true });
+    // Set up the project in localStorage with a deterministic projectId
+    await setupRealProject(page, projectPath, projectName, {
+      setAsCurrent: true,
+      projectId: TEST_PROJECT_ID,
+    });
 
     // Intercept settings API to ensure our test project remains current
-    // and doesn't get overridden by server settings
+    // and doesn't get overridden by server settings.
     await page.route('**/api/settings/global', async (route) => {
+      const method = route.request().method();
+      if (method === 'PUT') {
+        // Allow settings sync writes to pass through
+        return route.continue();
+      }
       const response = await route.fetch();
       const json = await response.json();
       if (json.settings) {
-        // Set our test project as the current project
-        const testProject = {
-          id: `project-${projectName}`,
-          name: projectName,
-          path: projectPath,
-          lastOpened: new Date().toISOString(),
-        };
-
-        // Add to projects if not already there
         const existingProjects = json.settings.projects || [];
-        const hasProject = existingProjects.some(
-          (p: { id: string; path: string }) => p.path === projectPath
-        );
-        if (!hasProject) {
+
+        // Find existing project by path to preserve any server-generated IDs
+        let testProject = existingProjects.find((p: { path: string }) => p.path === projectPath);
+
+        if (!testProject) {
+          // Project not in server response yet — use the same deterministic TEST_PROJECT_ID
+          // that was seeded in automaker-settings-cache.currentProjectId via setupRealProject.
+          testProject = {
+            id: TEST_PROJECT_ID,
+            name: projectName,
+            path: projectPath,
+            lastOpened: new Date().toISOString(),
+          };
           json.settings.projects = [testProject, ...existingProjects];
         }
 
-        // Set as current project
+        // Set as current project using the matching project's ID
         json.settings.currentProjectId = testProject.id;
+        // Ensure CI runs don't redirect to /setup
+        json.settings.setupComplete = true;
+        json.settings.isFirstRun = false;
       }
       await route.fulfill({ response, json });
     });
@@ -140,7 +156,6 @@ test.describe('Feature Manual Review Flow', () => {
       priority: 2,
     };
 
-    const API_BASE_URL = process.env.VITE_SERVER_URL || 'http://localhost:3008';
     const createResponse = await page.request.post(`${API_BASE_URL}/api/features/create`, {
       data: { projectPath, feature },
       headers: { 'Content-Type': 'application/json' },

@@ -27,7 +27,6 @@ import type {
 } from '@automaker/types';
 import { DEFAULT_IDEATION_CONTEXT_SOURCES } from '@automaker/types';
 import {
-  getIdeationDir,
   getIdeasDir,
   getIdeaDir,
   getIdeaPath,
@@ -230,10 +229,9 @@ export class IdeationService {
         );
         if (providerResult.provider) {
           claudeCompatibleProvider = providerResult.provider;
-          // Use resolved model from provider if available (maps to Claude model)
-          if (providerResult.resolvedModel) {
-            modelId = providerResult.resolvedModel;
-          }
+          // CRITICAL: For custom providers, use the provider's model ID (e.g. "GLM-4.7")
+          // for the API call, NOT the resolved Claude model - otherwise we get "model not found"
+          modelId = options.model;
           credentials = providerResult.credentials ?? credentials;
         }
       }
@@ -408,7 +406,9 @@ export class IdeationService {
         return [];
       }
 
-      const entries = (await secureFs.readdir(ideasDir, { withFileTypes: true })) as any[];
+      const entries = (await secureFs.readdir(ideasDir, {
+        withFileTypes: true,
+      })) as import('fs').Dirent[];
       const ideaDirs = entries.filter((entry) => entry.isDirectory());
 
       const ideas: Idea[] = [];
@@ -856,15 +856,26 @@ ${contextSection}${existingWorkSection}`;
       }
 
       return parsed
-        .map((item: any, index: number) => ({
-          id: this.generateId('sug'),
-          category,
-          title: item.title || `Suggestion ${index + 1}`,
-          description: item.description || '',
-          rationale: item.rationale || '',
-          priority: item.priority || 'medium',
-          relatedFiles: item.relatedFiles || [],
-        }))
+        .map(
+          (
+            item: {
+              title?: string;
+              description?: string;
+              rationale?: string;
+              priority?: 'low' | 'medium' | 'high';
+              relatedFiles?: string[];
+            },
+            index: number
+          ) => ({
+            id: this.generateId('sug'),
+            category,
+            title: item.title || `Suggestion ${index + 1}`,
+            description: item.description || '',
+            rationale: item.rationale || '',
+            priority: item.priority || ('medium' as const),
+            relatedFiles: item.relatedFiles || [],
+          })
+        )
         .slice(0, count);
     } catch (error) {
       logger.warn('Failed to parse JSON response:', error);
@@ -889,7 +900,7 @@ ${contextSection}${existingWorkSection}`;
 
     for (const line of lines) {
       // Check for numbered items or markdown headers
-      const titleMatch = line.match(/^(?:\d+[\.\)]\s*\*{0,2}|#{1,3}\s+)(.+)/);
+      const titleMatch = line.match(/^(?:\d+[.)]\s*\*{0,2}|#{1,3}\s+)(.+)/);
 
       if (titleMatch) {
         // Save previous suggestion
@@ -1706,7 +1717,9 @@ ${contextSection}${existingWorkSection}`;
     const results: AnalysisFileInfo[] = [];
 
     try {
-      const entries = (await secureFs.readdir(dirPath, { withFileTypes: true })) as any[];
+      const entries = (await secureFs.readdir(dirPath, {
+        withFileTypes: true,
+      })) as import('fs').Dirent[];
 
       for (const entry of entries) {
         if (entry.isDirectory()) {

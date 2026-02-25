@@ -3,13 +3,15 @@ import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { getBlockingDependencies } from '@automaker/dependency-resolver';
+import { useAppStore, formatShortcut } from '@/store/app-store';
 import type { Feature } from '@/store/app-store';
-import type { PipelineConfig, FeatureStatusWithPipeline } from '@automaker/types';
+import type { PipelineConfig, FeatureStatusWithPipeline, FeatureTemplate } from '@automaker/types';
 import { ListHeader } from './list-header';
 import { ListRow, sortFeatures } from './list-row';
 import { createRowActionHandlers, type RowActionHandlers } from './row-actions';
 import { getStatusOrder } from './status-badge';
 import { getColumnsWithPipeline } from '../../constants';
+import { AddFeatureButton } from '../add-feature-button';
 import type { SortConfig, SortColumn } from '../../hooks/use-list-view-state';
 
 /** Empty set constant to avoid creating new instances on each render */
@@ -42,6 +44,9 @@ export interface ListViewActionHandlers {
   onViewPlan?: (feature: Feature) => void;
   onApprovePlan?: (feature: Feature) => void;
   onSpawnTask?: (feature: Feature) => void;
+  onDuplicate?: (feature: Feature) => void;
+  onDuplicateAsChild?: (feature: Feature) => void;
+  onDuplicateAsChildMultiple?: (feature: Feature) => void;
 }
 
 export interface ListViewProps {
@@ -61,6 +66,12 @@ export interface ListViewProps {
   pipelineConfig?: PipelineConfig | null;
   /** Callback to add a new feature */
   onAddFeature?: () => void;
+  /** Callback for quick add */
+  onQuickAdd?: () => void;
+  /** Callback for template selection */
+  onTemplateSelect?: (template: FeatureTemplate) => void;
+  /** Available feature templates */
+  templates?: FeatureTemplate[];
   /** Whether selection mode is enabled */
   isSelectionMode?: boolean;
   /** Set of selected feature IDs */
@@ -121,7 +132,22 @@ const StatusGroupHeader = memo(function StatusGroupHeader({
 /**
  * EmptyState displays a message when there are no features
  */
-const EmptyState = memo(function EmptyState({ onAddFeature }: { onAddFeature?: () => void }) {
+const EmptyState = memo(function EmptyState({
+  onAddFeature,
+  onQuickAdd,
+  onTemplateSelect,
+  templates,
+  shortcut,
+}: {
+  onAddFeature?: () => void;
+  onQuickAdd?: () => void;
+  onTemplateSelect?: (template: FeatureTemplate) => void;
+  templates?: FeatureTemplate[];
+  shortcut?: string;
+}) {
+  // Only show AddFeatureButton if all required handlers are provided
+  const canShowSplitButton = onAddFeature && onQuickAdd && onTemplateSelect;
+
   return (
     <div
       className={cn(
@@ -131,12 +157,21 @@ const EmptyState = memo(function EmptyState({ onAddFeature }: { onAddFeature?: (
       data-testid="list-view-empty"
     >
       <p className="text-sm mb-4">No features to display</p>
-      {onAddFeature && (
-        <Button variant="outline" size="sm" onClick={onAddFeature}>
+      {canShowSplitButton ? (
+        <AddFeatureButton
+          onAddFeature={onAddFeature}
+          onQuickAdd={onQuickAdd}
+          onTemplateSelect={onTemplateSelect}
+          templates={templates || []}
+          shortcut={shortcut}
+          testIdPrefix="list-view-empty-add-feature"
+        />
+      ) : onAddFeature ? (
+        <Button variant="default" size="sm" onClick={onAddFeature}>
           <Plus className="w-4 h-4 mr-2" />
           Add Feature
         </Button>
-      )}
+      ) : null}
     </div>
   );
 });
@@ -186,6 +221,9 @@ export const ListView = memo(function ListView({
   runningAutoTasks,
   pipelineConfig = null,
   onAddFeature,
+  onQuickAdd,
+  onTemplateSelect,
+  templates = [],
   isSelectionMode = false,
   selectedFeatureIds = EMPTY_SET,
   onToggleFeatureSelection,
@@ -194,6 +232,10 @@ export const ListView = memo(function ListView({
 }: ListViewProps) {
   // Track collapsed state for each status group
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Get the keyboard shortcut for adding features
+  const keyboardShortcuts = useAppStore((state) => state.keyboardShortcuts);
+  const addFeatureShortcut = keyboardShortcuts.addFeature || 'N';
 
   // Generate status groups from columnFeaturesMap
   const statusGroups = useMemo<StatusGroup[]>(() => {
@@ -313,6 +355,24 @@ export const ListView = memo(function ListView({
               if (f) actionHandlers.onSpawnTask?.(f);
             }
           : undefined,
+        duplicate: actionHandlers.onDuplicate
+          ? (id) => {
+              const f = allFeatures.find((f) => f.id === id);
+              if (f) actionHandlers.onDuplicate?.(f);
+            }
+          : undefined,
+        duplicateAsChild: actionHandlers.onDuplicateAsChild
+          ? (id) => {
+              const f = allFeatures.find((f) => f.id === id);
+              if (f) actionHandlers.onDuplicateAsChild?.(f);
+            }
+          : undefined,
+        duplicateAsChildMultiple: actionHandlers.onDuplicateAsChildMultiple
+          ? (id) => {
+              const f = allFeatures.find((f) => f.id === id);
+              if (f) actionHandlers.onDuplicateAsChildMultiple?.(f);
+            }
+          : undefined,
       });
     },
     [actionHandlers, allFeatures]
@@ -362,7 +422,13 @@ export const ListView = memo(function ListView({
   if (totalFeatures === 0) {
     return (
       <div className={cn('flex flex-col h-full bg-background', className)} data-testid="list-view">
-        <EmptyState onAddFeature={onAddFeature} />
+        <EmptyState
+          onAddFeature={onAddFeature}
+          onQuickAdd={onQuickAdd}
+          onTemplateSelect={onTemplateSelect}
+          templates={templates}
+          shortcut={formatShortcut(addFeatureShortcut, true)}
+        />
       </div>
     );
   }
@@ -425,19 +491,18 @@ export const ListView = memo(function ListView({
         })}
       </div>
 
-      {/* Footer with Add Feature button */}
-      {onAddFeature && (
-        <div className="border-t border-border px-4 py-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onAddFeature}
-            className="w-full sm:w-auto"
-            data-testid="list-view-add-feature"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Feature
-          </Button>
+      {/* Footer with Add Feature button, styled like board view */}
+      {onAddFeature && onQuickAdd && onTemplateSelect && (
+        <div className="border-t border-border px-4 py-2">
+          <AddFeatureButton
+            onAddFeature={onAddFeature}
+            onQuickAdd={onQuickAdd}
+            onTemplateSelect={onTemplateSelect}
+            templates={templates}
+            fullWidth
+            shortcut={formatShortcut(addFeatureShortcut, true)}
+            testIdPrefix="list-view-add-feature"
+          />
         </div>
       )}
     </div>

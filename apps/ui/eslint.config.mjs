@@ -2,6 +2,7 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import js from '@eslint/js';
 import ts from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 const eslintConfig = defineConfig([
   js.configs.recommended,
@@ -51,6 +52,8 @@ const eslintConfig = defineConfig([
         getComputedStyle: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
+        requestIdleCallback: 'readonly',
+        cancelIdleCallback: 'readonly',
         alert: 'readonly',
         // DOM Element Types
         HTMLElement: 'readonly',
@@ -62,6 +65,8 @@ const eslintConfig = defineConfig([
         HTMLHeadingElement: 'readonly',
         HTMLParagraphElement: 'readonly',
         HTMLImageElement: 'readonly',
+        HTMLLinkElement: 'readonly',
+        HTMLScriptElement: 'readonly',
         Element: 'readonly',
         SVGElement: 'readonly',
         SVGSVGElement: 'readonly',
@@ -76,6 +81,7 @@ const eslintConfig = defineConfig([
         MouseEvent: 'readonly',
         UIEvent: 'readonly',
         MediaQueryListEvent: 'readonly',
+        PageTransitionEvent: 'readonly',
         DataTransfer: 'readonly',
         // Web APIs
         ResizeObserver: 'readonly',
@@ -91,11 +97,13 @@ const eslintConfig = defineConfig([
         Response: 'readonly',
         RequestInit: 'readonly',
         RequestCache: 'readonly',
+        ServiceWorkerRegistration: 'readonly',
         // Timers
         setTimeout: 'readonly',
         setInterval: 'readonly',
         clearTimeout: 'readonly',
         clearInterval: 'readonly',
+        queueMicrotask: 'readonly',
         // Node.js (for scripts and Electron)
         process: 'readonly',
         require: 'readonly',
@@ -109,16 +117,30 @@ const eslintConfig = defineConfig([
         Electron: 'readonly',
         // Console
         console: 'readonly',
+        // Structured clone (modern browser/Node API)
+        structuredClone: 'readonly',
         // Vite defines
         __APP_VERSION__: 'readonly',
+        __APP_BUILD_HASH__: 'readonly',
       },
     },
     plugins: {
       '@typescript-eslint': ts,
+      'react-hooks': reactHooks,
     },
     rules: {
       ...ts.configs.recommended.rules,
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/ban-ts-comment': [
         'error',
@@ -127,6 +149,32 @@ const eslintConfig = defineConfig([
           minimumDescriptionLength: 10,
         },
       ],
+    },
+  },
+  {
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: {
+        // Service Worker globals
+        self: 'readonly',
+        caches: 'readonly',
+        fetch: 'readonly',
+        Headers: 'readonly',
+        Response: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
+        // Built-in globals used in sw.js
+        Date: 'readonly',
+        Promise: 'readonly',
+        Set: 'readonly',
+        JSON: 'readonly',
+        String: 'readonly',
+        Array: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
     },
   },
   globalIgnores([

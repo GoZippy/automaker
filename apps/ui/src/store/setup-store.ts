@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { GeminiAuthStatus } from '@automaker/types';
 // Note: persist middleware removed - settings now sync via API (use-settings-sync.ts)
 
 // CLI Installation Status
@@ -112,6 +113,24 @@ export interface CodexAuthStatus {
   error?: string;
 }
 
+// z.ai Auth Method
+export type ZaiAuthMethod =
+  | 'api_key_env' // Z_AI_API_KEY environment variable
+  | 'api_key' // Manually stored API key
+  | 'none';
+
+// z.ai Auth Status
+export interface ZaiAuthStatus {
+  authenticated: boolean;
+  method: ZaiAuthMethod;
+  hasApiKey?: boolean;
+  hasEnvApiKey?: boolean;
+  error?: string;
+}
+
+// GeminiAuthStatus is imported from @automaker/types (method: 'google_login' | 'api_key' | 'vertex_ai' | 'none')
+export type { GeminiAuthStatus };
+
 // Claude Auth Method - all possible authentication sources
 export type ClaudeAuthMethod =
   | 'oauth_token_env'
@@ -185,9 +204,13 @@ export interface SetupState {
 
   // Gemini CLI state
   geminiCliStatus: GeminiCliStatus | null;
+  geminiAuthStatus: GeminiAuthStatus | null;
 
   // Copilot SDK state
   copilotCliStatus: CopilotCliStatus | null;
+
+  // z.ai API state
+  zaiAuthStatus: ZaiAuthStatus | null;
 
   // Setup preferences
   skipClaudeSetup: boolean;
@@ -225,9 +248,13 @@ export interface SetupActions {
 
   // Gemini CLI
   setGeminiCliStatus: (status: GeminiCliStatus | null) => void;
+  setGeminiAuthStatus: (status: GeminiAuthStatus | null) => void;
 
   // Copilot SDK
   setCopilotCliStatus: (status: CopilotCliStatus | null) => void;
+
+  // z.ai API
+  setZaiAuthStatus: (status: ZaiAuthStatus | null) => void;
 
   // Preferences
   setSkipClaudeSetup: (skip: boolean) => void;
@@ -243,10 +270,39 @@ const initialInstallProgress: InstallProgress = {
 // Check if setup should be skipped (for E2E testing)
 const shouldSkipSetup = import.meta.env.VITE_SKIP_SETUP === 'true';
 
+/**
+ * Pre-flight check: read setupComplete from localStorage settings cache so that
+ * the routing effect in __root.tsx doesn't flash /setup for returning users.
+ *
+ * The setup store is intentionally NOT persisted (settings sync via API), but on
+ * first render the routing check fires before the initAuth useEffect can call
+ * hydrateStoreFromSettings(). If setupComplete starts as false, returning users
+ * who have completed setup see a /setup redirect flash.
+ *
+ * Reading from localStorage here is safe: it's the same key used by
+ * parseLocalStorageSettings() and written by the settings sync hook.
+ * On first-ever visit (no cache), this returns false as expected.
+ */
+function getInitialSetupComplete(): boolean {
+  if (shouldSkipSetup) return true;
+  try {
+    const raw = localStorage.getItem('automaker-settings-cache');
+    if (raw) {
+      const parsed = JSON.parse(raw) as { setupComplete?: boolean };
+      if (parsed?.setupComplete === true) return true;
+    }
+  } catch {
+    // localStorage unavailable or JSON invalid — fall through
+  }
+  return false;
+}
+
+const initialSetupComplete = getInitialSetupComplete();
+
 const initialState: SetupState = {
-  isFirstRun: !shouldSkipSetup,
-  setupComplete: shouldSkipSetup,
-  currentStep: shouldSkipSetup ? 'complete' : 'welcome',
+  isFirstRun: !shouldSkipSetup && !initialSetupComplete,
+  setupComplete: initialSetupComplete,
+  currentStep: initialSetupComplete ? 'complete' : 'welcome',
 
   claudeCliStatus: null,
   claudeAuthStatus: null,
@@ -263,8 +319,11 @@ const initialState: SetupState = {
   opencodeCliStatus: null,
 
   geminiCliStatus: null,
+  geminiAuthStatus: null,
 
   copilotCliStatus: null,
+
+  zaiAuthStatus: null,
 
   skipClaudeSetup: shouldSkipSetup,
 };
@@ -286,7 +345,11 @@ export const useSetupStore = create<SetupState & SetupActions>()((set, get) => (
   resetSetup: () =>
     set({
       ...initialState,
-      isFirstRun: false, // Don't reset first run flag
+      // Explicitly override runtime-critical fields that may be stale in the
+      // module-level initialState (captured at import time from localStorage).
+      setupComplete: false,
+      currentStep: 'welcome',
+      isFirstRun: false, // Don't reset first run flag — user has visited before
     }),
 
   setIsFirstRun: (isFirstRun) => set({ isFirstRun }),
@@ -340,9 +403,13 @@ export const useSetupStore = create<SetupState & SetupActions>()((set, get) => (
 
   // Gemini CLI
   setGeminiCliStatus: (status) => set({ geminiCliStatus: status }),
+  setGeminiAuthStatus: (status) => set({ geminiAuthStatus: status }),
 
   // Copilot SDK
   setCopilotCliStatus: (status) => set({ copilotCliStatus: status }),
+
+  // z.ai API
+  setZaiAuthStatus: (status) => set({ zaiAuthStatus: status }),
 
   // Preferences
   setSkipClaudeSetup: (skip) => set({ skipClaudeSetup: skip }),

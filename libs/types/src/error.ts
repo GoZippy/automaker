@@ -8,6 +8,8 @@ export type ErrorType =
   | 'execution'
   | 'rate_limit'
   | 'quota_exhausted'
+  | 'model_not_found'
+  | 'stream_disconnected'
   | 'unknown';
 
 /**
@@ -21,6 +23,8 @@ export interface ErrorInfo {
   isCancellation: boolean;
   isRateLimit: boolean;
   isQuotaExhausted: boolean; // Session/weekly usage limit reached
+  isModelNotFound: boolean; // Model does not exist or user lacks access
+  isStreamDisconnected: boolean; // Stream disconnected before completion
   retryAfter?: number; // Seconds to wait before retrying (for rate limit errors)
   originalError: unknown;
 }

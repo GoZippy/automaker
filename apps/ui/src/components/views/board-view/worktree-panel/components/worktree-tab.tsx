@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { Button } from '@/components/ui/button';
-import { Globe, CircleDot, GitPullRequest } from 'lucide-react';
+import { Globe, CircleDot, GitPullRequest, AlertTriangle } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import { BranchSwitchDropdown } from './branch-switch-dropdown';
 import { WorktreeActionsDropdown } from './worktree-actions-dropdown';
+import { getConflictBadgeStyles, getConflictTypeLabel } from './worktree-indicator-utils';
 
 interface WorktreeTabProps {
   worktree: WorktreeInfo;
@@ -37,6 +38,8 @@ interface WorktreeTabProps {
   aheadCount: number;
   behindCount: number;
   hasRemoteBranch: boolean;
+  /** The name of the remote that the current branch is tracking (e.g. "origin"), if any */
+  trackingRemote?: string;
   gitRepoStatus: GitRepoStatus;
   /** Whether auto mode is running for this worktree */
   isAutoModeRunning?: boolean;
@@ -59,10 +62,13 @@ interface WorktreeTabProps {
   onOpenInIntegratedTerminal: (worktree: WorktreeInfo, mode?: 'tab' | 'split') => void;
   onOpenInExternalTerminal: (worktree: WorktreeInfo, terminalId?: string) => void;
   onViewChanges: (worktree: WorktreeInfo) => void;
+  onViewCommits: (worktree: WorktreeInfo) => void;
   onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
+  onChangePRNumber?: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
+  onAutoAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onResolveConflicts: (worktree: WorktreeInfo) => void;
   onMerge: (worktree: WorktreeInfo) => void;
   onDeleteWorktree: (worktree: WorktreeInfo) => void;
@@ -78,9 +84,49 @@ interface WorktreeTabProps {
   onStopTests?: (worktree: WorktreeInfo) => void;
   /** View test logs for this worktree */
   onViewTestLogs?: (worktree: WorktreeInfo) => void;
+  /** Stash changes for this worktree */
+  onStashChanges?: (worktree: WorktreeInfo) => void;
+  /** View stashes for this worktree */
+  onViewStashes?: (worktree: WorktreeInfo) => void;
+  /** Cherry-pick commits from another branch */
+  onCherryPick?: (worktree: WorktreeInfo) => void;
+  /** Abort an in-progress merge/rebase/cherry-pick */
+  onAbortOperation?: (worktree: WorktreeInfo) => void;
+  /** Continue an in-progress merge/rebase/cherry-pick after resolving conflicts */
+  onContinueOperation?: (worktree: WorktreeInfo) => void;
   hasInitScript: boolean;
   /** Whether a test command is configured in project settings */
   hasTestCommand?: boolean;
+  /** List of available remotes for this worktree (used to show remote submenu) */
+  remotes?: Array<{ name: string; url: string }>;
+  /** Pull from a specific remote, bypassing the remote selection dialog */
+  onPullWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Push to a specific remote, bypassing the remote selection dialog */
+  onPushWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Terminal quick scripts configured for the project */
+  terminalScripts?: import('@/components/views/project-settings-view/terminal-scripts-constants').TerminalScript[];
+  /** Callback to run a terminal quick script in a new terminal session */
+  onRunTerminalScript?: (worktree: WorktreeInfo, command: string) => void;
+  /** Callback to open the script editor UI */
+  onEditScripts?: () => void;
+  /** Whether sync is in progress */
+  isSyncing?: boolean;
+  /** Sync (pull + push) callback */
+  onSync?: (worktree: WorktreeInfo) => void;
+  /** Sync with a specific remote */
+  onSyncWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Set tracking branch to a specific remote */
+  onSetTracking?: (worktree: WorktreeInfo, remote: string) => void;
+  /** List of remote names that have a branch matching the current branch name */
+  remotesWithBranch?: string[];
+  /** Available worktrees for swapping into this slot (non-main only) */
+  availableWorktreesForSwap?: WorktreeInfo[];
+  /** The slot index for this tab in the pinned list (0-based, excluding main) */
+  slotIndex?: number;
+  /** Callback when user swaps this slot to a different worktree */
+  onSwapWorktree?: (slotIndex: number, newBranch: string) => void;
+  /** List of currently pinned branch names (to show which are pinned in the swap dropdown) */
+  pinnedBranches?: string[];
 }
 
 export function WorktreeTab({
@@ -104,6 +150,7 @@ export function WorktreeTab({
   aheadCount,
   behindCount,
   hasRemoteBranch,
+  trackingRemote,
   gitRepoStatus,
   isAutoModeRunning = false,
   isStartingTests = false,
@@ -122,10 +169,13 @@ export function WorktreeTab({
   onOpenInIntegratedTerminal,
   onOpenInExternalTerminal,
   onViewChanges,
+  onViewCommits,
   onDiscardChanges,
   onCommit,
   onCreatePR,
+  onChangePRNumber,
   onAddressPRComments,
+  onAutoAddressPRComments,
   onResolveConflicts,
   onMerge,
   onDeleteWorktree,
@@ -138,8 +188,28 @@ export function WorktreeTab({
   onStartTests,
   onStopTests,
   onViewTestLogs,
+  onStashChanges,
+  onViewStashes,
+  onCherryPick,
+  onAbortOperation,
+  onContinueOperation,
   hasInitScript,
   hasTestCommand = false,
+  remotes,
+  onPullWithRemote,
+  onPushWithRemote,
+  terminalScripts,
+  onRunTerminalScript,
+  onEditScripts,
+  isSyncing = false,
+  onSync,
+  onSyncWithRemote,
+  onSetTracking,
+  remotesWithBranch,
+  availableWorktreesForSwap,
+  slotIndex,
+  onSwapWorktree,
+  pinnedBranches,
 }: WorktreeTabProps) {
   // Make the worktree tab a drop target for feature cards
   const { setNodeRef, isOver } = useDroppable({
@@ -293,6 +363,29 @@ export function WorktreeTab({
                 </TooltipContent>
               </Tooltip>
             )}
+            {worktree.hasConflicts && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={cn(
+                      'inline-flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-medium rounded border',
+                      isSelected ? 'bg-red-500 text-white border-red-400' : getConflictBadgeStyles()
+                    )}
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+                    {getConflictTypeLabel(worktree.conflictType)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {getConflictTypeLabel(worktree.conflictType)} conflicts detected
+                    {worktree.conflictFiles && worktree.conflictFiles.length > 0
+                      ? ` (${worktree.conflictFiles.length} file${worktree.conflictFiles.length !== 1 ? 's' : ''})`
+                      : ''}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             {prBadge}
           </Button>
           <BranchSwitchDropdown
@@ -360,11 +453,34 @@ export function WorktreeTab({
               </TooltipContent>
             </Tooltip>
           )}
+          {worktree.hasConflicts && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    'inline-flex items-center justify-center h-4 min-w-[1rem] px-1 text-[10px] font-medium rounded border',
+                    isSelected ? 'bg-red-500 text-white border-red-400' : getConflictBadgeStyles()
+                  )}
+                >
+                  <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+                  {getConflictTypeLabel(worktree.conflictType)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>
+                  {getConflictTypeLabel(worktree.conflictType)} conflicts detected
+                  {worktree.conflictFiles && worktree.conflictFiles.length > 0
+                    ? ` (${worktree.conflictFiles.length} file${worktree.conflictFiles.length !== 1 ? 's' : ''})`
+                    : ''}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          )}
           {prBadge}
         </Button>
       )}
 
-      {isDevServerRunning && (
+      {isDevServerRunning && devServerInfo?.urlDetected !== false && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -412,29 +528,37 @@ export function WorktreeTab({
         aheadCount={aheadCount}
         behindCount={behindCount}
         hasRemoteBranch={hasRemoteBranch}
+        trackingRemote={trackingRemote}
         isPulling={isPulling}
         isPushing={isPushing}
         isStartingDevServer={isStartingDevServer}
         isDevServerRunning={isDevServerRunning}
         devServerInfo={devServerInfo}
         gitRepoStatus={gitRepoStatus}
+        isLoadingGitStatus={isLoadingBranches}
         isAutoModeRunning={isAutoModeRunning}
         hasTestCommand={hasTestCommand}
         isStartingTests={isStartingTests}
         isTestRunning={isTestRunning}
         testSessionInfo={testSessionInfo}
+        remotes={remotes}
         onOpenChange={onActionsDropdownOpenChange}
         onPull={onPull}
         onPush={onPush}
         onPushNewBranch={onPushNewBranch}
+        onPullWithRemote={onPullWithRemote}
+        onPushWithRemote={onPushWithRemote}
         onOpenInEditor={onOpenInEditor}
         onOpenInIntegratedTerminal={onOpenInIntegratedTerminal}
         onOpenInExternalTerminal={onOpenInExternalTerminal}
         onViewChanges={onViewChanges}
+        onViewCommits={onViewCommits}
         onDiscardChanges={onDiscardChanges}
         onCommit={onCommit}
         onCreatePR={onCreatePR}
+        onChangePRNumber={onChangePRNumber}
         onAddressPRComments={onAddressPRComments}
+        onAutoAddressPRComments={onAutoAddressPRComments}
         onResolveConflicts={onResolveConflicts}
         onMerge={onMerge}
         onDeleteWorktree={onDeleteWorktree}
@@ -447,7 +571,24 @@ export function WorktreeTab({
         onStartTests={onStartTests}
         onStopTests={onStopTests}
         onViewTestLogs={onViewTestLogs}
+        onStashChanges={onStashChanges}
+        onViewStashes={onViewStashes}
+        onCherryPick={onCherryPick}
+        onAbortOperation={onAbortOperation}
+        onContinueOperation={onContinueOperation}
         hasInitScript={hasInitScript}
+        terminalScripts={terminalScripts}
+        onRunTerminalScript={onRunTerminalScript}
+        onEditScripts={onEditScripts}
+        isSyncing={isSyncing}
+        onSync={onSync}
+        onSyncWithRemote={onSyncWithRemote}
+        onSetTracking={onSetTracking}
+        remotesWithBranch={remotesWithBranch}
+        availableWorktreesForSwap={availableWorktreesForSwap}
+        slotIndex={slotIndex}
+        onSwapWorktree={onSwapWorktree}
+        pinnedBranches={pinnedBranches}
       />
     </div>
   );

@@ -46,6 +46,30 @@ export function getChangesBadgeStyles(): string {
   return 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30';
 }
 
+/**
+ * Returns the CSS classes for the conflict indicator badge.
+ * Uses red/destructive colors to indicate merge/rebase/cherry-pick conflicts.
+ */
+export function getConflictBadgeStyles(): string {
+  return 'bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/30';
+}
+
+/**
+ * Returns a human-readable label for the conflict type.
+ */
+export function getConflictTypeLabel(conflictType?: 'merge' | 'rebase' | 'cherry-pick'): string {
+  switch (conflictType) {
+    case 'merge':
+      return 'Merge';
+    case 'rebase':
+      return 'Rebase';
+    case 'cherry-pick':
+      return 'Cherry-pick';
+    default:
+      return 'Conflict';
+  }
+}
+
 /** Possible test session status values */
 export type TestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled';
 

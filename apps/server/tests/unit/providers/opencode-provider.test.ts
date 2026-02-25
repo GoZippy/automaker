@@ -69,19 +69,19 @@ describe('opencode-provider.ts', () => {
 
     it('should include free tier GLM model', () => {
       const models = provider.getAvailableModels();
-      const glm = models.find((m) => m.id === 'opencode/glm-4.7-free');
+      const glm = models.find((m) => m.id === 'opencode/glm-5-free');
 
       expect(glm).toBeDefined();
-      expect(glm?.name).toBe('GLM 4.7 Free');
+      expect(glm?.name).toBe('GLM 5 Free');
       expect(glm?.tier).toBe('basic');
     });
 
     it('should include free tier MiniMax model', () => {
       const models = provider.getAvailableModels();
-      const minimax = models.find((m) => m.id === 'opencode/minimax-m2.1-free');
+      const minimax = models.find((m) => m.id === 'opencode/minimax-m2.5-free');
 
       expect(minimax).toBeDefined();
-      expect(minimax?.name).toBe('MiniMax M2.1 Free');
+      expect(minimax?.name).toBe('MiniMax M2.5 Free');
       expect(minimax?.tier).toBe('basic');
     });
 

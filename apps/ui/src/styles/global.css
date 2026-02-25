@@ -384,6 +384,38 @@
     font-family: var(--font-sans);
   }
 
+  /* Fixed viewport for mobile - app-like feel with no scrolling/bouncing */
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+  }
+
+  /* iOS Safari: position:fixed on body prevents pull-to-refresh and overscroll bounce.
+     Scoped to touch devices only to avoid breaking desktop browser behaviours. */
+  @media (hover: none) and (pointer: coarse) {
+    html,
+    body {
+      position: fixed;
+    }
+  }
+
+  /* App container: full viewport, no scroll, safe-area insets for notched devices */
+  #app {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    /* Default bottom inset: reduced multiplier to balance home-indicator clearance with screen space */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) * 0.1);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
   /* Apply monospace font to code elements */
   code,
   pre,
@@ -515,6 +547,57 @@
 @layer utilities {
   .glass {
     @apply backdrop-blur-md border-white/10;
+  }
+
+  /* Disable iOS long-press context menu - apply only to non-interactive chrome elements */
+  .no-touch-callout {
+    -webkit-touch-callout: none;
+  }
+
+  /* Safe-area padding for full-screen mobile dialogs (e.g. view changes, commits).
+     Prevents overlap with the Dynamic Island / notch on iOS.
+     Uses calc() to ADD safe-area insets to the existing 1.5rem (p-6) padding from
+     DialogContent, so on non-notched devices the base p-6 padding is preserved.
+     On sm+ (desktop), the dialog is centered and not full-screen, so restore
+     the plain 1.5rem top/bottom padding. */
+  .dialog-fullscreen-mobile {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 1.5rem);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+  }
+
+  @media (min-width: 640px) {
+    .dialog-fullscreen-mobile {
+      padding-top: 1.5rem;
+      padding-bottom: 1.5rem;
+    }
+  }
+
+  /* Safe-area-aware close button positioning for full-screen mobile dialogs.
+     On mobile, shift the close button down by the safe-area-inset-top so it
+     remains reachable and not hidden behind the notch or Dynamic Island.
+     On sm+ (desktop), use standard top positioning. */
+  .dialog-fullscreen-mobile [data-slot='dialog-close'] {
+    top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  }
+
+  @media (min-width: 640px) {
+    .dialog-fullscreen-mobile [data-slot='dialog-close'] {
+      top: 0.75rem;
+    }
+  }
+
+  /* Safe-area-aware top padding for compact dialog headers (p-0 dialogs with own header).
+     Ensures the header content starts below the Dynamic Island / notch on iOS.
+     Used in dev-server-logs and test-logs panels that use p-0 on DialogContent.
+     On sm+ (desktop), the dialog is centered so no safe-area adjustment needed. */
+  .dialog-compact-header-mobile {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  }
+
+  @media (min-width: 640px) {
+    .dialog-compact-header-mobile {
+      padding-top: 0.75rem;
+    }
   }
 
   .glass-subtle {
@@ -859,6 +942,19 @@
 
 .animate-accordion-up {
   animation: accordion-up 0.2s ease-out forwards;
+}
+
+/* ========================================
+   CODE EDITOR - MOBILE RESPONSIVE STYLES
+   Reduce line number gutter width on mobile
+   ======================================== */
+
+/* On small screens (mobile), reduce line number gutter width to save horizontal space */
+@media (max-width: 640px) {
+  .cm-lineNumbers .cm-gutterElement {
+    min-width: 1.75rem !important;
+    padding-right: 0.25rem !important;
+  }
 }
 
 /* Terminal scrollbar theming */

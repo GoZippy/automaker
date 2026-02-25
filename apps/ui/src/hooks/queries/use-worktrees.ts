@@ -22,6 +22,12 @@ interface WorktreeInfo {
   changedFilesCount?: number;
   featureId?: string;
   linkedToBranch?: string;
+  /** Whether a merge, rebase, or cherry-pick is in progress with conflicts */
+  hasConflicts?: boolean;
+  /** Type of conflict operation in progress */
+  conflictType?: 'merge' | 'rebase' | 'cherry-pick';
+  /** List of files with conflicts */
+  conflictFiles?: string[];
 }
 
 interface RemovedWorktree {
@@ -154,6 +160,7 @@ export function useWorktreeDiffs(projectPath: string | undefined, featureId: str
       return {
         files: result.files ?? [],
         diff: result.diff ?? '',
+        ...(result.mergeState ? { mergeState: result.mergeState } : {}),
       };
     },
     enabled: !!projectPath && !!featureId,
@@ -179,6 +186,10 @@ interface BranchesResult {
   hasAnyRemotes: boolean;
   isGitRepo: boolean;
   hasCommits: boolean;
+  /** The name of the remote that the current branch is tracking (e.g. "origin"), if any */
+  trackingRemote?: string;
+  /** List of remote names that have a branch matching the current branch name */
+  remotesWithBranch?: string[];
 }
 
 /**
@@ -236,6 +247,8 @@ export function useWorktreeBranches(worktreePath: string | undefined, includeRem
         hasAnyRemotes: result.result?.hasAnyRemotes ?? false,
         isGitRepo: true,
         hasCommits: true,
+        trackingRemote: result.result?.trackingRemote,
+        remotesWithBranch: result.result?.remotesWithBranch,
       };
     },
     enabled: !!worktreePath,

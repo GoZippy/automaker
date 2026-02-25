@@ -2,6 +2,9 @@
  * Git utilities types and constants
  */
 
+// Re-export MergeStateInfo from the centralized @automaker/types package
+export type { MergeStateInfo } from '@automaker/types';
+
 // Binary file extensions to skip
 export const BINARY_EXTENSIONS = new Set([
   '.png',
@@ -70,4 +73,12 @@ export interface FileStatus {
   status: string;
   path: string;
   statusText: string;
+  /** Raw staging area (index) status character from git porcelain format */
+  indexStatus?: string;
+  /** Raw working tree status character from git porcelain format */
+  workTreeStatus?: string;
+  /** Whether this file is involved in a merge operation (both-modified, added-by-us, etc.) */
+  isMergeAffected?: boolean;
+  /** Type of merge involvement: 'both-modified' | 'added-by-us' | 'added-by-them' | 'deleted-by-us' | 'deleted-by-them' | 'both-added' | 'both-deleted' */
+  mergeType?: string;
 }

@@ -16,6 +16,7 @@ import {
   Globe,
   GitPullRequest,
   FlaskConical,
+  AlertTriangle,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,8 @@ import {
   truncateBranchName,
   getPRBadgeStyles,
   getChangesBadgeStyles,
+  getConflictBadgeStyles,
+  getConflictTypeLabel,
   getTestStatusStyles,
 } from './worktree-indicator-utils';
 
@@ -79,6 +82,10 @@ export interface WorktreeDropdownProps {
   aheadCount: number;
   behindCount: number;
   hasRemoteBranch: boolean;
+  /** The name of the remote that the current branch is tracking (e.g. "origin"), if any */
+  trackingRemote?: string;
+  /** Per-worktree tracking remote lookup */
+  getTrackingRemote?: (worktreePath: string) => string | undefined;
   gitRepoStatus: GitRepoStatus;
   hasTestCommand: boolean;
   isStartingTests: boolean;
@@ -91,10 +98,13 @@ export interface WorktreeDropdownProps {
   onOpenInIntegratedTerminal: (worktree: WorktreeInfo, mode?: 'tab' | 'split') => void;
   onOpenInExternalTerminal: (worktree: WorktreeInfo, terminalId?: string) => void;
   onViewChanges: (worktree: WorktreeInfo) => void;
+  onViewCommits: (worktree: WorktreeInfo) => void;
   onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
+  onChangePRNumber?: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
+  onAutoAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onResolveConflicts: (worktree: WorktreeInfo) => void;
   onMerge: (worktree: WorktreeInfo) => void;
   onDeleteWorktree: (worktree: WorktreeInfo) => void;
@@ -107,6 +117,40 @@ export interface WorktreeDropdownProps {
   onStartTests: (worktree: WorktreeInfo) => void;
   onStopTests: (worktree: WorktreeInfo) => void;
   onViewTestLogs: (worktree: WorktreeInfo) => void;
+  /** Stash changes for this worktree */
+  onStashChanges?: (worktree: WorktreeInfo) => void;
+  /** View stashes for this worktree */
+  onViewStashes?: (worktree: WorktreeInfo) => void;
+  /** Cherry-pick commits from another branch */
+  onCherryPick?: (worktree: WorktreeInfo) => void;
+  /** Abort an in-progress merge/rebase/cherry-pick */
+  onAbortOperation?: (worktree: WorktreeInfo) => void;
+  /** Continue an in-progress merge/rebase/cherry-pick after resolving conflicts */
+  onContinueOperation?: (worktree: WorktreeInfo) => void;
+  /** Remotes cache: maps worktree path to list of remotes */
+  remotesCache?: Record<string, Array<{ name: string; url: string }>>;
+  /** Pull from a specific remote, bypassing the remote selection dialog */
+  onPullWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Push to a specific remote, bypassing the remote selection dialog */
+  onPushWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Terminal quick scripts configured for the project */
+  terminalScripts?: import('@/components/views/project-settings-view/terminal-scripts-constants').TerminalScript[];
+  /** Callback to run a terminal quick script in a new terminal session */
+  onRunTerminalScript?: (worktree: WorktreeInfo, command: string) => void;
+  /** Callback to open the script editor UI */
+  onEditScripts?: () => void;
+  /** Whether sync is in progress */
+  isSyncing?: boolean;
+  /** Sync (pull + push) callback */
+  onSync?: (worktree: WorktreeInfo) => void;
+  /** Sync with a specific remote */
+  onSyncWithRemote?: (worktree: WorktreeInfo, remote: string) => void;
+  /** Set tracking branch to a specific remote */
+  onSetTracking?: (worktree: WorktreeInfo, remote: string) => void;
+  /** List of remote names that have a branch matching the current branch name */
+  remotesWithBranch?: string[];
+  /** When false, the trigger button uses a subdued style instead of the primary highlight. Defaults to true. */
+  highlightTrigger?: boolean;
 }
 
 /**
@@ -156,6 +200,8 @@ export function WorktreeDropdown({
   aheadCount,
   behindCount,
   hasRemoteBranch,
+  trackingRemote,
+  getTrackingRemote,
   gitRepoStatus,
   hasTestCommand,
   isStartingTests,
@@ -168,10 +214,13 @@ export function WorktreeDropdown({
   onOpenInIntegratedTerminal,
   onOpenInExternalTerminal,
   onViewChanges,
+  onViewCommits,
   onDiscardChanges,
   onCommit,
   onCreatePR,
+  onChangePRNumber,
   onAddressPRComments,
+  onAutoAddressPRComments,
   onResolveConflicts,
   onMerge,
   onDeleteWorktree,
@@ -184,10 +233,29 @@ export function WorktreeDropdown({
   onStartTests,
   onStopTests,
   onViewTestLogs,
+  onStashChanges,
+  onViewStashes,
+  onCherryPick,
+  onAbortOperation,
+  onContinueOperation,
+  remotesCache,
+  onPullWithRemote,
+  onPushWithRemote,
+  terminalScripts,
+  onRunTerminalScript,
+  onEditScripts,
+  isSyncing = false,
+  onSync,
+  onSyncWithRemote,
+  onSetTracking,
+  remotesWithBranch,
+  highlightTrigger = true,
 }: WorktreeDropdownProps) {
   // Find the currently selected worktree to display in the trigger
   const selectedWorktree = worktrees.find((w) => isWorktreeSelected(w));
-  const displayBranch = selectedWorktree?.branch || 'Select worktree';
+  const displayBranch =
+    selectedWorktree?.branch ??
+    (worktrees.length > 0 ? `+${worktrees.length} more` : 'Select worktree');
   const { truncated: truncatedBranch, isTruncated: isBranchNameTruncated } = truncateBranchName(
     displayBranch,
     MAX_TRIGGER_BRANCH_NAME_LENGTH
@@ -231,15 +299,28 @@ export function WorktreeDropdown({
   const triggerButton = useMemo(
     () => (
       <Button
-        variant="outline"
+        variant={selectedWorktree && highlightTrigger ? 'default' : 'outline'}
         size="sm"
         className={cn(
-          'h-7 px-3 gap-1.5 font-mono text-xs bg-secondary/50 hover:bg-secondary min-w-0 border-r-0 rounded-r-none'
+          'h-7 px-3 gap-1.5 font-mono text-xs min-w-0',
+          selectedWorktree &&
+            highlightTrigger &&
+            'bg-primary text-primary-foreground border-r-0 rounded-l-md rounded-r-none',
+          selectedWorktree &&
+            !highlightTrigger &&
+            'bg-secondary/50 hover:bg-secondary border-r-0 rounded-l-md rounded-r-none',
+          !selectedWorktree && 'bg-secondary/50 hover:bg-secondary rounded-md'
         )}
         disabled={isActivating}
       >
         {/* Running/Activating indicator */}
-        {(selectedStatus.isRunning || isActivating) && <Spinner size="xs" className="shrink-0" />}
+        {(selectedStatus.isRunning || isActivating) && (
+          <Spinner
+            size="xs"
+            className="shrink-0"
+            variant={selectedWorktree && highlightTrigger ? 'foreground' : 'primary'}
+          />
+        )}
 
         {/* Branch icon */}
         <GitBranch className="w-3.5 h-3.5 shrink-0" />
@@ -269,8 +350,8 @@ export function WorktreeDropdown({
           </span>
         )}
 
-        {/* Dev server indicator */}
-        {selectedStatus.devServerRunning && (
+        {/* Dev server indicator - only shown when port is confirmed detected */}
+        {selectedStatus.devServerRunning && selectedStatus.devServerInfo?.urlDetected !== false && (
           <span
             className="inline-flex items-center justify-center h-4 w-4 text-green-500 shrink-0"
             title={`Dev server running on port ${selectedStatus.devServerInfo?.port}`}
@@ -312,6 +393,20 @@ export function WorktreeDropdown({
           </span>
         )}
 
+        {/* Conflict indicator */}
+        {selectedWorktree?.hasConflicts && (
+          <span
+            className={cn(
+              'inline-flex items-center justify-center h-4 min-w-4 px-1 text-[10px] font-medium rounded border shrink-0',
+              getConflictBadgeStyles()
+            )}
+            title={`${getConflictTypeLabel(selectedWorktree.conflictType)} conflicts detected`}
+          >
+            <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+            {getConflictTypeLabel(selectedWorktree.conflictType)}
+          </span>
+        )}
+
         {/* PR badge */}
         {selectedWorktree?.pr && (
           <span
@@ -328,7 +423,14 @@ export function WorktreeDropdown({
         <ChevronDown className="w-3 h-3 shrink-0 ml-auto" />
       </Button>
     ),
-    [isActivating, selectedStatus, truncatedBranch, selectedWorktree, branchCardCounts]
+    [
+      isActivating,
+      selectedStatus,
+      truncatedBranch,
+      selectedWorktree,
+      branchCardCounts,
+      highlightTrigger,
+    ]
   );
 
   // Wrap trigger button with dropdown trigger first to ensure ref is passed correctly
@@ -415,7 +517,7 @@ export function WorktreeDropdown({
       {selectedWorktree?.isMain && (
         <BranchSwitchDropdown
           worktree={selectedWorktree}
-          isSelected={true}
+          isSelected={highlightTrigger}
           branches={branches}
           filteredBranches={filteredBranches}
           branchFilter={branchFilter}
@@ -432,33 +534,43 @@ export function WorktreeDropdown({
       {selectedWorktree && (
         <WorktreeActionsDropdown
           worktree={selectedWorktree}
-          isSelected={true}
+          isSelected={highlightTrigger}
           aheadCount={aheadCount}
           behindCount={behindCount}
           hasRemoteBranch={hasRemoteBranch}
+          trackingRemote={
+            getTrackingRemote ? getTrackingRemote(selectedWorktree.path) : trackingRemote
+          }
           isPulling={isPulling}
           isPushing={isPushing}
           isStartingDevServer={isStartingDevServer}
           isDevServerRunning={isDevServerRunning(selectedWorktree)}
           devServerInfo={getDevServerInfo(selectedWorktree)}
           gitRepoStatus={gitRepoStatus}
+          isLoadingGitStatus={isLoadingBranches}
           isAutoModeRunning={isAutoModeRunningForWorktree(selectedWorktree)}
           hasTestCommand={hasTestCommand}
           isStartingTests={isStartingTests}
           isTestRunning={isTestRunningForWorktree(selectedWorktree)}
           testSessionInfo={getTestSessionInfo(selectedWorktree)}
+          remotes={remotesCache?.[selectedWorktree.path]}
           onOpenChange={onActionsDropdownOpenChange(selectedWorktree)}
           onPull={onPull}
           onPush={onPush}
           onPushNewBranch={onPushNewBranch}
+          onPullWithRemote={onPullWithRemote}
+          onPushWithRemote={onPushWithRemote}
           onOpenInEditor={onOpenInEditor}
           onOpenInIntegratedTerminal={onOpenInIntegratedTerminal}
           onOpenInExternalTerminal={onOpenInExternalTerminal}
           onViewChanges={onViewChanges}
+          onViewCommits={onViewCommits}
           onDiscardChanges={onDiscardChanges}
           onCommit={onCommit}
           onCreatePR={onCreatePR}
+          onChangePRNumber={onChangePRNumber}
           onAddressPRComments={onAddressPRComments}
+          onAutoAddressPRComments={onAutoAddressPRComments}
           onResolveConflicts={onResolveConflicts}
           onMerge={onMerge}
           onDeleteWorktree={onDeleteWorktree}
@@ -471,7 +583,20 @@ export function WorktreeDropdown({
           onStartTests={onStartTests}
           onStopTests={onStopTests}
           onViewTestLogs={onViewTestLogs}
+          onStashChanges={onStashChanges}
+          onViewStashes={onViewStashes}
+          onCherryPick={onCherryPick}
+          onAbortOperation={onAbortOperation}
+          onContinueOperation={onContinueOperation}
           hasInitScript={hasInitScript}
+          terminalScripts={terminalScripts}
+          onRunTerminalScript={onRunTerminalScript}
+          onEditScripts={onEditScripts}
+          isSyncing={isSyncing}
+          onSync={onSync}
+          onSyncWithRemote={onSyncWithRemote}
+          onSetTracking={onSetTracking}
+          remotesWithBranch={remotesWithBranch}
         />
       )}
     </div>

@@ -3,13 +3,13 @@
  */
 
 import type { Request, Response } from 'express';
-import type { AutoModeService } from '../../../services/auto-mode-service.js';
+import type { AutoModeServiceCompat } from '../../../services/auto-mode/index.js';
 import { createLogger } from '@automaker/utils';
 import { getErrorMessage, logError } from '../common.js';
 
 const logger = createLogger('AutoMode');
 
-export function createRunFeatureHandler(autoModeService: AutoModeService) {
+export function createRunFeatureHandler(autoModeService: AutoModeServiceCompat) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, featureId, useWorktrees } = req.body as {
@@ -26,23 +26,9 @@ export function createRunFeatureHandler(autoModeService: AutoModeService) {
         return;
       }
 
-      // Check per-worktree capacity before starting
-      const capacity = await autoModeService.checkWorktreeCapacity(projectPath, featureId);
-      if (!capacity.hasCapacity) {
-        const worktreeDesc = capacity.branchName
-          ? `worktree "${capacity.branchName}"`
-          : 'main worktree';
-        res.status(429).json({
-          success: false,
-          error: `Agent limit reached for ${worktreeDesc} (${capacity.currentAgents}/${capacity.maxAgents}). Wait for running tasks to complete or increase the limit.`,
-          details: {
-            currentAgents: capacity.currentAgents,
-            maxAgents: capacity.maxAgents,
-            branchName: capacity.branchName,
-          },
-        });
-        return;
-      }
+      // Note: No concurrency limit check here. Manual feature starts always run
+      // immediately and bypass the concurrency limit. Their presence IS counted
+      // by the auto-loop coordinator when deciding whether to dispatch new auto-mode tasks.
 
       // Start execution in background
       // executeFeature derives workDir from feature.branchName
@@ -50,10 +36,6 @@ export function createRunFeatureHandler(autoModeService: AutoModeService) {
         .executeFeature(projectPath, featureId, useWorktrees ?? false, false)
         .catch((error) => {
           logger.error(`Feature ${featureId} error:`, error);
-        })
-        .finally(() => {
-          // Release the starting slot when execution completes (success or error)
-          // Note: The feature should be in runningFeatures by this point
         });
 
       res.json({ success: true });

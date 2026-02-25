@@ -2,8 +2,14 @@
  * Electron API type definitions
  */
 
-import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
-import type { ParsedTask } from '@automaker/types';
+import type {
+  ClaudeUsageResponse,
+  CodexUsageResponse,
+  ZaiUsageResponse,
+  GeminiUsageResponse,
+} from '@/store/app-store';
+import type { ParsedTask, FeatureStatusWithPipeline, MergeStateInfo } from '@automaker/types';
+export type { MergeStateInfo } from '@automaker/types';
 
 export interface ImageAttachment {
   id?: string; // Optional - may not be present in messages loaded from server
@@ -27,6 +33,14 @@ export interface ToolUse {
   input: unknown;
 }
 
+export interface ToolResult {
+  name: string;
+  input: {
+    toolUseId?: string;
+    content: string;
+  };
+}
+
 export type StreamEvent =
   | {
       type: 'message';
@@ -46,6 +60,11 @@ export type StreamEvent =
       tool: ToolUse;
     }
   | {
+      type: 'tool_result';
+      sessionId: string;
+      tool: ToolResult;
+    }
+  | {
       type: 'complete';
       sessionId: string;
       messageId?: string;
@@ -63,6 +82,7 @@ export interface SessionListItem {
   id: string;
   name: string;
   projectPath: string;
+  workingDirectory?: string; // The worktree/directory this session runs in
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -359,6 +379,21 @@ export type AutoModeEvent =
         title?: string;
         status?: string;
       }>;
+    }
+  | {
+      type: 'feature_status_changed';
+      featureId: string;
+      projectPath?: string;
+      status: FeatureStatusWithPipeline;
+      previousStatus: FeatureStatusWithPipeline;
+      reason?: string;
+    }
+  | {
+      type: 'features_reconciled';
+      projectPath?: string;
+      reconciledCount: number;
+      reconciledFeatureIds: string[];
+      message: string;
     };
 
 export type SpecRegenerationEvent =
@@ -622,6 +657,27 @@ export interface ElectronAPI {
     error?: string;
   }>;
 
+  // Copy, Move, Download APIs
+  copyItem?: (
+    sourcePath: string,
+    destinationPath: string,
+    overwrite?: boolean
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    exists?: boolean;
+  }>;
+  moveItem?: (
+    sourcePath: string,
+    destinationPath: string,
+    overwrite?: boolean
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    exists?: boolean;
+  }>;
+  downloadItem?: (filePath: string) => Promise<void>;
+
   // App APIs
   getPath: (name: string) => Promise<string>;
   saveImageToTemp: (
@@ -695,6 +751,16 @@ export interface ElectronAPI {
     getUsage: () => Promise<CodexUsageResponse>;
   };
 
+  // z.ai Usage API
+  zai: {
+    getUsage: () => Promise<ZaiUsageResponse>;
+  };
+
+  // Gemini Usage API
+  gemini: {
+    getUsage: () => Promise<GeminiUsageResponse>;
+  };
+
   // Worktree Management APIs
   worktree: WorktreeAPI;
 
@@ -725,6 +791,14 @@ export interface FileStatus {
   status: string;
   path: string;
   statusText: string;
+  /** Raw staging area (index) status character from git porcelain format */
+  indexStatus?: string;
+  /** Raw working tree status character from git porcelain format */
+  workTreeStatus?: string;
+  /** Whether this file is involved in a merge operation */
+  isMergeAffected?: boolean;
+  /** Type of merge involvement (e.g. 'both-modified', 'added-by-us', etc.) */
+  mergeType?: string;
 }
 
 export interface FileDiffsResult {
@@ -733,6 +807,8 @@ export interface FileDiffsResult {
   files?: FileStatus[];
   hasChanges?: boolean;
   error?: string;
+  /** Merge state info, present when a merge/rebase/cherry-pick is in progress */
+  mergeState?: MergeStateInfo;
 }
 
 export interface FileDiffResult {
@@ -763,6 +839,26 @@ export interface WorktreeAPI {
       branchDeleted: boolean;
     };
     error?: string;
+    hasConflicts?: boolean;
+    conflictFiles?: string[];
+  }>;
+
+  // Rebase the current branch onto a target branch
+  rebase: (
+    worktreePath: string,
+    ontoBranch: string,
+    remote?: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      ontoBranch: string;
+      message: string;
+    };
+    error?: string;
+    hasConflicts?: boolean;
+    conflictFiles?: string[];
+    aborted?: boolean;
   }>;
 
   // Get worktree info for a feature
@@ -828,6 +924,19 @@ export interface WorktreeAPI {
       path: string;
       branch: string;
       isNew: boolean;
+      /** Short commit hash the worktree is based on */
+      baseCommitHash?: string;
+      /** Result of syncing the base branch with its remote tracking branch */
+      syncResult?: {
+        /** Whether the sync succeeded */
+        synced: boolean;
+        /** The remote that was synced from */
+        remote?: string;
+        /** Human-readable message about the sync result */
+        message?: string;
+        /** Whether the branch had diverged (local commits ahead of remote) */
+        diverged?: boolean;
+      };
     };
     error?: string;
   }>;
@@ -849,7 +958,8 @@ export interface WorktreeAPI {
   // Commit changes in a worktree
   commit: (
     worktreePath: string,
-    message: string
+    message: string,
+    files?: string[]
   ) => Promise<{
     success: boolean;
     result?: {
@@ -862,9 +972,28 @@ export interface WorktreeAPI {
   }>;
 
   // Generate an AI commit message from git diff
-  generateCommitMessage: (worktreePath: string) => Promise<{
+  generateCommitMessage: (
+    worktreePath: string,
+    model?: string,
+    thinkingLevel?: string,
+    providerId?: string
+  ) => Promise<{
     success: boolean;
     message?: string;
+    error?: string;
+  }>;
+
+  // Generate an AI PR title and description from branch diff
+  generatePRDescription: (
+    worktreePath: string,
+    baseBranch?: string,
+    model?: string,
+    thinkingLevel?: string,
+    providerId?: string
+  ) => Promise<{
+    success: boolean;
+    title?: string;
+    body?: string;
     error?: string;
   }>;
 
@@ -872,16 +1001,59 @@ export interface WorktreeAPI {
   push: (
     worktreePath: string,
     force?: boolean,
-    remote?: string
+    remote?: string,
+    autoResolve?: boolean
   ) => Promise<{
     success: boolean;
     result?: {
       branch: string;
       pushed: boolean;
+      diverged?: boolean;
+      autoResolved?: boolean;
       message: string;
     };
     error?: string;
+    diverged?: boolean;
+    hasConflicts?: boolean;
+    conflictFiles?: string[];
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS';
+  }>;
+
+  // Sync a worktree branch (pull then push)
+  sync: (
+    worktreePath: string,
+    remote?: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      pulled: boolean;
+      pushed: boolean;
+      isFastForward?: boolean;
+      isMerge?: boolean;
+      autoResolved?: boolean;
+      message: string;
+    };
+    error?: string;
+    hasConflicts?: boolean;
+    conflictFiles?: string[];
+    conflictSource?: 'pull' | 'stash';
+  }>;
+
+  // Set the upstream tracking branch
+  setTracking: (
+    worktreePath: string,
+    remote: string,
+    branch?: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      remote: string;
+      upstream: string;
+      message: string;
+    };
+    error?: string;
   }>;
 
   // Create a pull request from a worktree
@@ -894,6 +1066,9 @@ export interface WorktreeAPI {
       prBody?: string;
       baseBranch?: string;
       draft?: boolean;
+      remote?: string;
+      /** Remote to create the PR against (e.g. upstream). If not specified, inferred from repo setup. */
+      targetRemote?: string;
     }
   ) => Promise<{
     success: boolean;
@@ -913,6 +1088,27 @@ export interface WorktreeAPI {
     error?: string;
   }>;
 
+  // Update the tracked PR number for a worktree branch
+  updatePRNumber: (
+    worktreePath: string,
+    prNumber: number,
+    projectPath?: string
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      prInfo: {
+        number: number;
+        url: string;
+        title: string;
+        state: string;
+        createdAt: string;
+      };
+      ghCliUnavailable?: boolean;
+    };
+    error?: string;
+  }>;
+
   // Get file diffs for a feature worktree
   getDiffs: (projectPath: string, featureId: string) => Promise<FileDiffsResult>;
 
@@ -923,37 +1119,83 @@ export interface WorktreeAPI {
     filePath: string
   ) => Promise<FileDiffResult>;
 
-  // Pull latest changes from remote
-  pull: (worktreePath: string) => Promise<{
+  // Stage or unstage files in a worktree
+  stageFiles: (
+    worktreePath: string,
+    files: string[],
+    operation: 'stage' | 'unstage'
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      operation: 'stage' | 'unstage';
+      filesCount: number;
+    };
+    error?: string;
+  }>;
+
+  // Pull latest changes from remote with optional stash management
+  pull: (
+    worktreePath: string,
+    remote?: string,
+    stashIfNeeded?: boolean
+  ) => Promise<{
     success: boolean;
     result?: {
       branch: string;
       pulled: boolean;
       message: string;
+      hasLocalChanges?: boolean;
+      localChangedFiles?: string[];
+      hasConflicts?: boolean;
+      conflictSource?: 'pull' | 'stash';
+      conflictFiles?: string[];
+      stashed?: boolean;
+      stashRestored?: boolean;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS';
   }>;
 
-  // Create and checkout a new branch
+  // Check for uncommitted changes in a worktree
+  checkChanges: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      hasChanges: boolean;
+      staged: string[];
+      unstaged: string[];
+      untracked: string[];
+      totalFiles: number;
+    };
+    error?: string;
+  }>;
+
+  // Create and checkout a new branch (with optional stash handling)
   checkoutBranch: (
     worktreePath: string,
-    branchName: string
+    branchName: string,
+    baseBranch?: string,
+    stashChanges?: boolean,
+    includeUntracked?: boolean
   ) => Promise<{
     success: boolean;
     result?: {
       previousBranch: string;
       newBranch: string;
       message: string;
+      hasConflicts?: boolean;
+      stashedChanges?: boolean;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS';
+    stashPopConflicts?: boolean;
+    stashPopConflictMessage?: string;
   }>;
 
   // List branches (local and optionally remote)
   listBranches: (
     worktreePath: string,
-    includeRemote?: boolean
+    includeRemote?: boolean,
+    signal?: AbortSignal
   ) => Promise<{
     success: boolean;
     result?: {
@@ -967,6 +1209,8 @@ export interface WorktreeAPI {
       behindCount: number;
       hasRemoteBranch: boolean;
       hasAnyRemotes: boolean;
+      /** The name of the remote that the current branch is tracking (e.g. "origin"), if any */
+      trackingRemote?: string;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS'; // Error codes for git status issues
@@ -982,9 +1226,15 @@ export interface WorktreeAPI {
       previousBranch: string;
       currentBranch: string;
       message: string;
+      hasConflicts: boolean;
+      stashedChanges: boolean;
     };
     error?: string;
     code?: 'NOT_GIT_REPO' | 'NO_COMMITS' | 'UNCOMMITTED_CHANGES';
+    /** True when the checkout failed AND the stash-pop used to restore changes produced merge conflicts */
+    stashPopConflicts?: boolean;
+    /** Human-readable message describing the stash-pop conflict situation */
+    stashPopConflictMessage?: string;
   }>;
 
   // List all remotes and their branches
@@ -1163,6 +1413,7 @@ export interface WorktreeAPI {
         worktreePath: string;
         port: number;
         url: string;
+        urlDetected: boolean;
       }>;
     };
     error?: string;
@@ -1181,7 +1432,7 @@ export interface WorktreeAPI {
     error?: string;
   }>;
 
-  // Subscribe to dev server log events (started, output, stopped)
+  // Subscribe to dev server log events (started, output, stopped, url-detected)
   onDevServerLogEvent: (
     callback: (
       event:
@@ -1200,6 +1451,15 @@ export interface WorktreeAPI {
               port: number;
               exitCode: number | null;
               error?: string;
+              timestamp: string;
+            };
+          }
+        | {
+            type: 'dev-server:url-detected';
+            payload: {
+              worktreePath: string;
+              url: string;
+              port: number;
               timestamp: string;
             };
           }
@@ -1288,8 +1548,11 @@ export interface WorktreeAPI {
     }) => void
   ) => () => void;
 
-  // Discard changes for a worktree
-  discardChanges: (worktreePath: string) => Promise<{
+  // Discard changes for a worktree (optionally only specific files)
+  discardChanges: (
+    worktreePath: string,
+    files?: string[]
+  ) => Promise<{
     success: boolean;
     result?: {
       discarded: boolean;
@@ -1369,6 +1632,156 @@ export interface WorktreeAPI {
           }
     ) => void
   ) => () => void;
+
+  // Get recent commit history for a worktree
+  getCommitLog: (
+    worktreePath: string,
+    limit?: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      commits: Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        authorEmail: string;
+        date: string;
+        subject: string;
+        body: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
+
+  // Stash changes in a worktree (with optional message and optional file selection)
+  stashPush: (
+    worktreePath: string,
+    message?: string,
+    files?: string[]
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      stashed: boolean;
+      branch?: string;
+      message?: string;
+    };
+    error?: string;
+  }>;
+
+  // List all stashes in a worktree
+  stashList: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      stashes: Array<{
+        index: number;
+        message: string;
+        branch: string;
+        date: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
+
+  // Apply or pop a stash entry
+  stashApply: (
+    worktreePath: string,
+    stashIndex: number,
+    pop?: boolean
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      applied: boolean;
+      hasConflicts: boolean;
+      conflictFiles?: string[];
+      operation: 'apply' | 'pop';
+      stashIndex: number;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Drop (delete) a stash entry
+  stashDrop: (
+    worktreePath: string,
+    stashIndex: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      dropped: boolean;
+      stashIndex: number;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Cherry-pick one or more commits into the current branch
+  cherryPick: (
+    worktreePath: string,
+    commitHashes: string[],
+    options?: {
+      noCommit?: boolean;
+    }
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      cherryPicked: boolean;
+      commitHashes: string[];
+      branch: string;
+      message: string;
+    };
+    error?: string;
+    hasConflicts?: boolean;
+    aborted?: boolean;
+  }>;
+
+  // Abort an in-progress merge, rebase, or cherry-pick operation
+  abortOperation: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      operation: string;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Continue an in-progress merge, rebase, or cherry-pick after conflict resolution
+  continueOperation: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      operation: string;
+      message: string;
+    };
+    error?: string;
+  }>;
+
+  // Get commit log for a specific branch (not just the current one)
+  getBranchCommitLog: (
+    worktreePath: string,
+    branchName?: string,
+    limit?: number
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      branch: string;
+      commits: Array<{
+        hash: string;
+        shortHash: string;
+        author: string;
+        authorEmail: string;
+        date: string;
+        subject: string;
+        body: string;
+        files: string[];
+      }>;
+      total: number;
+    };
+    error?: string;
+  }>;
 }
 
 // Test runner status type
@@ -1403,12 +1816,71 @@ export interface TestRunnerCompletedEvent {
   timestamp: string;
 }
 
+export interface GitFileDetails {
+  branch: string;
+  lastCommitHash: string;
+  lastCommitMessage: string;
+  lastCommitAuthor: string;
+  lastCommitTimestamp: string;
+  linesAdded: number;
+  linesRemoved: number;
+  isConflicted: boolean;
+  isStaged: boolean;
+  isUnstaged: boolean;
+  statusLabel: string;
+}
+
+export interface EnhancedFileStatus {
+  path: string;
+  indexStatus: string;
+  workTreeStatus: string;
+  isConflicted: boolean;
+  isStaged: boolean;
+  isUnstaged: boolean;
+  linesAdded: number;
+  linesRemoved: number;
+  statusLabel: string;
+}
+
+export interface EnhancedStatusResult {
+  success: boolean;
+  branch?: string;
+  files?: EnhancedFileStatus[];
+  error?: string;
+}
+
+export interface GitDetailsResult {
+  success: boolean;
+  details?: GitFileDetails;
+  error?: string;
+}
+
 export interface GitAPI {
   // Get diffs for the main project (not a worktree)
   getDiffs: (projectPath: string) => Promise<FileDiffsResult>;
 
   // Get diff for a specific file in the main project
   getFileDiff: (projectPath: string, filePath: string) => Promise<FileDiffResult>;
+
+  // Stage or unstage files in the main project
+  stageFiles: (
+    projectPath: string,
+    files: string[],
+    operation: 'stage' | 'unstage'
+  ) => Promise<{
+    success: boolean;
+    result?: {
+      operation: 'stage' | 'unstage';
+      filesCount: number;
+    };
+    error?: string;
+  }>;
+
+  // Get detailed git info for a file (branch, last commit, diff stats, conflict status)
+  getDetails: (projectPath: string, filePath?: string) => Promise<GitDetailsResult>;
+
+  // Get enhanced status with per-file diff stats and staged/unstaged differentiation
+  getEnhancedStatus: (projectPath: string) => Promise<EnhancedStatusResult>;
 }
 
 // Model definition type

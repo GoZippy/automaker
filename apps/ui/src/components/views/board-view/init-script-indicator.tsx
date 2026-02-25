@@ -191,7 +191,7 @@ export function InitScriptIndicator({ projectPath }: InitScriptIndicatorProps) {
     <div
       className={cn(
         'fixed bottom-4 right-4 z-50 flex flex-col gap-2',
-        'max-h-[calc(100vh-120px)] overflow-y-auto',
+        'max-h-[calc(100dvh-120px)] overflow-y-auto',
         'scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent'
       )}
     >

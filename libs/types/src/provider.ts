@@ -163,6 +163,13 @@ export interface ExecuteOptions {
   systemPrompt?: string | SystemPromptPreset;
   maxTurns?: number;
   allowedTools?: string[];
+  /**
+   * Restrict which built-in tools are available to the subprocess.
+   * - string[] - Array of specific tool names (e.g., ['Bash', 'Read', 'Edit'])
+   * - [] (empty array) - Disable all built-in tools (text generation only)
+   * Unlike allowedTools (which controls auto-approval), this controls tool availability.
+   */
+  tools?: string[];
   mcpServers?: Record<string, McpServerConfig>;
   /** If true, allows all MCP tools unrestricted (no approval needed). Default: false */
   mcpUnrestrictedTools?: boolean;
@@ -253,7 +260,13 @@ export interface ContentBlock {
  */
 export interface ProviderMessage {
   type: 'assistant' | 'user' | 'error' | 'result';
-  subtype?: 'success' | 'error' | 'error_max_turns' | 'error_max_structured_output_retries';
+  subtype?:
+    | 'success'
+    | 'error'
+    | 'error_max_turns'
+    | 'error_max_structured_output_retries'
+    | 'error_during_execution'
+    | 'error_max_budget_usd';
   session_id?: string;
   message?: {
     role: 'user' | 'assistant';

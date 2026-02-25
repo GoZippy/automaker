@@ -13,6 +13,12 @@ import {
   X,
   SquarePlus,
   Settings,
+  GitBranch,
+  ChevronDown,
+  FolderGit,
+  Palette,
+  RotateCcw,
+  Type,
 } from 'lucide-react';
 import { Spinner } from '@/components/ui/spinner';
 import { getServerUrlSync } from '@/lib/http-api-client';
@@ -28,6 +34,17 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -226,9 +243,17 @@ interface TerminalViewProps {
   initialMode?: 'tab' | 'split';
   /** Unique nonce to allow opening the same worktree multiple times */
   nonce?: number;
+  /** Command to run automatically when the terminal is created (e.g., from scripts submenu) */
+  initialCommand?: string;
 }
 
-export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: TerminalViewProps) {
+export function TerminalView({
+  initialCwd,
+  initialBranch,
+  initialMode,
+  nonce,
+  initialCommand,
+}: TerminalViewProps) {
   const {
     terminalState,
     setTerminalUnlocked,
@@ -254,7 +279,11 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     setTerminalLineHeight,
     setTerminalScrollbackLines,
     setTerminalScreenReaderMode,
+    setTerminalBackgroundColor,
+    setTerminalForegroundColor,
     updateTerminalPanelSizes,
+    currentWorktreeByProject,
+    worktreesByProject,
   } = useAppStore();
 
   const navigate = useNavigate();
@@ -272,6 +301,10 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
   const isCreatingRef = useRef<boolean>(false);
   const restoringProjectPathRef = useRef<string | null>(null);
   const [newSessionIds, setNewSessionIds] = useState<Set<string>>(new Set());
+  // Per-session command overrides (e.g., from scripts submenu), takes priority over defaultRunScript
+  const [sessionCommandOverrides, setSessionCommandOverrides] = useState<Map<string, string>>(
+    new Map()
+  );
   const [serverSessionInfo, setServerSessionInfo] = useState<{
     current: number;
     max: number;
@@ -560,7 +593,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
 
     // Skip if we've already handled this exact request (prevents duplicate terminals)
     // Include mode and nonce in the key to allow opening same cwd multiple times
-    const cwdKey = `${initialCwd}:${initialMode || 'default'}:${nonce || 0}`;
+    const cwdKey = `${initialCwd}:${initialMode || 'default'}:${nonce || 0}:${initialCommand || ''}`;
     if (initialCwdHandledRef.current === cwdKey) return;
 
     // Skip if terminal is not enabled or not unlocked
@@ -602,8 +635,12 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
           }
 
           // Mark this session as new for running initial command
-          if (defaultRunScript) {
+          if (initialCommand || defaultRunScript) {
             setNewSessionIds((prev) => new Set(prev).add(data.data.id));
+            // Store per-session command override if an explicit command was provided
+            if (initialCommand) {
+              setSessionCommandOverrides((prev) => new Map(prev).set(data.data.id, initialCommand));
+            }
           }
 
           // Show success toast with branch name if provided
@@ -638,6 +675,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     initialCwd,
     initialBranch,
     initialMode,
+    initialCommand,
     nonce,
     status?.enabled,
     status?.passwordRequired,
@@ -946,13 +984,50 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
     }
   };
 
+  // Helper: find the branchName of the given session ID within a layout tree
+  const findSessionBranchName = (
+    layout: TerminalPanelContent | null,
+    sessionId: string
+  ): string | undefined => {
+    if (!layout) return undefined;
+    if (layout.type === 'terminal') {
+      return layout.sessionId === sessionId ? layout.branchName : undefined;
+    }
+    if (layout.type === 'split') {
+      for (const panel of layout.panels) {
+        const found = findSessionBranchName(panel, sessionId);
+        if (found !== undefined) return found;
+      }
+    }
+    return undefined;
+  };
+
+  // Helper: resolve the worktree cwd and branchName for the currently active terminal session.
+  // Returns { cwd, branchName } if the active terminal was opened in a worktree, or {} otherwise.
+  const getActiveSessionWorktreeInfo = (): { cwd?: string; branchName?: string } => {
+    const activeSessionId = terminalState.activeSessionId;
+    if (!activeSessionId || !activeTab?.layout || !currentProject) return {};
+
+    const branchName = findSessionBranchName(activeTab.layout, activeSessionId);
+    if (!branchName) return {};
+
+    // Look up the worktree path for this branch in the project's worktree list
+    const projectWorktrees = worktreesByProject[currentProject.path] ?? [];
+    const worktree = projectWorktrees.find((wt) => wt.branch === branchName);
+    if (!worktree) return { branchName };
+
+    return { cwd: worktree.path, branchName };
+  };
+
   // Create a new terminal session
   // targetSessionId: the terminal to split (if splitting an existing terminal)
   // customCwd: optional working directory to use instead of the current project path
+  // branchName: optional branch name to display in the terminal panel header
   const createTerminal = async (
     direction?: 'horizontal' | 'vertical',
     targetSessionId?: string,
-    customCwd?: string
+    customCwd?: string,
+    branchName?: string
   ) => {
     if (!canCreateTerminal('[Terminal] Debounced terminal creation')) {
       return;
@@ -971,7 +1046,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       const data = await response.json();
 
       if (data.success) {
-        addTerminalToLayout(data.data.id, direction, targetSessionId);
+        addTerminalToLayout(data.data.id, direction, targetSessionId, branchName);
         // Mark this session as new for running initial command
         if (defaultRunScript) {
           setNewSessionIds((prev) => new Set(prev).add(data.data.id));
@@ -1004,10 +1079,22 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
   };
 
   // Create terminal in new tab
-  const createTerminalInNewTab = async () => {
+  // customCwd: optional working directory (e.g., a specific worktree path)
+  // branchName: optional branch name to display in the terminal panel header
+  // command: optional command to run when the terminal connects (e.g., from scripts menu)
+  const createTerminalInNewTab = async (
+    customCwd?: string,
+    branchName?: string,
+    command?: string
+  ) => {
     if (!canCreateTerminal('[Terminal] Debounced terminal tab creation')) {
       return;
     }
+
+    // Use provided cwd/branch, or inherit from active session's worktree
+    const { cwd: worktreeCwd, branchName: worktreeBranch } = customCwd
+      ? { cwd: customCwd, branchName: branchName }
+      : getActiveSessionWorktreeInfo();
 
     const tabId = addTerminalTab();
     try {
@@ -1018,17 +1105,21 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
 
       const response = await apiFetch('/api/terminal/sessions', 'POST', {
         headers,
-        body: { cwd: currentProject?.path || undefined, cols: 80, rows: 24 },
+        body: { cwd: worktreeCwd || currentProject?.path || undefined, cols: 80, rows: 24 },
       });
       const data = await response.json();
 
       if (data.success) {
-        // Add to the newly created tab
+        // Add to the newly created tab (passing branchName so the panel header shows the branch badge)
         const { addTerminalToTab } = useAppStore.getState();
-        addTerminalToTab(data.data.id, tabId);
+        addTerminalToTab(data.data.id, tabId, undefined, worktreeBranch);
         // Mark this session as new for running initial command
-        if (defaultRunScript) {
+        if (command || defaultRunScript) {
           setNewSessionIds((prev) => new Set(prev).add(data.data.id));
+          // Store per-session command override if an explicit command was provided
+          if (command) {
+            setSessionCommandOverrides((prev) => new Map(prev).set(data.data.id, command));
+          }
         }
         // Refresh session count
         fetchServerSettings();
@@ -1076,6 +1167,18 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       // Always remove from UI - even if server says 404 (session may have already exited)
       removeTerminalFromLayout(sessionId);
 
+      // Clean up stale entries for killed sessions
+      setSessionCommandOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      setNewSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+
       if (!response.ok && response.status !== 404) {
         // Log non-404 errors but still proceed with UI cleanup
         const data = await response.json().catch(() => ({}));
@@ -1088,6 +1191,17 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       logger.error('Kill session error:', err);
       // Still remove from UI on network error - better UX than leaving broken terminal
       removeTerminalFromLayout(sessionId);
+      // Clean up stale entries for killed sessions (same cleanup as try block)
+      setSessionCommandOverrides((prev) => {
+        const next = new Map(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      setNewSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
     }
   };
 
@@ -1121,6 +1235,22 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
         }
       })
     );
+
+    // Clean up stale entries for all killed sessions in this tab
+    setSessionCommandOverrides((prev) => {
+      const next = new Map(prev);
+      for (const sessionId of sessionIds) {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+    setNewSessionIds((prev) => {
+      const next = new Set(prev);
+      for (const sessionId of sessionIds) {
+        next.delete(sessionId);
+      }
+      return next;
+    });
 
     // Now remove the tab from state
     removeTerminalTab(tabId);
@@ -1192,6 +1322,12 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
   const handleCommandRan = useCallback((sessionId: string) => {
     setNewSessionIds((prev) => {
       const next = new Set(prev);
+      next.delete(sessionId);
+      return next;
+    });
+    // Clean up any per-session command override
+    setSessionCommandOverrides((prev) => {
+      const next = new Map(prev);
       next.delete(sessionId);
       return next;
     });
@@ -1327,6 +1463,9 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
       const terminalFontSize = content.fontSize ?? terminalState.defaultFontSize;
       // Only run command on new sessions (not restored ones)
       const isNewSession = newSessionIds.has(content.sessionId);
+      // Per-session command override takes priority over defaultRunScript
+      const sessionCommand = sessionCommandOverrides.get(content.sessionId);
+      const runCommand = isNewSession ? sessionCommand || defaultRunScript : undefined;
       return (
         <TerminalErrorBoundary
           key={`boundary-${content.sessionId}`}
@@ -1344,9 +1483,19 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
             isActive={terminalState.activeSessionId === content.sessionId}
             onFocus={() => setActiveTerminalSession(content.sessionId)}
             onClose={() => killTerminal(content.sessionId)}
-            onSplitHorizontal={() => createTerminal('horizontal', content.sessionId)}
-            onSplitVertical={() => createTerminal('vertical', content.sessionId)}
+            onSplitHorizontal={() => {
+              const { cwd, branchName } = getActiveSessionWorktreeInfo();
+              createTerminal('horizontal', content.sessionId, cwd, branchName);
+            }}
+            onSplitVertical={() => {
+              const { cwd, branchName } = getActiveSessionWorktreeInfo();
+              createTerminal('vertical', content.sessionId, cwd, branchName);
+            }}
             onNewTab={createTerminalInNewTab}
+            onRunCommandInNewTab={(command: string) => {
+              const { cwd, branchName: branch } = getActiveSessionWorktreeInfo();
+              createTerminalInNewTab(cwd, branch, command);
+            }}
             onNavigateUp={() => navigateToTerminal('up')}
             onNavigateDown={() => navigateToTerminal('down')}
             onNavigateLeft={() => navigateToTerminal('left')}
@@ -1361,7 +1510,7 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
             isDropTarget={activeDragId !== null && activeDragId !== content.sessionId}
             fontSize={terminalFontSize}
             onFontSizeChange={(size) => setTerminalPanelFontSize(content.sessionId, size)}
-            runCommandOnConnect={isNewSession ? defaultRunScript : undefined}
+            runCommandOnConnect={runCommand}
             onCommandRan={() => handleCommandRan(content.sessionId)}
             isMaximized={terminalState.maximizedSessionId === content.sessionId}
             onToggleMaximize={() => toggleTerminalMaximized(content.sessionId)}
@@ -1502,6 +1651,15 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
 
   // No terminals yet - show welcome screen
   if (terminalState.tabs.length === 0) {
+    // Get the current worktree for this project (if any)
+    const currentWorktreeInfo = currentProject
+      ? (currentWorktreeByProject[currentProject.path] ?? null)
+      : null;
+    // Only show worktree button when the current worktree has a specific path set
+    // (non-null path means a worktree is selected, as opposed to the main project)
+    const currentWorktreePath = currentWorktreeInfo?.path ?? null;
+    const currentWorktreeBranch = currentWorktreeInfo?.branch ?? null;
+
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
         <div className="p-4 rounded-full bg-brand-500/10 mb-4">
@@ -1518,10 +1676,40 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
           )}
         </p>
 
-        <Button onClick={() => createTerminal()}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Terminal
-        </Button>
+        <div className="flex flex-col items-center gap-3 w-full max-w-xs">
+          {currentWorktreePath && (
+            <Button
+              className="w-full flex-col h-auto py-2"
+              onClick={() =>
+                createTerminal(
+                  undefined,
+                  undefined,
+                  currentWorktreePath,
+                  currentWorktreeBranch ?? undefined
+                )
+              }
+            >
+              <span className="flex items-center">
+                <GitBranch className="h-4 w-4 mr-2 shrink-0" />
+                Open Terminal in Worktree
+              </span>
+              {currentWorktreeBranch && (
+                <span className="text-xs opacity-70 truncate max-w-full px-2">
+                  {currentWorktreeBranch}
+                </span>
+              )}
+            </Button>
+          )}
+
+          <Button
+            className="w-full"
+            variant={currentWorktreePath ? 'outline' : 'default'}
+            onClick={() => createTerminal()}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Terminal
+          </Button>
+        </div>
 
         {status?.platform && (
           <p className="text-xs text-muted-foreground mt-6">
@@ -1564,14 +1752,94 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
 
             {(activeDragId || activeDragTabId) && <NewTabDropZone isDropTarget={true} />}
 
-            {/* New tab button */}
-            <button
-              className="flex items-center justify-center p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
-              onClick={createTerminalInNewTab}
-              title="New Tab"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
+            {/* New tab split button */}
+            <div className="flex items-center">
+              <button
+                className="flex items-center justify-center p-1.5 rounded-l hover:bg-accent text-muted-foreground hover:text-foreground"
+                onClick={() => createTerminalInNewTab()}
+                title="New Tab"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex items-center justify-center px-0.5 py-1.5 rounded-r hover:bg-accent text-muted-foreground hover:text-foreground border-l border-border"
+                    title="New Terminal Options"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="bottom" className="w-56">
+                  <DropdownMenuItem onClick={() => createTerminalInNewTab()} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    New Tab
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => {
+                      const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                      createTerminal('horizontal', undefined, cwd, branchName);
+                    }}
+                    className="gap-2"
+                  >
+                    <SplitSquareHorizontal className="h-4 w-4" />
+                    Split Right
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                      createTerminal('vertical', undefined, cwd, branchName);
+                    }}
+                    className="gap-2"
+                  >
+                    <SplitSquareVertical className="h-4 w-4" />
+                    Split Down
+                  </DropdownMenuItem>
+                  {/* Worktree options - show when project has worktrees */}
+                  {(() => {
+                    const projectWorktrees = currentProject
+                      ? (worktreesByProject[currentProject.path] ?? [])
+                      : [];
+                    if (projectWorktrees.length === 0) return null;
+                    const mainWorktree = projectWorktrees.find((wt) => wt.isMain);
+                    const featureWorktrees = projectWorktrees.filter((wt) => !wt.isMain);
+                    return (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="text-xs text-muted-foreground">
+                          Open in Worktree
+                        </DropdownMenuLabel>
+                        {mainWorktree && (
+                          <DropdownMenuItem
+                            onClick={() =>
+                              createTerminalInNewTab(mainWorktree.path, mainWorktree.branch)
+                            }
+                            className="gap-2"
+                          >
+                            <FolderGit className="h-4 w-4" />
+                            <span className="truncate">{mainWorktree.branch}</span>
+                            <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+                              main
+                            </span>
+                          </DropdownMenuItem>
+                        )}
+                        {featureWorktrees.map((wt) => (
+                          <DropdownMenuItem
+                            key={wt.path}
+                            onClick={() => createTerminalInNewTab(wt.path, wt.branch)}
+                            className="gap-2"
+                          >
+                            <GitBranch className="h-4 w-4" />
+                            <span className="truncate">{wt.branch}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Toolbar buttons */}
@@ -1580,7 +1848,10 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-muted-foreground hover:text-foreground"
-              onClick={() => createTerminal('horizontal')}
+              onClick={() => {
+                const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                createTerminal('horizontal', undefined, cwd, branchName);
+              }}
               title="Split Right"
             >
               <SplitSquareHorizontal className="h-4 w-4" />
@@ -1589,7 +1860,10 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-muted-foreground hover:text-foreground"
-              onClick={() => createTerminal('vertical')}
+              onClick={() => {
+                const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                createTerminal('vertical', undefined, cwd, branchName);
+              }}
               title="Split Down"
             >
               <SplitSquareVertical className="h-4 w-4" />
@@ -1728,6 +2002,119 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
                     />
                   </div>
 
+                  {/* Background Color */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">Background Color</Label>
+                      {terminalState.customBackgroundColor && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={() => setTerminalBackgroundColor(null)}
+                          title="Reset to theme default"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-7 h-7 rounded border border-border/50 shrink-0 flex items-center justify-center"
+                        style={{
+                          backgroundColor: terminalState.customBackgroundColor || 'var(--card)',
+                        }}
+                      >
+                        <Palette
+                          className={cn(
+                            'h-3 w-3',
+                            terminalState.customBackgroundColor
+                              ? 'text-white/80'
+                              : 'text-muted-foreground'
+                          )}
+                        />
+                      </div>
+                      <Input
+                        type="color"
+                        value={terminalState.customBackgroundColor || '#000000'}
+                        onChange={(e) => setTerminalBackgroundColor(e.target.value)}
+                        className="w-10 h-7 p-0.5 cursor-pointer bg-transparent border-border/50 shrink-0"
+                        title="Pick a background color"
+                      />
+                      <Input
+                        type="text"
+                        value={terminalState.customBackgroundColor || ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                            if (value === '' || /^#[0-9A-Fa-f]{6}$/.test(value)) {
+                              setTerminalBackgroundColor(value || null);
+                            }
+                          }
+                        }}
+                        placeholder="#1a1a1a"
+                        className="flex-1 h-7 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Foreground Color */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">Foreground Color</Label>
+                      {terminalState.customForegroundColor && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={() => setTerminalForegroundColor(null)}
+                          title="Reset to theme default"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-7 h-7 rounded border border-border/50 shrink-0 flex items-center justify-center"
+                        style={{
+                          backgroundColor:
+                            terminalState.customForegroundColor || 'var(--foreground)',
+                        }}
+                      >
+                        <Type
+                          className={cn(
+                            'h-3 w-3',
+                            terminalState.customForegroundColor
+                              ? 'text-black/80'
+                              : 'text-background'
+                          )}
+                        />
+                      </div>
+                      <Input
+                        type="color"
+                        value={terminalState.customForegroundColor || '#ffffff'}
+                        onChange={(e) => setTerminalForegroundColor(e.target.value)}
+                        className="w-10 h-7 p-0.5 cursor-pointer bg-transparent border-border/50 shrink-0"
+                        title="Pick a foreground color"
+                      />
+                      <Input
+                        type="text"
+                        value={terminalState.customForegroundColor || ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || /^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                            if (value === '' || /^#[0-9A-Fa-f]{6}$/.test(value)) {
+                              setTerminalForegroundColor(value || null);
+                            }
+                          }
+                        }}
+                        placeholder="#ffffff"
+                        className="flex-1 h-7 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
                   {/* Screen Reader */}
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
@@ -1771,13 +2158,19 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
                 isActive={true}
                 onFocus={() => setActiveTerminalSession(terminalState.maximizedSessionId!)}
                 onClose={() => killTerminal(terminalState.maximizedSessionId!)}
-                onSplitHorizontal={() =>
-                  createTerminal('horizontal', terminalState.maximizedSessionId!)
-                }
-                onSplitVertical={() =>
-                  createTerminal('vertical', terminalState.maximizedSessionId!)
-                }
+                onSplitHorizontal={() => {
+                  const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                  createTerminal('horizontal', terminalState.maximizedSessionId!, cwd, branchName);
+                }}
+                onSplitVertical={() => {
+                  const { cwd, branchName } = getActiveSessionWorktreeInfo();
+                  createTerminal('vertical', terminalState.maximizedSessionId!, cwd, branchName);
+                }}
                 onNewTab={createTerminalInNewTab}
+                onRunCommandInNewTab={(command: string) => {
+                  const { cwd, branchName: branch } = getActiveSessionWorktreeInfo();
+                  createTerminalInNewTab(cwd, branch, command);
+                }}
                 onSessionInvalid={() => {
                   const sessionId = terminalState.maximizedSessionId!;
                   logger.info(`Maximized session ${sessionId} is invalid, removing from layout`);
@@ -1789,6 +2182,13 @@ export function TerminalView({ initialCwd, initialBranch, initialMode, nonce }: 
                 onFontSizeChange={(size) =>
                   setTerminalPanelFontSize(terminalState.maximizedSessionId!, size)
                 }
+                runCommandOnConnect={
+                  newSessionIds.has(terminalState.maximizedSessionId)
+                    ? sessionCommandOverrides.get(terminalState.maximizedSessionId) ||
+                      defaultRunScript
+                    : undefined
+                }
+                onCommandRan={() => handleCommandRan(terminalState.maximizedSessionId!)}
                 isMaximized={true}
                 onToggleMaximize={() => toggleTerminalMaximized(terminalState.maximizedSessionId!)}
               />

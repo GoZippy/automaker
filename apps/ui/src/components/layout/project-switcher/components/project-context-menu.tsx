@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, memo, useCallback, useMemo } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Edit2, Trash2, Palette, ChevronRight, Moon, Sun, Monitor } from 'lucide-react';
+import { Edit2, Trash2, Palette, ChevronRight, Moon, Sun, Monitor, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { type ThemeMode, useAppStore } from '@/store/app-store';
@@ -196,11 +196,13 @@ export function ProjectContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const {
     moveProjectToTrash,
+    removeProject,
     theme: globalTheme,
     setProjectTheme,
     setPreviewTheme,
   } = useAppStore();
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
+  const [showRemoveFromAutomakerDialog, setShowRemoveFromAutomakerDialog] = useState(false);
   const [showThemeSubmenu, setShowThemeSubmenu] = useState(false);
   const themeSubmenuRef = useRef<HTMLDivElement>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -282,7 +284,7 @@ export function ProjectContextMenu({
   useEffect(() => {
     const handleClickOutside = (event: globalThis.MouseEvent) => {
       // Don't close if a confirmation dialog is open (dialog is in a portal)
-      if (showRemoveDialog) return;
+      if (showRemoveDialog || showRemoveFromAutomakerDialog) return;
 
       if (menuRef.current && !menuRef.current.contains(event.target as globalThis.Node)) {
         setPreviewTheme(null);
@@ -292,7 +294,7 @@ export function ProjectContextMenu({
 
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       // Don't close if a confirmation dialog is open (let the dialog handle escape)
-      if (showRemoveDialog) return;
+      if (showRemoveDialog || showRemoveFromAutomakerDialog) return;
 
       if (event.key === 'Escape') {
         setPreviewTheme(null);
@@ -307,7 +309,7 @@ export function ProjectContextMenu({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [onClose, setPreviewTheme, showRemoveDialog]);
+  }, [onClose, setPreviewTheme, showRemoveDialog, showRemoveFromAutomakerDialog]);
 
   const handleEdit = () => {
     onEdit(project);
@@ -359,10 +361,31 @@ export function ProjectContextMenu({
     [onClose]
   );
 
+  const handleRemoveFromAutomaker = () => {
+    setShowRemoveFromAutomakerDialog(true);
+  };
+
+  const handleConfirmRemoveFromAutomaker = useCallback(() => {
+    removeProject(project.id);
+    toast.success('Project removed from Automaker', {
+      description: `${project.name} has been removed. The folder remains on disk.`,
+    });
+  }, [removeProject, project.id, project.name]);
+
+  const handleRemoveFromAutomakerDialogClose = useCallback(
+    (isOpen: boolean) => {
+      setShowRemoveFromAutomakerDialog(isOpen);
+      if (!isOpen) {
+        onClose();
+      }
+    },
+    [onClose]
+  );
+
   return (
     <>
       {/* Hide context menu when confirm dialog is open */}
-      {!showRemoveDialog && (
+      {!showRemoveDialog && !showRemoveFromAutomakerDialog && (
         <div
           ref={menuRef}
           className={cn(
@@ -509,7 +532,22 @@ export function ProjectContextMenu({
               data-testid="remove-project-button"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Remove Project</span>
+              <span>Move to Trash</span>
+            </button>
+
+            <button
+              onClick={handleRemoveFromAutomaker}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 rounded-md',
+                'text-sm font-medium text-left',
+                'text-muted-foreground hover:text-foreground hover:bg-accent',
+                'transition-colors',
+                'focus:outline-none focus:bg-accent'
+              )}
+              data-testid="remove-from-automaker-button"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Remove from Automaker</span>
             </button>
           </div>
         </div>
@@ -519,12 +557,24 @@ export function ProjectContextMenu({
         open={showRemoveDialog}
         onOpenChange={handleDialogClose}
         onConfirm={handleConfirmRemove}
-        title="Remove Project"
-        description={`Are you sure you want to remove "${project.name}" from the project list? This won't delete any files on disk.`}
+        title="Move to Trash"
+        description={`Are you sure you want to move "${project.name}" to Trash? You can restore it later from the Recycle Bin.`}
         icon={Trash2}
         iconClassName="text-destructive"
-        confirmText="Remove"
+        confirmText="Move to Trash"
         confirmVariant="destructive"
+      />
+
+      <ConfirmDialog
+        open={showRemoveFromAutomakerDialog}
+        onOpenChange={handleRemoveFromAutomakerDialogClose}
+        onConfirm={handleConfirmRemoveFromAutomaker}
+        title="Remove from Automaker"
+        description={`Remove "${project.name}" from Automaker? The folder will remain on disk and can be re-added later by opening it.`}
+        icon={LogOut}
+        iconClassName="text-muted-foreground"
+        confirmText="Remove from Automaker"
+        confirmVariant="secondary"
       />
     </>
   );

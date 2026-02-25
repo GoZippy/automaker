@@ -133,12 +133,16 @@ export const TOOL_PRESETS = {
     'Read',
     'Write',
     'Edit',
+    'MultiEdit',
     'Glob',
     'Grep',
+    'LS',
     'Bash',
     'WebSearch',
     'WebFetch',
     'TodoWrite',
+    'Task',
+    'Skill',
   ] as const,
 
   /** Tools for chat/interactive mode */
@@ -146,12 +150,16 @@ export const TOOL_PRESETS = {
     'Read',
     'Write',
     'Edit',
+    'MultiEdit',
     'Glob',
     'Grep',
+    'LS',
     'Bash',
     'WebSearch',
     'WebFetch',
     'TodoWrite',
+    'Task',
+    'Skill',
   ] as const,
 } as const;
 
@@ -253,11 +261,27 @@ function buildMcpOptions(config: CreateSdkOptionsConfig): McpOptions {
 /**
  * Build thinking options for SDK configuration.
  * Converts ThinkingLevel to maxThinkingTokens for the Claude SDK.
+ * For adaptive thinking (Opus 4.6), omits maxThinkingTokens to let the model
+ * decide its own reasoning depth.
  *
  * @param thinkingLevel - The thinking level to convert
- * @returns Object with maxThinkingTokens if thinking is enabled
+ * @returns Object with maxThinkingTokens if thinking is enabled with a budget
  */
 function buildThinkingOptions(thinkingLevel?: ThinkingLevel): Partial<Options> {
+  if (!thinkingLevel || thinkingLevel === 'none') {
+    return {};
+  }
+
+  // Adaptive thinking (Opus 4.6): don't set maxThinkingTokens
+  // The model will use adaptive thinking by default
+  if (thinkingLevel === 'adaptive') {
+    logger.debug(
+      `buildThinkingOptions: thinkingLevel="adaptive" -> no maxThinkingTokens (model decides)`
+    );
+    return {};
+  }
+
+  // Manual budget-based thinking for Haiku/Sonnet
   const maxThinkingTokens = getThinkingTokenBudget(thinkingLevel);
   logger.debug(
     `buildThinkingOptions: thinkingLevel="${thinkingLevel}" -> maxThinkingTokens=${maxThinkingTokens}`
@@ -266,11 +290,15 @@ function buildThinkingOptions(thinkingLevel?: ThinkingLevel): Partial<Options> {
 }
 
 /**
- * Build system prompt configuration based on autoLoadClaudeMd setting.
- * When autoLoadClaudeMd is true:
- * - Uses preset mode with 'claude_code' to enable CLAUDE.md auto-loading
- * - If there's a custom systemPrompt, appends it to the preset
- * - Sets settingSources to ['project'] for SDK to load CLAUDE.md files
+ * Build system prompt and settingSources based on two independent settings:
+ * - useClaudeCodeSystemPrompt: controls whether to use the 'claude_code' preset as the base prompt
+ * - autoLoadClaudeMd: controls whether to add settingSources for SDK to load CLAUDE.md files
+ *
+ * These combine independently (4 possible states):
+ * 1. Both ON: preset + settingSources (full Claude Code experience)
+ * 2. useClaudeCodeSystemPrompt ON, autoLoadClaudeMd OFF: preset only (no CLAUDE.md auto-loading)
+ * 3. useClaudeCodeSystemPrompt OFF, autoLoadClaudeMd ON: plain string + settingSources
+ * 4. Both OFF: plain string only
  *
  * @param config - The SDK options config
  * @returns Object with systemPrompt and settingSources for SDK options
@@ -279,27 +307,34 @@ function buildClaudeMdOptions(config: CreateSdkOptionsConfig): {
   systemPrompt?: string | SystemPromptConfig;
   settingSources?: Array<'user' | 'project' | 'local'>;
 } {
-  if (!config.autoLoadClaudeMd) {
-    // Standard mode - just pass through the system prompt as-is
-    return config.systemPrompt ? { systemPrompt: config.systemPrompt } : {};
-  }
-
-  // Auto-load CLAUDE.md mode - use preset with settingSources
   const result: {
-    systemPrompt: SystemPromptConfig;
-    settingSources: Array<'user' | 'project' | 'local'>;
-  } = {
-    systemPrompt: {
+    systemPrompt?: string | SystemPromptConfig;
+    settingSources?: Array<'user' | 'project' | 'local'>;
+  } = {};
+
+  // Determine system prompt format based on useClaudeCodeSystemPrompt
+  if (config.useClaudeCodeSystemPrompt) {
+    // Use Claude Code's built-in system prompt as the base
+    const presetConfig: SystemPromptConfig = {
       type: 'preset',
       preset: 'claude_code',
-    },
-    // Load both user (~/.claude/CLAUDE.md) and project (.claude/CLAUDE.md) settings
-    settingSources: ['user', 'project'],
-  };
+    };
+    // If there's a custom system prompt, append it to the preset
+    if (config.systemPrompt) {
+      presetConfig.append = config.systemPrompt;
+    }
+    result.systemPrompt = presetConfig;
+  } else {
+    // Standard mode - just pass through the system prompt as-is
+    if (config.systemPrompt) {
+      result.systemPrompt = config.systemPrompt;
+    }
+  }
 
-  // If there's a custom system prompt, append it to the preset
-  if (config.systemPrompt) {
-    result.systemPrompt.append = config.systemPrompt;
+  // Determine settingSources based on autoLoadClaudeMd
+  if (config.autoLoadClaudeMd) {
+    // Load both user (~/.claude/CLAUDE.md) and project (.claude/CLAUDE.md) settings
+    result.settingSources = ['user', 'project'];
   }
 
   return result;
@@ -307,12 +342,14 @@ function buildClaudeMdOptions(config: CreateSdkOptionsConfig): {
 
 /**
  * System prompt configuration for SDK options
- * When using preset mode with claude_code, CLAUDE.md files are automatically loaded
+ * The 'claude_code' preset provides the system prompt only — it does NOT auto-load
+ * CLAUDE.md files. CLAUDE.md auto-loading is controlled independently by
+ * settingSources (set via autoLoadClaudeMd). These two settings are orthogonal.
  */
 export interface SystemPromptConfig {
-  /** Use preset mode with claude_code to enable CLAUDE.md auto-loading */
+  /** Use preset mode to select the base system prompt */
   type: 'preset';
-  /** The preset to use - 'claude_code' enables CLAUDE.md loading */
+  /** The preset to use - 'claude_code' uses the Claude Code system prompt */
   preset: 'claude_code';
   /** Optional additional prompt to append to the preset */
   append?: string;
@@ -346,11 +383,19 @@ export interface CreateSdkOptionsConfig {
   /** Enable auto-loading of CLAUDE.md files via SDK's settingSources */
   autoLoadClaudeMd?: boolean;
 
+  /** Use Claude Code's built-in system prompt (claude_code preset) as the base prompt */
+  useClaudeCodeSystemPrompt?: boolean;
+
   /** MCP servers to make available to the agent */
   mcpServers?: Record<string, McpServerConfig>;
 
   /** Extended thinking level for Claude models */
   thinkingLevel?: ThinkingLevel;
+
+  /** Optional user-configured max turns override (from settings).
+   * When provided, overrides the preset MAX_TURNS for the use case.
+   * Range: 1-2000. */
+  maxTurns?: number;
 }
 
 // Re-export MCP types from @automaker/types for convenience
@@ -387,7 +432,7 @@ export function createSpecGenerationOptions(config: CreateSdkOptionsConfig): Opt
     // See: https://github.com/AutoMaker-Org/automaker/issues/149
     permissionMode: 'default',
     model: getModelForUseCase('spec', config.model),
-    maxTurns: MAX_TURNS.maximum,
+    maxTurns: config.maxTurns ?? MAX_TURNS.maximum,
     cwd: config.cwd,
     allowedTools: [...TOOL_PRESETS.specGeneration],
     ...claudeMdOptions,
@@ -421,7 +466,7 @@ export function createFeatureGenerationOptions(config: CreateSdkOptionsConfig): 
     // Override permissionMode - feature generation only needs read-only tools
     permissionMode: 'default',
     model: getModelForUseCase('features', config.model),
-    maxTurns: MAX_TURNS.quick,
+    maxTurns: config.maxTurns ?? MAX_TURNS.quick,
     cwd: config.cwd,
     allowedTools: [...TOOL_PRESETS.readOnly],
     ...claudeMdOptions,
@@ -452,7 +497,7 @@ export function createSuggestionsOptions(config: CreateSdkOptionsConfig): Option
   return {
     ...getBaseOptions(),
     model: getModelForUseCase('suggestions', config.model),
-    maxTurns: MAX_TURNS.extended,
+    maxTurns: config.maxTurns ?? MAX_TURNS.extended,
     cwd: config.cwd,
     allowedTools: [...TOOL_PRESETS.readOnly],
     ...claudeMdOptions,
@@ -490,7 +535,7 @@ export function createChatOptions(config: CreateSdkOptionsConfig): Options {
   return {
     ...getBaseOptions(),
     model: getModelForUseCase('chat', effectiveModel),
-    maxTurns: MAX_TURNS.standard,
+    maxTurns: config.maxTurns ?? MAX_TURNS.standard,
     cwd: config.cwd,
     allowedTools: [...TOOL_PRESETS.chat],
     ...claudeMdOptions,
@@ -525,7 +570,7 @@ export function createAutoModeOptions(config: CreateSdkOptionsConfig): Options {
   return {
     ...getBaseOptions(),
     model: getModelForUseCase('auto', config.model),
-    maxTurns: MAX_TURNS.maximum,
+    maxTurns: config.maxTurns ?? MAX_TURNS.maximum,
     cwd: config.cwd,
     allowedTools: [...TOOL_PRESETS.fullAccess],
     ...claudeMdOptions,

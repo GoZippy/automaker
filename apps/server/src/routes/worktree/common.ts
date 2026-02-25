@@ -2,59 +2,26 @@
  * Common utilities for worktree routes
  */
 
-import { createLogger } from '@automaker/utils';
-import { spawnProcess } from '@automaker/platform';
+import {
+  createLogger,
+  isValidBranchName,
+  isValidRemoteName,
+  MAX_BRANCH_NAME_LENGTH,
+} from '@automaker/utils';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getErrorMessage as getErrorMessageShared, createLogError } from '../common.js';
 
+// Re-export execGitCommand from the canonical shared module so any remaining
+// consumers that import from this file continue to work.
+export { execGitCommand } from '../../lib/git.js';
+
 const logger = createLogger('Worktree');
 export const execAsync = promisify(exec);
 
-// ============================================================================
-// Secure Command Execution
-// ============================================================================
-
-/**
- * Execute git command with array arguments to prevent command injection.
- * Uses spawnProcess from @automaker/platform for secure, cross-platform execution.
- *
- * @param args - Array of git command arguments (e.g., ['worktree', 'add', path])
- * @param cwd - Working directory to execute the command in
- * @returns Promise resolving to stdout output
- * @throws Error with stderr message if command fails
- *
- * @example
- * ```typescript
- * // Safe: no injection possible
- * await execGitCommand(['branch', '-D', branchName], projectPath);
- *
- * // Instead of unsafe:
- * // await execAsync(`git branch -D ${branchName}`, { cwd });
- * ```
- */
-export async function execGitCommand(args: string[], cwd: string): Promise<string> {
-  const result = await spawnProcess({
-    command: 'git',
-    args,
-    cwd,
-  });
-
-  // spawnProcess returns { stdout, stderr, exitCode }
-  if (result.exitCode === 0) {
-    return result.stdout;
-  } else {
-    const errorMessage = result.stderr || `Git command failed with code ${result.exitCode}`;
-    throw new Error(errorMessage);
-  }
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/** Maximum allowed length for git branch names */
-export const MAX_BRANCH_NAME_LENGTH = 250;
+// Re-export git validation utilities from the canonical shared module so
+// existing consumers that import from this file continue to work.
+export { isValidBranchName, isValidRemoteName, MAX_BRANCH_NAME_LENGTH };
 
 // ============================================================================
 // Extended PATH configuration for Electron apps
@@ -97,19 +64,6 @@ export const execEnv = {
   ...process.env,
   PATH: extendedPath,
 };
-
-// ============================================================================
-// Validation utilities
-// ============================================================================
-
-/**
- * Validate branch name to prevent command injection.
- * Git branch names cannot contain: space, ~, ^, :, ?, *, [, \, or control chars.
- * We also reject shell metacharacters for safety.
- */
-export function isValidBranchName(name: string): boolean {
-  return /^[a-zA-Z0-9._\-/]+$/.test(name) && name.length < MAX_BRANCH_NAME_LENGTH;
-}
 
 /**
  * Check if gh CLI is available on the system

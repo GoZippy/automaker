@@ -26,11 +26,13 @@ import { useEffect, useState, useRef } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import { getHttpApiClient, waitForApiKeyInit } from '@/lib/http-api-client';
 import { getItem, setItem } from '@/lib/storage';
+import { sanitizeWorktreeByProject } from '@/lib/settings-utils';
 import { useAppStore, THEME_STORAGE_KEY } from '@/store/app-store';
 import { useSetupStore } from '@/store/setup-store';
 import {
   DEFAULT_OPENCODE_MODEL,
   DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_PHASE_MODELS,
   getAllOpencodeModelIds,
   getAllCursorModelIds,
   migrateCursorModelIds,
@@ -166,6 +168,7 @@ export function parseLocalStorageSettings(): Partial<GlobalSettings> | null {
       defaultSkipTests: state.defaultSkipTests as boolean,
       enableDependencyBlocking: state.enableDependencyBlocking as boolean,
       skipVerificationInAutoMode: state.skipVerificationInAutoMode as boolean,
+      mergePostAction: (state.mergePostAction as 'commit' | 'manual' | null) ?? null,
       useWorktrees: state.useWorktrees as boolean,
       defaultPlanningMode: state.defaultPlanningMode as GlobalSettings['defaultPlanningMode'],
       defaultRequirePlanApproval: state.defaultRequirePlanApproval as boolean,
@@ -182,6 +185,14 @@ export function parseLocalStorageSettings(): Partial<GlobalSettings> | null {
         state.enabledDynamicModelIds as GlobalSettings['enabledDynamicModelIds'],
       disabledProviders: (state.disabledProviders ?? []) as GlobalSettings['disabledProviders'],
       autoLoadClaudeMd: state.autoLoadClaudeMd as boolean,
+      useClaudeCodeSystemPrompt: state.useClaudeCodeSystemPrompt as boolean,
+      codexAutoLoadAgents: state.codexAutoLoadAgents as GlobalSettings['codexAutoLoadAgents'],
+      codexSandboxMode: state.codexSandboxMode as GlobalSettings['codexSandboxMode'],
+      codexApprovalPolicy: state.codexApprovalPolicy as GlobalSettings['codexApprovalPolicy'],
+      codexEnableWebSearch: state.codexEnableWebSearch as GlobalSettings['codexEnableWebSearch'],
+      codexEnableImages: state.codexEnableImages as GlobalSettings['codexEnableImages'],
+      codexAdditionalDirs: state.codexAdditionalDirs as GlobalSettings['codexAdditionalDirs'],
+      codexThreadId: state.codexThreadId as GlobalSettings['codexThreadId'],
       keyboardShortcuts: state.keyboardShortcuts as GlobalSettings['keyboardShortcuts'],
       mcpServers: state.mcpServers as GlobalSettings['mcpServers'],
       promptCustomization: state.promptCustomization as GlobalSettings['promptCustomization'],
@@ -205,6 +216,12 @@ export function parseLocalStorageSettings(): Partial<GlobalSettings> | null {
       // Claude Compatible Providers (new system)
       claudeCompatibleProviders:
         (state.claudeCompatibleProviders as GlobalSettings['claudeCompatibleProviders']) ?? [],
+      // Settings that were previously missing from migration (added for sync parity)
+      enableAiCommitMessages: state.enableAiCommitMessages as boolean | undefined,
+      enableSkills: state.enableSkills as boolean | undefined,
+      skillsSources: state.skillsSources as GlobalSettings['skillsSources'] | undefined,
+      enableSubagents: state.enableSubagents as boolean | undefined,
+      subagentsSources: state.subagentsSources as GlobalSettings['subagentsSources'] | undefined,
     };
   } catch (error) {
     logger.error('Failed to parse localStorage settings:', error);
@@ -347,6 +364,36 @@ export function mergeSettings(
     localSettings.claudeCompatibleProviders.length > 0
   ) {
     merged.claudeCompatibleProviders = localSettings.claudeCompatibleProviders;
+  }
+
+  // Event hooks - preserve from localStorage if server is empty
+  if (
+    (!serverSettings.eventHooks || serverSettings.eventHooks.length === 0) &&
+    localSettings.eventHooks &&
+    localSettings.eventHooks.length > 0
+  ) {
+    merged.eventHooks = localSettings.eventHooks;
+  }
+
+  // Preserve new settings fields from localStorage if server has defaults
+  // Use nullish coalescing to accept stored falsy values (e.g. false)
+  if (localSettings.enableAiCommitMessages != null && merged.enableAiCommitMessages == null) {
+    merged.enableAiCommitMessages = localSettings.enableAiCommitMessages;
+  }
+  if (localSettings.enableSkills != null && merged.enableSkills == null) {
+    merged.enableSkills = localSettings.enableSkills;
+  }
+  if (localSettings.skillsSources && (!merged.skillsSources || merged.skillsSources.length === 0)) {
+    merged.skillsSources = localSettings.skillsSources;
+  }
+  if (localSettings.enableSubagents != null && merged.enableSubagents == null) {
+    merged.enableSubagents = localSettings.enableSubagents;
+  }
+  if (
+    localSettings.subagentsSources &&
+    (!merged.subagentsSources || merged.subagentsSources.length === 0)
+  ) {
+    merged.subagentsSources = localSettings.subagentsSources;
   }
 
   return merged;
@@ -697,11 +744,13 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
     defaultSkipTests: settings.defaultSkipTests ?? true,
     enableDependencyBlocking: settings.enableDependencyBlocking ?? true,
     skipVerificationInAutoMode: settings.skipVerificationInAutoMode ?? false,
+    mergePostAction: settings.mergePostAction ?? null,
     useWorktrees: settings.useWorktrees ?? true,
     defaultPlanningMode: settings.defaultPlanningMode ?? 'skip',
     defaultRequirePlanApproval: settings.defaultRequirePlanApproval ?? false,
     defaultFeatureModel: migratePhaseModelEntry(settings.defaultFeatureModel) ?? {
       model: 'claude-opus',
+      thinkingLevel: 'adaptive',
     },
     muteDoneSound: settings.muteDoneSound ?? false,
     disableSplashScreen: settings.disableSplashScreen ?? false,
@@ -710,15 +759,30 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
     showQueryDevtools: settings.showQueryDevtools ?? true,
     enhancementModel: settings.enhancementModel ?? 'claude-sonnet',
     validationModel: settings.validationModel ?? 'claude-opus',
-    phaseModels: settings.phaseModels ?? current.phaseModels,
+    phaseModels: { ...DEFAULT_PHASE_MODELS, ...(settings.phaseModels ?? current.phaseModels) },
+    defaultThinkingLevel: settings.defaultThinkingLevel ?? 'adaptive',
+    defaultReasoningEffort: settings.defaultReasoningEffort ?? 'none',
     enabledCursorModels: allCursorModels, // Always use ALL cursor models
     cursorDefaultModel: sanitizedCursorDefaultModel,
     enabledOpencodeModels: sanitizedEnabledOpencodeModels,
     opencodeDefaultModel: sanitizedOpencodeDefaultModel,
     enabledDynamicModelIds: sanitizedDynamicModelIds,
     disabledProviders: settings.disabledProviders ?? [],
-    autoLoadClaudeMd: settings.autoLoadClaudeMd ?? false,
+    enableAiCommitMessages: settings.enableAiCommitMessages ?? true,
+    enableSkills: settings.enableSkills ?? true,
+    skillsSources: settings.skillsSources ?? ['user', 'project'],
+    enableSubagents: settings.enableSubagents ?? true,
+    subagentsSources: settings.subagentsSources ?? ['user', 'project'],
+    autoLoadClaudeMd: settings.autoLoadClaudeMd ?? true,
+    useClaudeCodeSystemPrompt: settings.useClaudeCodeSystemPrompt ?? true,
     skipSandboxWarning: settings.skipSandboxWarning ?? false,
+    codexAutoLoadAgents: settings.codexAutoLoadAgents ?? false,
+    codexSandboxMode: settings.codexSandboxMode ?? 'workspace-write',
+    codexApprovalPolicy: settings.codexApprovalPolicy ?? 'on-request',
+    codexEnableWebSearch: settings.codexEnableWebSearch ?? false,
+    codexEnableImages: settings.codexEnableImages ?? true,
+    codexAdditionalDirs: settings.codexAdditionalDirs ?? [],
+    codexThreadId: settings.codexThreadId,
     keyboardShortcuts: {
       ...current.keyboardShortcuts,
       ...(settings.keyboardShortcuts as unknown as Partial<typeof current.keyboardShortcuts>),
@@ -735,15 +799,46 @@ export function hydrateStoreFromSettings(settings: GlobalSettings): void {
     projectHistory: settings.projectHistory ?? [],
     projectHistoryIndex: settings.projectHistoryIndex ?? -1,
     lastSelectedSessionByProject: settings.lastSelectedSessionByProject ?? {},
+    // Sanitize currentWorktreeByProject: only restore entries where path is null
+    // (main branch). Non-null paths point to worktree directories that may have
+    // been deleted while the app was closed. Restoring a stale path causes the
+    // board to render an invalid worktree selection, triggering a crash loop
+    // (error boundary reloads → restores same bad path → crash again).
+    // The use-worktrees validation effect will re-discover valid worktrees
+    // from the server once they load.
+    currentWorktreeByProject: Object.fromEntries(
+      Object.entries(sanitizeWorktreeByProject(settings.currentWorktreeByProject)).filter(
+        ([, worktree]) => worktree.path === null
+      )
+    ),
     // UI State
     worktreePanelCollapsed: settings.worktreePanelCollapsed ?? false,
     lastProjectDir: settings.lastProjectDir ?? '',
     recentFolders: settings.recentFolders ?? [],
-    // Terminal font (nested in terminalState)
-    ...(settings.terminalFontFamily && {
+    // File editor settings
+    editorFontSize: settings.editorFontSize ?? 13,
+    editorFontFamily: settings.editorFontFamily ?? 'default',
+    editorAutoSave: settings.editorAutoSave ?? false,
+    editorAutoSaveDelay: settings.editorAutoSaveDelay ?? 1000,
+    // Terminal settings (nested in terminalState)
+    ...((settings.terminalFontFamily ||
+      (settings as unknown as Record<string, unknown>).terminalCustomBackgroundColor !==
+        undefined ||
+      (settings as unknown as Record<string, unknown>).terminalCustomForegroundColor !==
+        undefined) && {
       terminalState: {
         ...current.terminalState,
-        fontFamily: settings.terminalFontFamily,
+        ...(settings.terminalFontFamily && { fontFamily: settings.terminalFontFamily }),
+        ...((settings as unknown as Record<string, unknown>).terminalCustomBackgroundColor !==
+          undefined && {
+          customBackgroundColor: (settings as unknown as Record<string, unknown>)
+            .terminalCustomBackgroundColor as string | null,
+        }),
+        ...((settings as unknown as Record<string, unknown>).terminalCustomForegroundColor !==
+          undefined && {
+          customForegroundColor: (settings as unknown as Record<string, unknown>)
+            .terminalCustomForegroundColor as string | null,
+        }),
       },
     }),
   });
@@ -788,6 +883,7 @@ function buildSettingsUpdateFromStore(): Record<string, unknown> {
     defaultSkipTests: state.defaultSkipTests,
     enableDependencyBlocking: state.enableDependencyBlocking,
     skipVerificationInAutoMode: state.skipVerificationInAutoMode,
+    mergePostAction: state.mergePostAction,
     useWorktrees: state.useWorktrees,
     defaultPlanningMode: state.defaultPlanningMode,
     defaultRequirePlanApproval: state.defaultRequirePlanApproval,
@@ -798,10 +894,25 @@ function buildSettingsUpdateFromStore(): Record<string, unknown> {
     enhancementModel: state.enhancementModel,
     validationModel: state.validationModel,
     phaseModels: state.phaseModels,
+    defaultThinkingLevel: state.defaultThinkingLevel,
+    defaultReasoningEffort: state.defaultReasoningEffort,
     enabledDynamicModelIds: state.enabledDynamicModelIds,
     disabledProviders: state.disabledProviders,
+    enableAiCommitMessages: state.enableAiCommitMessages,
+    enableSkills: state.enableSkills,
+    skillsSources: state.skillsSources,
+    enableSubagents: state.enableSubagents,
+    subagentsSources: state.subagentsSources,
     autoLoadClaudeMd: state.autoLoadClaudeMd,
+    useClaudeCodeSystemPrompt: state.useClaudeCodeSystemPrompt,
     skipSandboxWarning: state.skipSandboxWarning,
+    codexAutoLoadAgents: state.codexAutoLoadAgents,
+    codexSandboxMode: state.codexSandboxMode,
+    codexApprovalPolicy: state.codexApprovalPolicy,
+    codexEnableWebSearch: state.codexEnableWebSearch,
+    codexEnableImages: state.codexEnableImages,
+    codexAdditionalDirs: state.codexAdditionalDirs,
+    codexThreadId: state.codexThreadId,
     keyboardShortcuts: state.keyboardShortcuts,
     mcpServers: state.mcpServers,
     promptCustomization: state.promptCustomization,
@@ -815,10 +926,17 @@ function buildSettingsUpdateFromStore(): Record<string, unknown> {
     projectHistory: state.projectHistory,
     projectHistoryIndex: state.projectHistoryIndex,
     lastSelectedSessionByProject: state.lastSelectedSessionByProject,
+    currentWorktreeByProject: state.currentWorktreeByProject,
     worktreePanelCollapsed: state.worktreePanelCollapsed,
     lastProjectDir: state.lastProjectDir,
     recentFolders: state.recentFolders,
+    editorFontSize: state.editorFontSize,
+    editorFontFamily: state.editorFontFamily,
+    editorAutoSave: state.editorAutoSave,
+    editorAutoSaveDelay: state.editorAutoSaveDelay,
     terminalFontFamily: state.terminalState.fontFamily,
+    terminalCustomBackgroundColor: state.terminalState.customBackgroundColor,
+    terminalCustomForegroundColor: state.terminalState.customForegroundColor,
   };
 }
 

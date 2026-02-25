@@ -30,7 +30,7 @@ const DEFAULT_MAX_FEATURES = 50;
  * Timeout for Codex models when generating features (5 minutes).
  * Codex models are slower and need more time to generate 50+ features.
  */
-const CODEX_FEATURE_GENERATION_TIMEOUT_MS = 300000; // 5 minutes
+const _CODEX_FEATURE_GENERATION_TIMEOUT_MS = 300000; // 5 minutes
 
 /**
  * Type for extracted features JSON response

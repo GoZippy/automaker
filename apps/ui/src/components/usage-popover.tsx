@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -6,8 +6,13 @@ import { RefreshCw, AlertTriangle, CheckCircle, XCircle, Clock, ExternalLink } f
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useSetupStore } from '@/store/setup-store';
-import { AnthropicIcon, OpenAIIcon } from '@/components/ui/provider-icon';
-import { useClaudeUsage, useCodexUsage } from '@/hooks/queries';
+import { AnthropicIcon, OpenAIIcon, ZaiIcon, GeminiIcon } from '@/components/ui/provider-icon';
+import { useClaudeUsage, useCodexUsage, useZaiUsage, useGeminiUsage } from '@/hooks/queries';
+import {
+  getExpectedWeeklyPacePercentage,
+  getExpectedCodexPacePercentage,
+  getPaceStatusLabel,
+} from '@/store/utils/usage-utils';
 
 // Error codes for distinguishing failure modes
 const ERROR_CODES = {
@@ -27,19 +32,24 @@ type UsageError = {
 
 const CLAUDE_SESSION_WINDOW_HOURS = 5;
 
-// Helper to format reset time for Codex
-function formatCodexResetTime(unixTimestamp: number): string {
-  const date = new Date(unixTimestamp * 1000);
+// Helper to format reset time for Codex/z.ai (unix timestamp in seconds or milliseconds)
+function formatResetTime(unixTimestamp: number, isMilliseconds = false): string {
+  const date = new Date(isMilliseconds ? unixTimestamp : unixTimestamp * 1000);
   const now = new Date();
   const diff = date.getTime() - now.getTime();
 
+  // Guard against past timestamps: clamp negative diffs to a friendly fallback
+  if (diff <= 0) {
+    return 'Resets now';
+  }
+
   if (diff < 3600000) {
-    const mins = Math.ceil(diff / 60000);
+    const mins = Math.max(0, Math.ceil(diff / 60000));
     return `Resets in ${mins}m`;
   }
   if (diff < 86400000) {
-    const hours = Math.floor(diff / 3600000);
-    const mins = Math.ceil((diff % 3600000) / 60000);
+    const hours = Math.max(0, Math.floor(diff / 3600000));
+    const mins = Math.max(0, Math.ceil((diff % 3600000) / 60000));
     return `Resets in ${hours}h ${mins > 0 ? `${mins}m` : ''}`;
   }
   return `Resets ${date.toLocaleDateString()} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
@@ -58,16 +68,37 @@ function getCodexWindowLabel(durationMins: number): { title: string; subtitle: s
   return { title: `${days}d Window`, subtitle: 'Rate limit' };
 }
 
+// Helper to format large numbers with K/M suffixes
+function formatNumber(num: number): string {
+  if (num >= 1_000_000_000) {
+    return `${(num / 1_000_000_000).toFixed(1)}B`;
+  }
+  if (num >= 1_000_000) {
+    return `${(num / 1_000_000).toFixed(1)}M`;
+  }
+  if (num >= 1_000) {
+    return `${(num / 1_000).toFixed(1)}K`;
+  }
+  return num.toLocaleString();
+}
+
 export function UsagePopover() {
   const claudeAuthStatus = useSetupStore((state) => state.claudeAuthStatus);
   const codexAuthStatus = useSetupStore((state) => state.codexAuthStatus);
+  const zaiAuthStatus = useSetupStore((state) => state.zaiAuthStatus);
+  const geminiAuthStatus = useSetupStore((state) => state.geminiAuthStatus);
 
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'claude' | 'codex'>('claude');
+  const [activeTab, setActiveTab] = useState<'claude' | 'codex' | 'zai' | 'gemini'>('claude');
+  // Track whether the user has manually selected a tab so we don't override their choice
+  const userHasSelected = useRef(false);
 
-  // Check authentication status
+  // Check authentication status — use explicit boolean coercion so hooks never
+  // receive undefined for their `enabled` parameter during auth-loading
   const isClaudeAuthenticated = !!claudeAuthStatus?.authenticated;
-  const isCodexAuthenticated = codexAuthStatus?.authenticated;
+  const isCodexAuthenticated = !!codexAuthStatus?.authenticated;
+  const isZaiAuthenticated = !!zaiAuthStatus?.authenticated;
+  const isGeminiAuthenticated = !!geminiAuthStatus?.authenticated;
 
   // Use React Query hooks for usage data
   // Only enable polling when popover is open AND the tab is active
@@ -86,6 +117,22 @@ export function UsagePopover() {
     dataUpdatedAt: codexUsageLastUpdated,
     refetch: refetchCodex,
   } = useCodexUsage(open && activeTab === 'codex' && isCodexAuthenticated);
+
+  const {
+    data: zaiUsage,
+    isLoading: zaiLoading,
+    error: zaiQueryError,
+    dataUpdatedAt: zaiUsageLastUpdated,
+    refetch: refetchZai,
+  } = useZaiUsage(open && activeTab === 'zai' && isZaiAuthenticated);
+
+  const {
+    data: geminiUsage,
+    isLoading: geminiLoading,
+    error: geminiQueryError,
+    dataUpdatedAt: geminiUsageLastUpdated,
+    refetch: refetchGemini,
+  } = useGeminiUsage(open && activeTab === 'gemini' && isGeminiAuthenticated);
 
   // Parse errors into structured format
   const claudeError = useMemo((): UsageError | null => {
@@ -116,14 +163,65 @@ export function UsagePopover() {
     return { code: ERROR_CODES.AUTH_ERROR, message };
   }, [codexQueryError]);
 
-  // Determine which tab to show by default
+  const zaiError = useMemo((): UsageError | null => {
+    if (!zaiQueryError) return null;
+    const message = zaiQueryError instanceof Error ? zaiQueryError.message : String(zaiQueryError);
+    if (message.includes('not configured') || message.includes('API token')) {
+      return { code: ERROR_CODES.NOT_AVAILABLE, message };
+    }
+    if (message.includes('API bridge')) {
+      return { code: ERROR_CODES.API_BRIDGE_UNAVAILABLE, message };
+    }
+    return { code: ERROR_CODES.AUTH_ERROR, message };
+  }, [zaiQueryError]);
+
+  const geminiError = useMemo((): UsageError | null => {
+    if (!geminiQueryError) return null;
+    const message =
+      geminiQueryError instanceof Error ? geminiQueryError.message : String(geminiQueryError);
+    if (message.includes('not configured') || message.includes('not authenticated')) {
+      return { code: ERROR_CODES.NOT_AVAILABLE, message };
+    }
+    if (message.includes('API bridge')) {
+      return { code: ERROR_CODES.API_BRIDGE_UNAVAILABLE, message };
+    }
+    return { code: ERROR_CODES.AUTH_ERROR, message };
+  }, [geminiQueryError]);
+
+  // Determine which tab to show by default.
+  // Only apply the default when the popover opens (open transitions to true) and the user has
+  // not yet made a manual selection during this session.  This prevents auth-flag re-renders from
+  // overriding a tab the user explicitly clicked.
   useEffect(() => {
+    if (!open) {
+      // Reset the user-selection guard each time the popover closes so the next open always gets
+      // a fresh default.
+      userHasSelected.current = false;
+      return;
+    }
+
+    // The user already picked a tab – respect their choice.
+    if (userHasSelected.current) {
+      return;
+    }
+
+    // Pick the first available provider in priority order.
     if (isClaudeAuthenticated) {
       setActiveTab('claude');
     } else if (isCodexAuthenticated) {
       setActiveTab('codex');
+    } else if (isZaiAuthenticated) {
+      setActiveTab('zai');
+    } else if (isGeminiAuthenticated) {
+      setActiveTab('gemini');
     }
-  }, [isClaudeAuthenticated, isCodexAuthenticated]);
+  }, [
+    open,
+    isClaudeAuthenticated,
+    isCodexAuthenticated,
+    isZaiAuthenticated,
+    isGeminiAuthenticated,
+  ]);
 
   // Check if data is stale (older than 2 minutes)
   const isClaudeStale = useMemo(() => {
@@ -134,9 +232,13 @@ export function UsagePopover() {
     return !codexUsageLastUpdated || Date.now() - codexUsageLastUpdated > 2 * 60 * 1000;
   }, [codexUsageLastUpdated]);
 
-  // Refetch functions for manual refresh
-  const fetchClaudeUsage = () => refetchClaude();
-  const fetchCodexUsage = () => refetchCodex();
+  const isZaiStale = useMemo(() => {
+    return !zaiUsageLastUpdated || Date.now() - zaiUsageLastUpdated > 2 * 60 * 1000;
+  }, [zaiUsageLastUpdated]);
+
+  const isGeminiStale = useMemo(() => {
+    return !geminiUsageLastUpdated || Date.now() - geminiUsageLastUpdated > 2 * 60 * 1000;
+  }, [geminiUsageLastUpdated]);
 
   // Derived status color/icon helper
   const getStatusInfo = (percentage: number) => {
@@ -146,13 +248,28 @@ export function UsagePopover() {
     return { color: 'text-green-500', icon: CheckCircle, bg: 'bg-green-500' };
   };
 
-  // Helper component for the progress bar
-  const ProgressBar = ({ percentage, colorClass }: { percentage: number; colorClass: string }) => (
-    <div className="h-2 w-full bg-secondary/50 rounded-full overflow-hidden">
+  // Helper component for the progress bar with optional pace indicator
+  const ProgressBar = ({
+    percentage,
+    colorClass,
+    pacePercentage,
+  }: {
+    percentage: number;
+    colorClass: string;
+    pacePercentage?: number | null;
+  }) => (
+    <div className="relative h-2 w-full bg-secondary/50 rounded-full overflow-hidden">
       <div
         className={cn('h-full transition-all duration-500', colorClass)}
         style={{ width: `${Math.min(percentage, 100)}%` }}
       />
+      {pacePercentage != null && pacePercentage > 0 && pacePercentage < 100 && (
+        <div
+          className="absolute top-0 h-full w-0.5 bg-foreground/60"
+          style={{ left: `${pacePercentage}%` }}
+          title={`Expected: ${Math.round(pacePercentage)}%`}
+        />
+      )}
     </div>
   );
 
@@ -163,6 +280,7 @@ export function UsagePopover() {
     resetText,
     isPrimary = false,
     stale = false,
+    pacePercentage,
   }: {
     title: string;
     subtitle: string;
@@ -170,6 +288,7 @@ export function UsagePopover() {
     resetText?: string;
     isPrimary?: boolean;
     stale?: boolean;
+    pacePercentage?: number | null;
   }) => {
     const isValidPercentage =
       typeof percentage === 'number' && !isNaN(percentage) && isFinite(percentage);
@@ -177,6 +296,10 @@ export function UsagePopover() {
 
     const status = getStatusInfo(safePercentage);
     const StatusIcon = status.icon;
+    const paceLabel =
+      isValidPercentage && pacePercentage != null
+        ? getPaceStatusLabel(safePercentage, pacePercentage)
+        : null;
 
     return (
       <div
@@ -211,21 +334,45 @@ export function UsagePopover() {
         <ProgressBar
           percentage={safePercentage}
           colorClass={isValidPercentage ? status.bg : 'bg-muted-foreground/30'}
+          pacePercentage={pacePercentage}
         />
-        {resetText && (
-          <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-between">
+          {paceLabel ? (
+            <p
+              className={cn(
+                'text-[10px] font-medium',
+                safePercentage > (pacePercentage ?? 0) ? 'text-orange-500' : 'text-green-500'
+              )}
+            >
+              {paceLabel}
+            </p>
+          ) : (
+            <div />
+          )}
+          {resetText && (
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               <Clock className="w-3 h-3" />
               {resetText}
             </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   };
 
   // Calculate max percentage for header button
   const claudeSessionPercentage = claudeUsage?.sessionPercentage || 0;
+
+  const zaiMaxPercentage = zaiUsage?.quotaLimits
+    ? Math.max(
+        zaiUsage.quotaLimits.tokens?.usedPercent || 0,
+        zaiUsage.quotaLimits.mcp?.usedPercent || 0
+      )
+    : 0;
+
+  // Gemini quota from Google Cloud API (if available)
+  // Default to 0 when usedPercent is not available to avoid a misleading full-red indicator
+  const geminiMaxPercentage = geminiUsage?.usedPercent ?? 0;
 
   const getProgressBarColor = (percentage: number) => {
     if (percentage >= 80) return 'bg-red-500';
@@ -239,9 +386,6 @@ export function UsagePopover() {
     codexSecondaryWindowMinutes && codexPrimaryWindowMinutes
       ? Math.min(codexPrimaryWindowMinutes, codexSecondaryWindowMinutes)
       : (codexSecondaryWindowMinutes ?? codexPrimaryWindowMinutes);
-  const codexWindowLabel = codexWindowMinutes
-    ? getCodexWindowLabel(codexWindowMinutes).title
-    : 'Window';
   const codexWindowUsage =
     codexWindowMinutes === codexSecondaryWindowMinutes
       ? codexUsage?.rateLimits?.secondary?.usedPercent
@@ -256,21 +400,38 @@ export function UsagePopover() {
           isStale: isClaudeStale,
           title: `Session usage (${CLAUDE_SESSION_WINDOW_HOURS}h window)`,
         }
-      : {
-          icon: OpenAIIcon,
-          percentage: codexWindowUsage ?? 0,
-          isStale: isCodexStale,
-          title: `Usage (${codexWindowLabel})`,
-        };
+      : activeTab === 'codex'
+        ? {
+            icon: OpenAIIcon,
+            percentage: codexWindowUsage ?? 0,
+            isStale: isCodexStale,
+          }
+        : activeTab === 'zai'
+          ? {
+              icon: ZaiIcon,
+              percentage: zaiMaxPercentage,
+              isStale: isZaiStale,
+              title: `Usage (z.ai)`,
+            }
+          : activeTab === 'gemini'
+            ? {
+                icon: GeminiIcon,
+                percentage: geminiMaxPercentage,
+                isStale: isGeminiStale,
+                title: `Usage (Gemini)`,
+              }
+            : null;
 
-  const statusColor = getStatusInfo(indicatorInfo.percentage).color;
-  const ProviderIcon = indicatorInfo.icon;
+  const statusColor = indicatorInfo ? getStatusInfo(indicatorInfo.percentage).color : '';
+  const ProviderIcon = indicatorInfo?.icon;
 
   const trigger = (
     <Button variant="ghost" size="sm" className="h-9 gap-2 bg-secondary border border-border px-3">
-      {(claudeUsage || codexUsage) && <ProviderIcon className={cn('w-4 h-4', statusColor)} />}
+      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && ProviderIcon && (
+        <ProviderIcon className={cn('w-4 h-4', statusColor)} />
+      )}
       <span className="text-sm font-medium">Usage</span>
-      {(claudeUsage || codexUsage) && (
+      {(claudeUsage || codexUsage || zaiUsage || geminiUsage) && indicatorInfo && (
         <div
           title={indicatorInfo.title}
           className={cn(
@@ -293,6 +454,9 @@ export function UsagePopover() {
   // Determine which tabs to show
   const showClaudeTab = isClaudeAuthenticated;
   const showCodexTab = isCodexAuthenticated;
+  const showZaiTab = isZaiAuthenticated;
+  const showGeminiTab = isGeminiAuthenticated;
+  const tabCount = [showClaudeTab, showCodexTab, showZaiTab, showGeminiTab].filter(Boolean).length;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -302,18 +466,47 @@ export function UsagePopover() {
         align="end"
         sideOffset={8}
       >
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'claude' | 'codex')}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            userHasSelected.current = true;
+            setActiveTab(v as 'claude' | 'codex' | 'zai' | 'gemini');
+          }}
+        >
           {/* Tabs Header */}
-          {showClaudeTab && showCodexTab && (
-            <TabsList className="grid w-full grid-cols-2 rounded-none border-b border-border/50">
-              <TabsTrigger value="claude" className="gap-2">
-                <AnthropicIcon className="w-3.5 h-3.5" />
-                Claude
-              </TabsTrigger>
-              <TabsTrigger value="codex" className="gap-2">
-                <OpenAIIcon className="w-3.5 h-3.5" />
-                Codex
-              </TabsTrigger>
+          {tabCount > 1 && (
+            <TabsList
+              className={cn(
+                'grid w-full rounded-none border-b border-border/50',
+                tabCount === 2 && 'grid-cols-2',
+                tabCount === 3 && 'grid-cols-3',
+                tabCount === 4 && 'grid-cols-4'
+              )}
+            >
+              {showClaudeTab && (
+                <TabsTrigger value="claude" className="gap-2">
+                  <AnthropicIcon className="w-3.5 h-3.5" />
+                  Claude
+                </TabsTrigger>
+              )}
+              {showCodexTab && (
+                <TabsTrigger value="codex" className="gap-2">
+                  <OpenAIIcon className="w-3.5 h-3.5" />
+                  Codex
+                </TabsTrigger>
+              )}
+              {showZaiTab && (
+                <TabsTrigger value="zai" className="gap-2">
+                  <ZaiIcon className="w-3.5 h-3.5" />
+                  z.ai
+                </TabsTrigger>
+              )}
+              {showGeminiTab && (
+                <TabsTrigger value="gemini" className="gap-2">
+                  <GeminiIcon className="w-3.5 h-3.5" />
+                  Gemini
+                </TabsTrigger>
+              )}
             </TabsList>
           )}
 
@@ -330,7 +523,7 @@ export function UsagePopover() {
                   variant="ghost"
                   size="icon"
                   className={cn('h-6 w-6', claudeLoading && 'opacity-80')}
-                  onClick={() => !claudeLoading && fetchClaudeUsage()}
+                  onClick={() => !claudeLoading && refetchClaude()}
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                 </Button>
@@ -384,6 +577,7 @@ export function UsagePopover() {
                       percentage={claudeUsage.sonnetWeeklyPercentage}
                       resetText={claudeUsage.sonnetResetText}
                       stale={isClaudeStale}
+                      pacePercentage={getExpectedWeeklyPacePercentage(claudeUsage.weeklyResetTime)}
                     />
                     <UsageCard
                       title="Weekly"
@@ -391,6 +585,7 @@ export function UsagePopover() {
                       percentage={claudeUsage.weeklyPercentage}
                       resetText={claudeUsage.weeklyResetText}
                       stale={isClaudeStale}
+                      pacePercentage={getExpectedWeeklyPacePercentage(claudeUsage.weeklyResetTime)}
                     />
                   </div>
 
@@ -437,7 +632,7 @@ export function UsagePopover() {
                   variant="ghost"
                   size="icon"
                   className={cn('h-6 w-6', codexLoading && 'opacity-80')}
-                  onClick={() => !codexLoading && fetchCodexUsage()}
+                  onClick={() => !codexLoading && refetchCodex()}
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                 </Button>
@@ -497,9 +692,13 @@ export function UsagePopover() {
                           .subtitle
                       }
                       percentage={codexUsage.rateLimits.primary.usedPercent}
-                      resetText={formatCodexResetTime(codexUsage.rateLimits.primary.resetsAt)}
+                      resetText={formatResetTime(codexUsage.rateLimits.primary.resetsAt)}
                       isPrimary={true}
                       stale={isCodexStale}
+                      pacePercentage={getExpectedCodexPacePercentage(
+                        codexUsage.rateLimits.primary.resetsAt,
+                        codexUsage.rateLimits.primary.windowDurationMins
+                      )}
                     />
                   )}
 
@@ -514,8 +713,12 @@ export function UsagePopover() {
                           .subtitle
                       }
                       percentage={codexUsage.rateLimits.secondary.usedPercent}
-                      resetText={formatCodexResetTime(codexUsage.rateLimits.secondary.resetsAt)}
+                      resetText={formatResetTime(codexUsage.rateLimits.secondary.resetsAt)}
                       stale={isCodexStale}
+                      pacePercentage={getExpectedCodexPacePercentage(
+                        codexUsage.rateLimits.secondary.resetsAt,
+                        codexUsage.rateLimits.secondary.windowDurationMins
+                      )}
                     />
                   )}
 
@@ -548,6 +751,259 @@ export function UsagePopover() {
                 className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
               >
                 OpenAI Dashboard <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+              <span className="text-[10px] text-muted-foreground">Updates every minute</span>
+            </div>
+          </TabsContent>
+
+          {/* z.ai Tab Content */}
+          <TabsContent value="zai" className="m-0">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-secondary/10">
+              <div className="flex items-center gap-2">
+                <ZaiIcon className="w-4 h-4" />
+                <span className="text-sm font-semibold">z.ai Usage</span>
+              </div>
+              {zaiError && zaiError.code !== ERROR_CODES.NOT_AVAILABLE && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('h-6 w-6', zaiLoading && 'opacity-80')}
+                  onClick={() => !zaiLoading && refetchZai()}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-4">
+              {zaiError ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center space-y-3">
+                  <AlertTriangle className="w-8 h-8 text-yellow-500/80" />
+                  <div className="space-y-1 flex flex-col items-center">
+                    <p className="text-sm font-medium">
+                      {zaiError.code === ERROR_CODES.NOT_AVAILABLE
+                        ? 'z.ai not configured'
+                        : zaiError.message}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {zaiError.code === ERROR_CODES.API_BRIDGE_UNAVAILABLE ? (
+                        'Ensure the Electron bridge is running or restart the app'
+                      ) : zaiError.code === ERROR_CODES.NOT_AVAILABLE ? (
+                        <>
+                          Set <code className="font-mono bg-muted px-1 rounded">Z_AI_API_KEY</code>{' '}
+                          environment variable to enable z.ai usage tracking
+                        </>
+                      ) : (
+                        <>Check your z.ai API key configuration</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ) : !zaiUsage ? (
+                <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                  <Spinner size="lg" />
+                  <p className="text-xs text-muted-foreground">Loading usage data...</p>
+                </div>
+              ) : zaiUsage.quotaLimits &&
+                (zaiUsage.quotaLimits.tokens || zaiUsage.quotaLimits.mcp) ? (
+                <>
+                  {zaiUsage.quotaLimits.tokens && (
+                    <UsageCard
+                      title="Token Quota"
+                      subtitle={`${formatNumber(zaiUsage.quotaLimits.tokens.used)} / ${formatNumber(zaiUsage.quotaLimits.tokens.limit)} tokens`}
+                      percentage={zaiUsage.quotaLimits.tokens.usedPercent}
+                      resetText={
+                        zaiUsage.quotaLimits.tokens.nextResetTime
+                          ? formatResetTime(zaiUsage.quotaLimits.tokens.nextResetTime, true)
+                          : undefined
+                      }
+                      isPrimary={true}
+                      stale={isZaiStale}
+                    />
+                  )}
+
+                  {zaiUsage.quotaLimits.mcp && (
+                    <UsageCard
+                      title="MCP Quota"
+                      subtitle={`${formatNumber(zaiUsage.quotaLimits.mcp.used)} / ${formatNumber(zaiUsage.quotaLimits.mcp.limit)} calls`}
+                      percentage={zaiUsage.quotaLimits.mcp.usedPercent}
+                      resetText={
+                        zaiUsage.quotaLimits.mcp.nextResetTime
+                          ? formatResetTime(zaiUsage.quotaLimits.mcp.nextResetTime, true)
+                          : undefined
+                      }
+                      stale={isZaiStale}
+                    />
+                  )}
+
+                  {zaiUsage.quotaLimits.planType && zaiUsage.quotaLimits.planType !== 'unknown' && (
+                    <div className="rounded-xl border border-border/40 bg-secondary/20 p-3">
+                      <p className="text-xs text-muted-foreground">
+                        Plan:{' '}
+                        <span className="text-foreground font-medium">
+                          {zaiUsage.quotaLimits.planType.charAt(0).toUpperCase() +
+                            zaiUsage.quotaLimits.planType.slice(1)}
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <AlertTriangle className="w-8 h-8 text-yellow-500/80" />
+                  <p className="text-sm font-medium mt-3">No usage data available</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-4 py-2 bg-secondary/10 border-t border-border/50">
+              <a
+                href="https://z.ai"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              >
+                z.ai <ExternalLink className="w-2.5 h-2.5" />
+              </a>
+              <span className="text-[10px] text-muted-foreground">Updates every minute</span>
+            </div>
+          </TabsContent>
+
+          {/* Gemini Tab Content */}
+          <TabsContent value="gemini" className="m-0">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-secondary/10">
+              <div className="flex items-center gap-2">
+                <GeminiIcon className="w-4 h-4" />
+                <span className="text-sm font-semibold">Gemini Usage</span>
+              </div>
+              {geminiError && geminiError.code !== ERROR_CODES.NOT_AVAILABLE && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('h-6 w-6', geminiLoading && 'opacity-80')}
+                  onClick={() => !geminiLoading && refetchGemini()}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-4">
+              {geminiError ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center space-y-3">
+                  <AlertTriangle className="w-8 h-8 text-yellow-500/80" />
+                  <div className="space-y-1 flex flex-col items-center">
+                    <p className="text-sm font-medium">
+                      {geminiError.code === ERROR_CODES.NOT_AVAILABLE
+                        ? 'Gemini not configured'
+                        : geminiError.message}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {geminiError.code === ERROR_CODES.API_BRIDGE_UNAVAILABLE ? (
+                        'Ensure the Electron bridge is running or restart the app'
+                      ) : geminiError.code === ERROR_CODES.NOT_AVAILABLE ? (
+                        <>
+                          Run{' '}
+                          <code className="font-mono bg-muted px-1 rounded">gemini auth login</code>{' '}
+                          to authenticate with your Google account
+                        </>
+                      ) : (
+                        <>Check your Gemini CLI configuration</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ) : !geminiUsage ? (
+                <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                  <Spinner size="lg" />
+                  <p className="text-xs text-muted-foreground">Loading usage data...</p>
+                </div>
+              ) : geminiUsage.authenticated ? (
+                <>
+                  {/* Show Flash and Pro quota tiers */}
+                  {geminiUsage.flashQuota || geminiUsage.proQuota ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {geminiUsage.flashQuota && (
+                        <UsageCard
+                          title="Flash"
+                          subtitle="Flash models"
+                          percentage={geminiUsage.flashQuota.usedPercent}
+                          resetText={geminiUsage.flashQuota.resetText}
+                          stale={isGeminiStale}
+                        />
+                      )}
+                      {geminiUsage.proQuota && (
+                        <UsageCard
+                          title="Pro"
+                          subtitle="Pro models"
+                          percentage={geminiUsage.proQuota.usedPercent}
+                          resetText={geminiUsage.proQuota.resetText}
+                          stale={isGeminiStale}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {/* No quota data available - show connected status */}
+                      <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                          <CheckCircle className="w-5 h-5 text-emerald-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-emerald-400">Connected</p>
+                          <p className="text-xs text-emerald-400/70 mt-0.5">
+                            Authenticated via{' '}
+                            <span className="font-mono">
+                              {geminiUsage.authMethod === 'cli_login'
+                                ? 'CLI Login'
+                                : geminiUsage.authMethod === 'api_key_env'
+                                  ? 'API Key (Environment)'
+                                  : geminiUsage.authMethod === 'api_key'
+                                    ? 'API Key'
+                                    : 'Unknown'}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-border/40 bg-secondary/20 p-3">
+                        <p className="text-xs text-muted-foreground">
+                          {geminiUsage.error ? (
+                            <>Quota API: {geminiUsage.error}</>
+                          ) : (
+                            <>No usage yet or quota data unavailable</>
+                          )}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <AlertTriangle className="w-8 h-8 text-yellow-500/80" />
+                  <p className="text-sm font-medium mt-3">Not authenticated</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Run <code className="font-mono bg-muted px-1 rounded">gemini auth login</code>{' '}
+                    to authenticate
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-4 py-2 bg-secondary/10 border-t border-border/50">
+              <a
+                href="https://ai.google.dev"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              >
+                Google AI <ExternalLink className="w-2.5 h-2.5" />
               </a>
               <span className="text-[10px] text-muted-foreground">Updates every minute</span>
             </div>

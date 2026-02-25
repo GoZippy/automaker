@@ -9,27 +9,43 @@ import {
   execAsync,
   execEnv,
   isValidBranchName,
+  isValidRemoteName,
   isGhCliAvailable,
 } from '../common.js';
+import { execGitCommand } from '../../../lib/git.js';
+import { spawnProcess } from '@automaker/platform';
 import { updateWorktreePRInfo } from '../../../lib/worktree-metadata.js';
 import { createLogger } from '@automaker/utils';
 import { validatePRState } from '@automaker/types';
+import { resolvePrTarget } from '../../../services/pr-service.js';
 
 const logger = createLogger('CreatePR');
 
 export function createCreatePRHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { worktreePath, projectPath, commitMessage, prTitle, prBody, baseBranch, draft } =
-        req.body as {
-          worktreePath: string;
-          projectPath?: string;
-          commitMessage?: string;
-          prTitle?: string;
-          prBody?: string;
-          baseBranch?: string;
-          draft?: boolean;
-        };
+      const {
+        worktreePath,
+        projectPath,
+        commitMessage,
+        prTitle,
+        prBody,
+        baseBranch,
+        draft,
+        remote,
+        targetRemote,
+      } = req.body as {
+        worktreePath: string;
+        projectPath?: string;
+        commitMessage?: string;
+        prTitle?: string;
+        prBody?: string;
+        baseBranch?: string;
+        draft?: boolean;
+        remote?: string;
+        /** Remote to create the PR against (e.g. upstream). If not specified, inferred from repo setup. */
+        targetRemote?: string;
+      };
 
       if (!worktreePath) {
         res.status(400).json({
@@ -59,6 +75,52 @@ export function createCreatePRHandler() {
         return;
       }
 
+      // --- Input validation: run all validation before any git write operations ---
+
+      // Validate remote names before use to prevent command injection
+      if (remote !== undefined && !isValidRemoteName(remote)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid remote name contains unsafe characters',
+        });
+        return;
+      }
+      if (targetRemote !== undefined && !isValidRemoteName(targetRemote)) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid target remote name contains unsafe characters',
+        });
+        return;
+      }
+
+      const pushRemote = remote || 'origin';
+
+      // Resolve repository URL, fork workflow, and target remote information.
+      // This is needed for both the existing PR check and PR creation.
+      // Resolve early so validation errors are caught before any writes.
+      let repoUrl: string | null = null;
+      let upstreamRepo: string | null = null;
+      let originOwner: string | null = null;
+      try {
+        const prTarget = await resolvePrTarget({
+          worktreePath,
+          pushRemote,
+          targetRemote,
+        });
+        repoUrl = prTarget.repoUrl;
+        upstreamRepo = prTarget.upstreamRepo;
+        originOwner = prTarget.originOwner;
+      } catch (resolveErr) {
+        // resolvePrTarget throws for validation errors (unknown targetRemote, missing pushRemote)
+        res.status(400).json({
+          success: false,
+          error: getErrorMessage(resolveErr),
+        });
+        return;
+      }
+
+      // --- Validation complete — proceed with git operations ---
+
       // Check for uncommitted changes
       logger.debug(`Checking for uncommitted changes in: ${worktreePath}`);
       const { stdout: status } = await execAsync('git status --porcelain', {
@@ -82,12 +144,9 @@ export function createCreatePRHandler() {
           logger.debug(`Running: git add -A`);
           await execAsync('git add -A', { cwd: worktreePath, env: execEnv });
 
-          // Create commit
+          // Create commit — pass message as a separate arg to avoid shell injection
           logger.debug(`Running: git commit`);
-          await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
-            cwd: worktreePath,
-            env: execEnv,
-          });
+          await execGitCommand(['commit', '-m', message], worktreePath);
 
           // Get commit hash
           const { stdout: hashOutput } = await execAsync('git rev-parse HEAD', {
@@ -110,20 +169,19 @@ export function createCreatePRHandler() {
         }
       }
 
-      // Push the branch to remote
+      // Push the branch to remote (use selected remote or default to 'origin')
+      // Uses array-based execGitCommand to avoid shell injection from pushRemote/branchName.
       let pushError: string | null = null;
       try {
-        await execAsync(`git push -u origin ${branchName}`, {
-          cwd: worktreePath,
-          env: execEnv,
-        });
-      } catch (error: unknown) {
+        await execGitCommand(['push', pushRemote, branchName], worktreePath, execEnv);
+      } catch {
         // If push fails, try with --set-upstream
         try {
-          await execAsync(`git push --set-upstream origin ${branchName}`, {
-            cwd: worktreePath,
-            env: execEnv,
-          });
+          await execGitCommand(
+            ['push', '--set-upstream', pushRemote, branchName],
+            worktreePath,
+            execEnv
+          );
         } catch (error2: unknown) {
           // Capture push error for reporting
           const err = error2 as { stderr?: string; message?: string };
@@ -145,81 +203,10 @@ export function createCreatePRHandler() {
       const base = baseBranch || 'main';
       const title = prTitle || branchName;
       const body = prBody || `Changes from branch ${branchName}`;
-      const draftFlag = draft ? '--draft' : '';
-
       let prUrl: string | null = null;
       let prError: string | null = null;
       let browserUrl: string | null = null;
       let ghCliAvailable = false;
-
-      // Get repository URL and detect fork workflow FIRST
-      // This is needed for both the existing PR check and PR creation
-      let repoUrl: string | null = null;
-      let upstreamRepo: string | null = null;
-      let originOwner: string | null = null;
-      try {
-        const { stdout: remotes } = await execAsync('git remote -v', {
-          cwd: worktreePath,
-          env: execEnv,
-        });
-
-        // Parse remotes to detect fork workflow and get repo URL
-        const lines = remotes.split(/\r?\n/); // Handle both Unix and Windows line endings
-        for (const line of lines) {
-          // Try multiple patterns to match different remote URL formats
-          // Pattern 1: git@github.com:owner/repo.git (fetch)
-          // Pattern 2: https://github.com/owner/repo.git (fetch)
-          // Pattern 3: https://github.com/owner/repo (fetch)
-          let match = line.match(/^(\w+)\s+.*[:/]([^/]+)\/([^/\s]+?)(?:\.git)?\s+\(fetch\)/);
-          if (!match) {
-            // Try SSH format: git@github.com:owner/repo.git
-            match = line.match(/^(\w+)\s+git@[^:]+:([^/]+)\/([^\s]+?)(?:\.git)?\s+\(fetch\)/);
-          }
-          if (!match) {
-            // Try HTTPS format: https://github.com/owner/repo.git
-            match = line.match(
-              /^(\w+)\s+https?:\/\/[^/]+\/([^/]+)\/([^\s]+?)(?:\.git)?\s+\(fetch\)/
-            );
-          }
-
-          if (match) {
-            const [, remoteName, owner, repo] = match;
-            if (remoteName === 'upstream') {
-              upstreamRepo = `${owner}/${repo}`;
-              repoUrl = `https://github.com/${owner}/${repo}`;
-            } else if (remoteName === 'origin') {
-              originOwner = owner;
-              if (!repoUrl) {
-                repoUrl = `https://github.com/${owner}/${repo}`;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        // Couldn't parse remotes - will try fallback
-      }
-
-      // Fallback: Try to get repo URL from git config if remote parsing failed
-      if (!repoUrl) {
-        try {
-          const { stdout: originUrl } = await execAsync('git config --get remote.origin.url', {
-            cwd: worktreePath,
-            env: execEnv,
-          });
-          const url = originUrl.trim();
-
-          // Parse URL to extract owner/repo
-          // Handle both SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git)
-          let match = url.match(/[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/);
-          if (match) {
-            const [, owner, repo] = match;
-            originOwner = owner;
-            repoUrl = `https://github.com/${owner}/${repo}`;
-          }
-        } catch (error) {
-          // Failed to get repo URL from config
-        }
-      }
 
       // Check if gh CLI is available (cross-platform)
       ghCliAvailable = await isGhCliAvailable();
@@ -228,13 +215,16 @@ export function createCreatePRHandler() {
       if (repoUrl) {
         const encodedTitle = encodeURIComponent(title);
         const encodedBody = encodeURIComponent(body);
+        // Encode base branch and head branch to handle special chars like # or %
+        const encodedBase = encodeURIComponent(base);
+        const encodedBranch = encodeURIComponent(branchName);
 
         if (upstreamRepo && originOwner) {
-          // Fork workflow: PR to upstream from origin
-          browserUrl = `https://github.com/${upstreamRepo}/compare/${base}...${originOwner}:${branchName}?expand=1&title=${encodedTitle}&body=${encodedBody}`;
+          // Fork workflow (or cross-remote PR): PR to target from push remote
+          browserUrl = `https://github.com/${upstreamRepo}/compare/${encodedBase}...${originOwner}:${encodedBranch}?expand=1&title=${encodedTitle}&body=${encodedBody}`;
         } else {
           // Regular repo
-          browserUrl = `${repoUrl}/compare/${base}...${branchName}?expand=1&title=${encodedTitle}&body=${encodedBody}`;
+          browserUrl = `${repoUrl}/compare/${encodedBase}...${encodedBranch}?expand=1&title=${encodedTitle}&body=${encodedBody}`;
         }
       }
 
@@ -244,18 +234,40 @@ export function createCreatePRHandler() {
       if (ghCliAvailable) {
         // First, check if a PR already exists for this branch using gh pr list
         // This is more reliable than gh pr view as it explicitly searches by branch name
-        // For forks, we need to use owner:branch format for the head parameter
+        // For forks/cross-remote, we need to use owner:branch format for the head parameter
         const headRef = upstreamRepo && originOwner ? `${originOwner}:${branchName}` : branchName;
-        const repoArg = upstreamRepo ? ` --repo "${upstreamRepo}"` : '';
 
         logger.debug(`Checking for existing PR for branch: ${branchName} (headRef: ${headRef})`);
         try {
-          const listCmd = `gh pr list${repoArg} --head "${headRef}" --json number,title,url,state --limit 1`;
-          logger.debug(`Running: ${listCmd}`);
-          const { stdout: existingPrOutput } = await execAsync(listCmd, {
+          const listArgs = ['pr', 'list'];
+          if (upstreamRepo) {
+            listArgs.push('--repo', upstreamRepo);
+          }
+          listArgs.push(
+            '--head',
+            headRef,
+            '--json',
+            'number,title,url,state,createdAt',
+            '--limit',
+            '1'
+          );
+          logger.debug(`Running: gh ${listArgs.join(' ')}`);
+          const listResult = await spawnProcess({
+            command: 'gh',
+            args: listArgs,
             cwd: worktreePath,
             env: execEnv,
           });
+          if (listResult.exitCode !== 0) {
+            logger.error(
+              `gh pr list failed with exit code ${listResult.exitCode}: ` +
+                `stderr=${listResult.stderr}, stdout=${listResult.stdout}`
+            );
+            throw new Error(
+              `gh pr list failed (exit code ${listResult.exitCode}): ${listResult.stderr || listResult.stdout}`
+            );
+          }
+          const existingPrOutput = listResult.stdout;
           logger.debug(`gh pr list output: ${existingPrOutput}`);
 
           const existingPrs = JSON.parse(existingPrOutput);
@@ -275,7 +287,7 @@ export function createCreatePRHandler() {
               url: existingPr.url,
               title: existingPr.title || title,
               state: validatePRState(existingPr.state),
-              createdAt: new Date().toISOString(),
+              createdAt: existingPr.createdAt || new Date().toISOString(),
             });
             logger.debug(
               `Stored existing PR info for branch ${branchName}: PR #${existingPr.number}`
@@ -291,27 +303,35 @@ export function createCreatePRHandler() {
         // Only create a new PR if one doesn't already exist
         if (!prUrl) {
           try {
-            // Build gh pr create command
-            let prCmd = `gh pr create --base "${base}"`;
+            // Build gh pr create args as an array to avoid shell injection on
+            // title/body (backticks, $, \ were unsafe with string interpolation)
+            const prArgs = ['pr', 'create', '--base', base];
 
             // If this is a fork (has upstream remote), specify the repo and head
             if (upstreamRepo && originOwner) {
               // For forks: --repo specifies where to create PR, --head specifies source
-              prCmd += ` --repo "${upstreamRepo}" --head "${originOwner}:${branchName}"`;
+              prArgs.push('--repo', upstreamRepo, '--head', `${originOwner}:${branchName}`);
             } else {
               // Not a fork, just specify the head branch
-              prCmd += ` --head "${branchName}"`;
+              prArgs.push('--head', branchName);
             }
 
-            prCmd += ` --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}" ${draftFlag}`;
-            prCmd = prCmd.trim();
+            prArgs.push('--title', title, '--body', body);
+            if (draft) prArgs.push('--draft');
 
-            logger.debug(`Creating PR with command: ${prCmd}`);
-            const { stdout: prOutput } = await execAsync(prCmd, {
+            logger.debug(`Creating PR with args: gh ${prArgs.join(' ')}`);
+            const prResult = await spawnProcess({
+              command: 'gh',
+              args: prArgs,
               cwd: worktreePath,
               env: execEnv,
             });
-            prUrl = prOutput.trim();
+            if (prResult.exitCode !== 0) {
+              throw Object.assign(new Error(prResult.stderr || 'gh pr create failed'), {
+                stderr: prResult.stderr,
+              });
+            }
+            prUrl = prResult.stdout.trim();
             logger.info(`PR created: ${prUrl}`);
 
             // Extract PR number and store metadata for newly created PR
@@ -345,11 +365,26 @@ export function createCreatePRHandler() {
             if (errorMessage.toLowerCase().includes('already exists')) {
               logger.debug(`PR already exists error - trying to fetch existing PR`);
               try {
-                const { stdout: viewOutput } = await execAsync(
-                  `gh pr view --json number,title,url,state`,
-                  { cwd: worktreePath, env: execEnv }
-                );
-                const existingPr = JSON.parse(viewOutput);
+                // Build args as an array to avoid shell injection.
+                // When upstreamRepo is set (fork/cross-remote workflow) we must
+                // query the upstream repository so we find the correct PR.
+                const viewArgs = ['pr', 'view', '--json', 'number,title,url,state,createdAt'];
+                if (upstreamRepo) {
+                  viewArgs.push('--repo', upstreamRepo);
+                }
+                logger.debug(`Running: gh ${viewArgs.join(' ')}`);
+                const viewResult = await spawnProcess({
+                  command: 'gh',
+                  args: viewArgs,
+                  cwd: worktreePath,
+                  env: execEnv,
+                });
+                if (viewResult.exitCode !== 0) {
+                  throw new Error(
+                    `gh pr view failed (exit code ${viewResult.exitCode}): ${viewResult.stderr || viewResult.stdout}`
+                  );
+                }
+                const existingPr = JSON.parse(viewResult.stdout);
                 if (existingPr.url) {
                   prUrl = existingPr.url;
                   prNumber = existingPr.number;
@@ -361,7 +396,7 @@ export function createCreatePRHandler() {
                     url: existingPr.url,
                     title: existingPr.title || title,
                     state: validatePRState(existingPr.state),
-                    createdAt: new Date().toISOString(),
+                    createdAt: existingPr.createdAt || new Date().toISOString(),
                   });
                   logger.debug(`Fetched and stored existing PR: #${existingPr.number}`);
                 }

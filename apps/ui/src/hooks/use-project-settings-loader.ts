@@ -25,7 +25,11 @@ export function useProjectSettingsLoader() {
   const setAutoDismissInitScriptIndicator = useAppStore(
     (state) => state.setAutoDismissInitScriptIndicator
   );
-  const setCurrentProject = useAppStore((state) => state.setCurrentProject);
+  const setWorktreeCopyFiles = useAppStore((state) => state.setWorktreeCopyFiles);
+  const setProjectUseWorktrees = useAppStore((state) => state.setProjectUseWorktrees);
+  const setPinnedWorktreesCount = useAppStore((state) => state.setPinnedWorktreesCount);
+  const setWorktreeDropdownThreshold = useAppStore((state) => state.setWorktreeDropdownThreshold);
+  const setAlwaysUseWorktreeDropdown = useAppStore((state) => state.setAlwaysUseWorktreeDropdown);
 
   const appliedProjectRef = useRef<{ path: string; dataUpdatedAt: number } | null>(null);
 
@@ -95,6 +99,29 @@ export function useProjectSettingsLoader() {
       setAutoDismissInitScriptIndicator(projectPath, settings.autoDismissInitScriptIndicator);
     }
 
+    // Apply worktreeCopyFiles if present
+    if (settings.worktreeCopyFiles !== undefined) {
+      setWorktreeCopyFiles(projectPath, settings.worktreeCopyFiles);
+    }
+
+    // Apply useWorktrees if present
+    if (settings.useWorktrees !== undefined) {
+      setProjectUseWorktrees(projectPath, settings.useWorktrees);
+    }
+
+    // Apply worktree display settings if present
+    if (settings.pinnedWorktreesCount !== undefined) {
+      setPinnedWorktreesCount(projectPath, settings.pinnedWorktreesCount);
+    }
+
+    if (settings.worktreeDropdownThreshold !== undefined) {
+      setWorktreeDropdownThreshold(projectPath, settings.worktreeDropdownThreshold);
+    }
+
+    if (settings.alwaysUseWorktreeDropdown !== undefined) {
+      setAlwaysUseWorktreeDropdown(projectPath, settings.alwaysUseWorktreeDropdown);
+    }
+
     // Apply activeClaudeApiProfileId and phaseModelOverrides if present
     // These are stored directly on the project, so we need to update both
     // currentProject AND the projects array to keep them in sync
@@ -110,30 +137,39 @@ export function useProjectSettingsLoader() {
 
     // Check if we need to update the project
     const storeState = useAppStore.getState();
-    const updatedProject = storeState.currentProject;
-    if (updatedProject && updatedProject.path === projectPath) {
+    // snapshotProject is the store's current value at this point in time;
+    // it is distinct from updatedProjectData which is the new value we build below.
+    const snapshotProject = storeState.currentProject;
+    if (snapshotProject && snapshotProject.path === projectPath) {
       const needsUpdate =
         (activeClaudeApiProfileId !== undefined &&
-          updatedProject.activeClaudeApiProfileId !== activeClaudeApiProfileId) ||
+          snapshotProject.activeClaudeApiProfileId !== activeClaudeApiProfileId) ||
         (phaseModelOverrides !== undefined &&
-          JSON.stringify(updatedProject.phaseModelOverrides) !==
+          JSON.stringify(snapshotProject.phaseModelOverrides) !==
             JSON.stringify(phaseModelOverrides));
 
       if (needsUpdate) {
         const updatedProjectData = {
-          ...updatedProject,
+          ...snapshotProject,
           ...(activeClaudeApiProfileId !== undefined && { activeClaudeApiProfileId }),
           ...(phaseModelOverrides !== undefined && { phaseModelOverrides }),
         };
 
-        // Update currentProject
-        setCurrentProject(updatedProjectData);
-
-        // Also update the project in the projects array to keep them in sync
+        // Update both currentProject and projects array in a single setState call
+        // to avoid two separate re-renders that can cascade during initialization
+        // and contribute to React error #185 (maximum update depth exceeded).
         const updatedProjects = storeState.projects.map((p) =>
-          p.id === updatedProject.id ? updatedProjectData : p
+          p.id === snapshotProject.id ? updatedProjectData : p
         );
-        useAppStore.setState({ projects: updatedProjects });
+        // NOTE: Intentionally bypasses setCurrentProject() to avoid a second
+        // render cycle that can trigger React error #185 (maximum update depth
+        // exceeded). This means persistEffectiveThemeForProject() is skipped,
+        // which is safe because only activeClaudeApiProfileId and
+        // phaseModelOverrides are mutated here — not the project theme.
+        useAppStore.setState({
+          currentProject: updatedProjectData,
+          projects: updatedProjects,
+        });
       }
     }
   }, [
@@ -152,6 +188,10 @@ export function useProjectSettingsLoader() {
     setShowInitScriptIndicator,
     setDefaultDeleteBranch,
     setAutoDismissInitScriptIndicator,
-    setCurrentProject,
+    setWorktreeCopyFiles,
+    setProjectUseWorktrees,
+    setPinnedWorktreesCount,
+    setWorktreeDropdownThreshold,
+    setAlwaysUseWorktreeDropdown,
   ]);
 }

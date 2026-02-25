@@ -5,6 +5,17 @@ import { collectAsyncGenerator } from '../../utils/helpers.js';
 
 vi.mock('@anthropic-ai/claude-agent-sdk');
 
+vi.mock('@automaker/platform', () => ({
+  getClaudeAuthIndicators: vi.fn().mockResolvedValue({
+    hasCredentialsFile: false,
+    hasSettingsFile: false,
+    hasStatsCacheWithActivity: false,
+    hasProjectsSessions: false,
+    credentials: null,
+    checks: {},
+  }),
+}));
+
 describe('claude-provider.ts', () => {
   let provider: ClaudeProvider;
 
@@ -39,7 +50,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Hello',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -59,7 +70,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test prompt',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test/dir',
         systemPrompt: 'You are helpful',
         maxTurns: 10,
@@ -71,7 +82,7 @@ describe('claude-provider.ts', () => {
       expect(sdk.query).toHaveBeenCalledWith({
         prompt: 'Test prompt',
         options: expect.objectContaining({
-          model: 'claude-opus-4-5-20251101',
+          model: 'claude-opus-4-6',
           systemPrompt: 'You are helpful',
           maxTurns: 10,
           cwd: '/test/dir',
@@ -91,7 +102,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -116,7 +127,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
         abortController,
       });
@@ -145,7 +156,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Current message',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
         conversationHistory,
         sdkSessionId: 'test-session-id',
@@ -176,7 +187,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: arrayPrompt as any,
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -187,7 +198,7 @@ describe('claude-provider.ts', () => {
       expect(typeof callArgs.prompt).not.toBe('string');
     });
 
-    it('should use maxTurns default of 20', async () => {
+    it('should use maxTurns default of 1000', async () => {
       vi.mocked(sdk.query).mockReturnValue(
         (async function* () {
           yield { type: 'text', text: 'test' };
@@ -196,7 +207,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -205,7 +216,7 @@ describe('claude-provider.ts', () => {
       expect(sdk.query).toHaveBeenCalledWith({
         prompt: 'Test',
         options: expect.objectContaining({
-          maxTurns: 20,
+          maxTurns: 1000,
         }),
       });
     });
@@ -222,7 +233,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -286,7 +297,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -313,7 +324,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -341,7 +352,7 @@ describe('claude-provider.ts', () => {
 
       const generator = provider.executeQuery({
         prompt: 'Test',
-        model: 'claude-opus-4-5-20251101',
+        model: 'claude-opus-4-6',
         cwd: '/test',
       });
 
@@ -360,27 +371,27 @@ describe('claude-provider.ts', () => {
   });
 
   describe('getAvailableModels', () => {
-    it('should return 4 Claude models', () => {
+    it('should return 5 Claude models', () => {
       const models = provider.getAvailableModels();
 
-      expect(models).toHaveLength(4);
+      expect(models).toHaveLength(5);
     });
 
-    it('should include Claude Opus 4.5', () => {
+    it('should include Claude Opus 4.6', () => {
       const models = provider.getAvailableModels();
 
-      const opus = models.find((m) => m.id === 'claude-opus-4-5-20251101');
+      const opus = models.find((m) => m.id === 'claude-opus-4-6');
       expect(opus).toBeDefined();
-      expect(opus?.name).toBe('Claude Opus 4.5');
+      expect(opus?.name).toBe('Claude Opus 4.6');
       expect(opus?.provider).toBe('anthropic');
     });
 
-    it('should include Claude Sonnet 4', () => {
+    it('should include Claude Sonnet 4.6', () => {
       const models = provider.getAvailableModels();
 
-      const sonnet = models.find((m) => m.id === 'claude-sonnet-4-20250514');
+      const sonnet = models.find((m) => m.id === 'claude-sonnet-4-6');
       expect(sonnet).toBeDefined();
-      expect(sonnet?.name).toBe('Claude Sonnet 4');
+      expect(sonnet?.name).toBe('Claude Sonnet 4.6');
     });
 
     it('should include Claude 3.5 Sonnet', () => {
@@ -400,7 +411,7 @@ describe('claude-provider.ts', () => {
     it('should mark Opus as default', () => {
       const models = provider.getAvailableModels();
 
-      const opus = models.find((m) => m.id === 'claude-opus-4-5-20251101');
+      const opus = models.find((m) => m.id === 'claude-opus-4-6');
       expect(opus?.default).toBe(true);
     });
 

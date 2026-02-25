@@ -118,6 +118,44 @@ export function isQuotaExhaustedError(error: unknown): boolean {
 }
 
 /**
+ * Check if an error indicates a model-not-found or model access issue
+ *
+ * @param error - The error to check
+ * @returns True if the error indicates the model doesn't exist or user lacks access
+ */
+export function isModelNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const lowerMessage = message.toLowerCase();
+
+  return (
+    lowerMessage.includes('does not exist or you do not have access') ||
+    lowerMessage.includes('model_not_found') ||
+    lowerMessage.includes('invalid_model') ||
+    (lowerMessage.includes('model') &&
+      (lowerMessage.includes('does not exist') || lowerMessage.includes('not found')))
+  );
+}
+
+/**
+ * Check if an error indicates a stream disconnection
+ *
+ * @param error - The error to check
+ * @returns True if the error indicates the stream was disconnected
+ */
+export function isStreamDisconnectedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const lowerMessage = message.toLowerCase();
+
+  return (
+    lowerMessage.includes('stream disconnected') ||
+    lowerMessage.includes('stream ended') ||
+    lowerMessage.includes('connection reset') ||
+    lowerMessage.includes('socket hang up') ||
+    lowerMessage.includes('econnreset')
+  );
+}
+
+/**
  * Extract retry-after duration from rate limit error
  *
  * @param error - The error to extract retry-after from
@@ -154,11 +192,17 @@ export function classifyError(error: unknown): ErrorInfo {
   const isCancellation = isCancellationError(message);
   const isRateLimit = isRateLimitError(error);
   const isQuotaExhausted = isQuotaExhaustedError(error);
+  const isModelNotFound = isModelNotFoundError(error);
+  const isStreamDisconnected = isStreamDisconnectedError(error);
   const retryAfter = isRateLimit ? (extractRetryAfter(error) ?? 60) : undefined;
 
   let type: ErrorType;
   if (isAuth) {
     type = 'authentication';
+  } else if (isModelNotFound) {
+    type = 'model_not_found';
+  } else if (isStreamDisconnected) {
+    type = 'stream_disconnected';
   } else if (isQuotaExhausted) {
     // Quota exhaustion takes priority over rate limit since it's more specific
     type = 'quota_exhausted';
@@ -182,6 +226,8 @@ export function classifyError(error: unknown): ErrorInfo {
     isCancellation,
     isRateLimit,
     isQuotaExhausted,
+    isModelNotFound,
+    isStreamDisconnected,
     retryAfter,
     originalError: error,
   };
@@ -202,6 +248,14 @@ export function getUserFriendlyErrorMessage(error: unknown): string {
 
   if (info.isAuth) {
     return 'Authentication failed. Please check your API key.';
+  }
+
+  if (info.isModelNotFound) {
+    return `Model not available: ${info.message}\n\nSome models require specific subscription plans or authentication methods. Try authenticating with 'codex login' or switch to a different model.`;
+  }
+
+  if (info.isStreamDisconnected) {
+    return `Connection interrupted: ${info.message}\n\nThe stream was disconnected before the response could complete. This may be caused by network issues, model access restrictions, or server timeouts. Try again or switch to a different model.`;
   }
 
   if (info.isQuotaExhausted) {
@@ -240,4 +294,26 @@ export function getUserFriendlyErrorMessage(error: unknown): string {
  */
 export function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
+}
+
+/**
+ * Log an error with a context message to stderr.
+ *
+ * Convenience utility for consistent error logging throughout the codebase.
+ * Outputs a formatted error line to stderr with an ❌ prefix and the context.
+ *
+ * @param error - The error value to log
+ * @param context - Descriptive context message indicating where/why the error occurred
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await someOperation();
+ * } catch (error) {
+ *   logError(error, 'Failed to perform some operation');
+ * }
+ * ```
+ */
+export function logError(error: unknown, context: string): void {
+  console.error(`❌ ${context}:`, error);
 }

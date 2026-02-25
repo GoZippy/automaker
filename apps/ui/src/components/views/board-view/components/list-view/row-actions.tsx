@@ -14,6 +14,8 @@ import {
   GitBranch,
   GitFork,
   ExternalLink,
+  Copy,
+  Repeat,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -22,6 +24,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { Feature } from '@/store/app-store';
@@ -43,6 +48,9 @@ export interface RowActionHandlers {
   onViewPlan?: () => void;
   onApprovePlan?: () => void;
   onSpawnTask?: () => void;
+  onDuplicate?: () => void;
+  onDuplicateAsChild?: () => void;
+  onDuplicateAsChildMultiple?: () => void;
 }
 
 export interface RowActionsProps {
@@ -52,6 +60,8 @@ export interface RowActionsProps {
   handlers: RowActionHandlers;
   /** Whether this feature is the current auto task (agent is running) */
   isCurrentAutoTask?: boolean;
+  /** Whether this feature is tracked as a running task (may be true even before status updates to in_progress) */
+  isRunningTask?: boolean;
   /** Whether the dropdown menu is open */
   isOpen?: boolean;
   /** Callback when the dropdown open state changes */
@@ -107,7 +117,8 @@ const MenuItem = memo(function MenuItem({
 function getPrimaryAction(
   feature: Feature,
   handlers: RowActionHandlers,
-  isCurrentAutoTask: boolean
+  isCurrentAutoTask: boolean,
+  isRunningTask: boolean = false
 ): {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -127,6 +138,24 @@ function getPrimaryAction(
     return null;
   }
 
+  // Running task with stale status - show stop instead of Make
+  // This handles the race window where the feature is tracked as running
+  // but status hasn't updated to in_progress yet
+  if (
+    isRunningTask &&
+    (feature.status === 'backlog' ||
+      feature.status === 'ready' ||
+      feature.status === 'interrupted') &&
+    handlers.onForceStop
+  ) {
+    return {
+      icon: StopCircle,
+      label: 'Stop',
+      onClick: handlers.onForceStop,
+      variant: 'destructive',
+    };
+  }
+
   // Backlog - implement is primary
   if (feature.status === 'backlog' && handlers.onImplement) {
     return {
@@ -134,6 +163,17 @@ function getPrimaryAction(
       label: 'Make',
       onClick: handlers.onImplement,
       variant: 'primary',
+    };
+  }
+
+  // In progress with no error - agent is starting/running but not yet in runningAutoTasks.
+  // Show Stop button immediately instead of Verify/Resume during this race window.
+  if (feature.status === 'in_progress' && !feature.error && handlers.onForceStop) {
+    return {
+      icon: StopCircle,
+      label: 'Stop',
+      onClick: handlers.onForceStop,
+      variant: 'destructive',
     };
   }
 
@@ -244,6 +284,7 @@ export const RowActions = memo(function RowActions({
   feature,
   handlers,
   isCurrentAutoTask = false,
+  isRunningTask = false,
   isOpen,
   onOpenChange,
   className,
@@ -267,7 +308,7 @@ export const RowActions = memo(function RowActions({
     [setOpen]
   );
 
-  const primaryAction = getPrimaryAction(feature, handlers, isCurrentAutoTask);
+  const primaryAction = getPrimaryAction(feature, handlers, isCurrentAutoTask, isRunningTask);
   const secondaryActions = getSecondaryActions(feature, handlers);
 
   // Helper to close menu after action
@@ -384,7 +425,7 @@ export const RowActions = memo(function RowActions({
           )}
 
           {/* Backlog actions */}
-          {!isCurrentAutoTask && feature.status === 'backlog' && (
+          {!isCurrentAutoTask && !isRunningTask && feature.status === 'backlog' && (
             <>
               <MenuItem icon={Edit} label="Edit" onClick={withClose(handlers.onEdit)} />
               {feature.planSpec?.content && handlers.onViewPlan && (
@@ -405,6 +446,38 @@ export const RowActions = memo(function RowActions({
                   onClick={withClose(handlers.onSpawnTask)}
                 />
               )}
+              {handlers.onDuplicate && (
+                <DropdownMenuSub>
+                  <div className="flex items-center">
+                    <DropdownMenuItem
+                      onClick={withClose(handlers.onDuplicate)}
+                      className="flex-1 pr-0 rounded-r-none"
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Duplicate
+                    </DropdownMenuItem>
+                    {handlers.onDuplicateAsChild && (
+                      <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8" />
+                    )}
+                  </div>
+                  {handlers.onDuplicateAsChild && (
+                    <DropdownMenuSubContent>
+                      <MenuItem
+                        icon={GitFork}
+                        label="Duplicate as Child"
+                        onClick={withClose(handlers.onDuplicateAsChild)}
+                      />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
+                    </DropdownMenuSubContent>
+                  )}
+                </DropdownMenuSub>
+              )}
               <DropdownMenuSeparator />
               <MenuItem
                 icon={Trash2}
@@ -415,56 +488,133 @@ export const RowActions = memo(function RowActions({
             </>
           )}
 
-          {/* In Progress actions */}
-          {!isCurrentAutoTask && feature.status === 'in_progress' && (
-            <>
-              {handlers.onViewOutput && (
+          {/* In Progress actions - starting/running (no error, force stop available) - mirrors running task actions */}
+          {!isCurrentAutoTask &&
+            feature.status === 'in_progress' &&
+            !feature.error &&
+            handlers.onForceStop && (
+              <>
+                {handlers.onViewOutput && (
+                  <MenuItem
+                    icon={FileText}
+                    label="View Logs"
+                    onClick={withClose(handlers.onViewOutput)}
+                  />
+                )}
+                {feature.planSpec?.status === 'generated' && handlers.onApprovePlan && (
+                  <MenuItem
+                    icon={FileText}
+                    label="Approve Plan"
+                    onClick={withClose(handlers.onApprovePlan)}
+                    variant="warning"
+                  />
+                )}
+                <MenuItem icon={Edit} label="Edit" onClick={withClose(handlers.onEdit)} />
+                {handlers.onSpawnTask && (
+                  <MenuItem
+                    icon={GitFork}
+                    label="Spawn Sub-Task"
+                    onClick={withClose(handlers.onSpawnTask)}
+                  />
+                )}
+                {handlers.onForceStop && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <MenuItem
+                      icon={StopCircle}
+                      label="Force Stop"
+                      onClick={withClose(handlers.onForceStop)}
+                      variant="destructive"
+                    />
+                  </>
+                )}
+              </>
+            )}
+
+          {/* In Progress actions - interrupted/error state */}
+          {!isCurrentAutoTask &&
+            feature.status === 'in_progress' &&
+            !(!feature.error && handlers.onForceStop) && (
+              <>
+                {handlers.onViewOutput && (
+                  <MenuItem
+                    icon={FileText}
+                    label="View Logs"
+                    onClick={withClose(handlers.onViewOutput)}
+                  />
+                )}
+                {feature.planSpec?.status === 'generated' && handlers.onApprovePlan && (
+                  <MenuItem
+                    icon={FileText}
+                    label="Approve Plan"
+                    onClick={withClose(handlers.onApprovePlan)}
+                    variant="warning"
+                  />
+                )}
+                {feature.skipTests && handlers.onManualVerify ? (
+                  <MenuItem
+                    icon={CheckCircle2}
+                    label="Verify"
+                    onClick={withClose(handlers.onManualVerify)}
+                    variant="success"
+                  />
+                ) : handlers.onResume ? (
+                  <MenuItem
+                    icon={RotateCcw}
+                    label="Resume"
+                    onClick={withClose(handlers.onResume)}
+                    variant="success"
+                  />
+                ) : null}
+                <DropdownMenuSeparator />
+                <MenuItem icon={Edit} label="Edit" onClick={withClose(handlers.onEdit)} />
+                {handlers.onSpawnTask && (
+                  <MenuItem
+                    icon={GitFork}
+                    label="Spawn Sub-Task"
+                    onClick={withClose(handlers.onSpawnTask)}
+                  />
+                )}
+                {handlers.onDuplicate && (
+                  <DropdownMenuSub>
+                    <div className="flex items-center">
+                      <DropdownMenuItem
+                        onClick={withClose(handlers.onDuplicate)}
+                        className="flex-1 pr-0 rounded-r-none"
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Duplicate
+                      </DropdownMenuItem>
+                      {handlers.onDuplicateAsChild && (
+                        <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8" />
+                      )}
+                    </div>
+                    {handlers.onDuplicateAsChild && (
+                      <DropdownMenuSubContent>
+                        <MenuItem
+                          icon={GitFork}
+                          label="Duplicate as Child"
+                          onClick={withClose(handlers.onDuplicateAsChild)}
+                        />
+                        {handlers.onDuplicateAsChildMultiple && (
+                          <MenuItem
+                            icon={Repeat}
+                            label="Duplicate as Child ×N"
+                            onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                          />
+                        )}
+                      </DropdownMenuSubContent>
+                    )}
+                  </DropdownMenuSub>
+                )}
                 <MenuItem
-                  icon={FileText}
-                  label="View Logs"
-                  onClick={withClose(handlers.onViewOutput)}
+                  icon={Trash2}
+                  label="Delete"
+                  onClick={withClose(handlers.onDelete)}
+                  variant="destructive"
                 />
-              )}
-              {feature.planSpec?.status === 'generated' && handlers.onApprovePlan && (
-                <MenuItem
-                  icon={FileText}
-                  label="Approve Plan"
-                  onClick={withClose(handlers.onApprovePlan)}
-                  variant="warning"
-                />
-              )}
-              {feature.skipTests && handlers.onManualVerify ? (
-                <MenuItem
-                  icon={CheckCircle2}
-                  label="Verify"
-                  onClick={withClose(handlers.onManualVerify)}
-                  variant="success"
-                />
-              ) : handlers.onResume ? (
-                <MenuItem
-                  icon={RotateCcw}
-                  label="Resume"
-                  onClick={withClose(handlers.onResume)}
-                  variant="success"
-                />
-              ) : null}
-              <DropdownMenuSeparator />
-              <MenuItem icon={Edit} label="Edit" onClick={withClose(handlers.onEdit)} />
-              {handlers.onSpawnTask && (
-                <MenuItem
-                  icon={GitFork}
-                  label="Spawn Sub-Task"
-                  onClick={withClose(handlers.onSpawnTask)}
-                />
-              )}
-              <MenuItem
-                icon={Trash2}
-                label="Delete"
-                onClick={withClose(handlers.onDelete)}
-                variant="destructive"
-              />
-            </>
-          )}
+              </>
+            )}
 
           {/* Waiting Approval actions */}
           {!isCurrentAutoTask && feature.status === 'waiting_approval' && (
@@ -502,6 +652,38 @@ export const RowActions = memo(function RowActions({
                   label="Spawn Sub-Task"
                   onClick={withClose(handlers.onSpawnTask)}
                 />
+              )}
+              {handlers.onDuplicate && (
+                <DropdownMenuSub>
+                  <div className="flex items-center">
+                    <DropdownMenuItem
+                      onClick={withClose(handlers.onDuplicate)}
+                      className="flex-1 pr-0 rounded-r-none"
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Duplicate
+                    </DropdownMenuItem>
+                    {handlers.onDuplicateAsChild && (
+                      <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8" />
+                    )}
+                  </div>
+                  {handlers.onDuplicateAsChild && (
+                    <DropdownMenuSubContent>
+                      <MenuItem
+                        icon={GitFork}
+                        label="Duplicate as Child"
+                        onClick={withClose(handlers.onDuplicateAsChild)}
+                      />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
+                    </DropdownMenuSubContent>
+                  )}
+                </DropdownMenuSub>
               )}
               <MenuItem
                 icon={Trash2}
@@ -554,6 +736,38 @@ export const RowActions = memo(function RowActions({
                   onClick={withClose(handlers.onSpawnTask)}
                 />
               )}
+              {handlers.onDuplicate && (
+                <DropdownMenuSub>
+                  <div className="flex items-center">
+                    <DropdownMenuItem
+                      onClick={withClose(handlers.onDuplicate)}
+                      className="flex-1 pr-0 rounded-r-none"
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Duplicate
+                    </DropdownMenuItem>
+                    {handlers.onDuplicateAsChild && (
+                      <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8" />
+                    )}
+                  </div>
+                  {handlers.onDuplicateAsChild && (
+                    <DropdownMenuSubContent>
+                      <MenuItem
+                        icon={GitFork}
+                        label="Duplicate as Child"
+                        onClick={withClose(handlers.onDuplicateAsChild)}
+                      />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
+                    </DropdownMenuSubContent>
+                  )}
+                </DropdownMenuSub>
+              )}
               <MenuItem
                 icon={Trash2}
                 label="Delete"
@@ -580,6 +794,38 @@ export const RowActions = memo(function RowActions({
                   label="Spawn Sub-Task"
                   onClick={withClose(handlers.onSpawnTask)}
                 />
+              )}
+              {handlers.onDuplicate && (
+                <DropdownMenuSub>
+                  <div className="flex items-center">
+                    <DropdownMenuItem
+                      onClick={withClose(handlers.onDuplicate)}
+                      className="flex-1 pr-0 rounded-r-none"
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Duplicate
+                    </DropdownMenuItem>
+                    {handlers.onDuplicateAsChild && (
+                      <DropdownMenuSubTrigger className="px-1 rounded-l-none border-l border-border/30 h-8" />
+                    )}
+                  </div>
+                  {handlers.onDuplicateAsChild && (
+                    <DropdownMenuSubContent>
+                      <MenuItem
+                        icon={GitFork}
+                        label="Duplicate as Child"
+                        onClick={withClose(handlers.onDuplicateAsChild)}
+                      />
+                      {handlers.onDuplicateAsChildMultiple && (
+                        <MenuItem
+                          icon={Repeat}
+                          label="Duplicate as Child ×N"
+                          onClick={withClose(handlers.onDuplicateAsChildMultiple)}
+                        />
+                      )}
+                    </DropdownMenuSubContent>
+                  )}
+                </DropdownMenuSub>
               )}
               <DropdownMenuSeparator />
               <MenuItem
@@ -615,6 +861,9 @@ export function createRowActionHandlers(
     viewPlan?: (id: string) => void;
     approvePlan?: (id: string) => void;
     spawnTask?: (id: string) => void;
+    duplicate?: (id: string) => void;
+    duplicateAsChild?: (id: string) => void;
+    duplicateAsChildMultiple?: (id: string) => void;
   }
 ): RowActionHandlers {
   return {
@@ -631,5 +880,12 @@ export function createRowActionHandlers(
     onViewPlan: actions.viewPlan ? () => actions.viewPlan!(featureId) : undefined,
     onApprovePlan: actions.approvePlan ? () => actions.approvePlan!(featureId) : undefined,
     onSpawnTask: actions.spawnTask ? () => actions.spawnTask!(featureId) : undefined,
+    onDuplicate: actions.duplicate ? () => actions.duplicate!(featureId) : undefined,
+    onDuplicateAsChild: actions.duplicateAsChild
+      ? () => actions.duplicateAsChild!(featureId)
+      : undefined,
+    onDuplicateAsChildMultiple: actions.duplicateAsChildMultiple
+      ? () => actions.duplicateAsChildMultiple!(featureId)
+      : undefined,
   };
 }

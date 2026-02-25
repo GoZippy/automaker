@@ -36,7 +36,7 @@ interface ExportRequest {
   };
 }
 
-export function createExportHandler(featureLoader: FeatureLoader) {
+export function createExportHandler(_featureLoader: FeatureLoader) {
   const exportService = getFeatureExportService();
 
   return async (req: Request, res: Response): Promise<void> => {

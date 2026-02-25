@@ -37,18 +37,21 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="bg-popover border-border max-w-lg"
+        className="bg-popover border-border max-w-lg flex flex-col"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
         showCloseButton={false}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2 text-destructive">
-            <ShieldAlert className="w-6 h-6" />
+            <ShieldAlert className="w-6 h-6 shrink-0" />
             Sandbox Environment Not Detected
           </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
           <DialogDescription asChild>
-            <div className="space-y-4 pt-2">
+            <div className="space-y-4 pt-2 pb-2">
               <p className="text-muted-foreground">
                 <strong>Warning:</strong> This application is running outside of a containerized
                 sandbox environment. AI agents will have direct access to your filesystem and can
@@ -69,11 +72,34 @@ export function SandboxRiskDialog({ open, onConfirm, onDeny }: SandboxRiskDialog
                 For safer operation, consider running Automaker in Docker. See the README for
                 instructions.
               </p>
+
+              <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-2">
+                <p className="text-sm font-medium text-foreground">
+                  Already running in Docker? Try these troubleshooting steps:
+                </p>
+                <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                  <li>
+                    Ensure <code className="bg-muted px-1 rounded">IS_CONTAINERIZED=true</code> is
+                    set in your docker-compose environment
+                  </li>
+                  <li>
+                    Verify the server container has the environment variable:{' '}
+                    <code className="bg-muted px-1 rounded">
+                      docker exec automaker-server printenv IS_CONTAINERIZED
+                    </code>
+                  </li>
+                  <li>Rebuild and restart containers if you recently changed the configuration</li>
+                  <li>
+                    Check the server logs for startup messages:{' '}
+                    <code className="bg-muted px-1 rounded">docker-compose logs server</code>
+                  </li>
+                </ul>
+              </div>
             </div>
           </DialogDescription>
-        </DialogHeader>
+        </div>
 
-        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4">
+        <DialogFooter className="flex-col gap-4 sm:flex-col pt-4 shrink-0 border-t border-border mt-4">
           <div className="flex items-center space-x-2 self-start">
             <Checkbox
               id="skip-sandbox-warning"

@@ -77,7 +77,27 @@ export async function setupWelcomeView(
       };
       localStorage.setItem('automaker-setup', JSON.stringify(setupState));
 
-      // Set workspace directory if provided
+      // Set settings cache to ensure setupComplete is recognized on cold start.
+      // This prevents the server's setupComplete value (which may be false on fresh CI)
+      // from overriding the setup store and causing a redirect to /setup.
+      const settingsCache: Record<string, unknown> = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: opts?.recentProjects || [],
+        theme: 'dark',
+        sidebarOpen: true,
+        maxConcurrency: 3,
+      };
+
+      // Include lastProjectDir in settings cache so it's available during fast-hydrate.
+      // The standalone localStorage key is a legacy fallback; the cache is the primary source.
+      if (opts?.workspaceDir) {
+        settingsCache.lastProjectDir = opts.workspaceDir;
+      }
+
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
+      // Set workspace directory if provided (legacy fallback key)
       if (opts?.workspaceDir) {
         localStorage.setItem('automaker:lastProjectDir', opts.workspaceDir);
       }
@@ -129,6 +149,8 @@ export async function setupRealProject(
     setAsCurrent?: boolean;
     /** Additional recent projects to include */
     additionalProjects?: TestProject[];
+    /** Optional project ID to use (if not provided, generates timestamp-based ID) */
+    projectId?: string;
   }
 ): Promise<void> {
   await page.addInitScript(
@@ -143,7 +165,7 @@ export async function setupRealProject(
       opts: typeof options;
       versions: typeof STORE_VERSIONS;
     }) => {
-      const projectId = `project-${Date.now()}`;
+      const projectId = opts?.projectId || `project-${Date.now()}`;
       const project: TestProject = {
         id: projectId,
         name: name,
@@ -182,6 +204,27 @@ export async function setupRealProject(
       };
       localStorage.setItem('automaker-setup', JSON.stringify(setupState));
 
+      // Set settings cache to ensure setupComplete is recognized on cold start.
+      // This prevents the server's setupComplete value (which may be false on fresh CI)
+      // from overriding the setup store and causing a redirect to /setup.
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: allProjects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          path: p.path,
+          lastOpened: p.lastOpened,
+        })),
+        // Include currentProjectId so hydrateStoreFromSettings can restore
+        // the current project directly (without relying on auto-open logic)
+        currentProjectId: currentProject ? currentProject.id : null,
+        theme: 'dark',
+        sidebarOpen: true,
+        maxConcurrency: 3,
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
       // Disable splash screen in tests
       sessionStorage.setItem('automaker-splash-shown', 'true');
     },
@@ -194,7 +237,7 @@ export async function setupRealProject(
  * This simulates having opened a project before
  */
 export async function setupMockProject(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((versions: typeof STORE_VERSIONS) => {
     const mockProject = {
       id: 'test-project-1',
       name: 'Test Project',
@@ -213,14 +256,43 @@ export async function setupMockProject(page: Page): Promise<void> {
         chatHistoryOpen: false,
         maxConcurrency: 3,
       },
-      version: 2, // Must match app-store.ts persist version
+      version: versions.APP_STORE,
     };
 
     localStorage.setItem('automaker-storage', JSON.stringify(mockState));
 
+    // Mark setup as complete to prevent redirect to /setup
+    const setupState = {
+      state: {
+        isFirstRun: false,
+        setupComplete: true,
+        skipClaudeSetup: false,
+      },
+      version: versions.SETUP_STORE,
+    };
+    localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+    // Set settings cache so the fast hydrate path is taken on page load.
+    const settingsCache = {
+      setupComplete: true,
+      isFirstRun: false,
+      projects: [
+        {
+          id: mockProject.id,
+          name: mockProject.name,
+          path: mockProject.path,
+          lastOpened: mockProject.lastOpened,
+        },
+      ],
+      theme: 'dark',
+      sidebarOpen: true,
+      maxConcurrency: 3,
+    };
+    localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
     // Disable splash screen in tests
     sessionStorage.setItem('automaker-splash-shown', 'true');
-  });
+  }, STORE_VERSIONS);
 }
 
 /**
@@ -230,30 +302,57 @@ export async function setupMockProjectWithConcurrency(
   page: Page,
   concurrency: number
 ): Promise<void> {
-  await page.addInitScript((maxConcurrency: number) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ maxConcurrency, versions }: { maxConcurrency: number; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: maxConcurrency,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      // Mark setup as complete to prevent redirect to /setup
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: maxConcurrency,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
-
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-  }, concurrency);
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+    },
+    { maxConcurrency: concurrency, versions: STORE_VERSIONS }
+  );
 }
 
 /**
@@ -265,7 +364,15 @@ export async function setupMockProjectAtConcurrencyLimit(
   runningTasks: string[] = ['running-task-1']
 ): Promise<void> {
   await page.addInitScript(
-    ({ maxConcurrency, runningTasks }: { maxConcurrency: number; runningTasks: string[] }) => {
+    ({
+      maxConcurrency,
+      runningTasks,
+      versions,
+    }: {
+      maxConcurrency: number;
+      runningTasks: string[];
+      versions: typeof STORE_VERSIONS;
+    }) => {
       const mockProject = {
         id: 'test-project-1',
         name: 'Test Project',
@@ -287,15 +394,38 @@ export async function setupMockProjectAtConcurrencyLimit(
           runningAutoTasks: runningTasks,
           autoModeActivityLog: [],
         },
-        version: 2, // Must match app-store.ts persist version
+        version: versions.APP_STORE,
       };
 
       localStorage.setItem('automaker-storage', JSON.stringify(mockState));
 
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
+        theme: 'dark',
+        sidebarOpen: true,
+        maxConcurrency: maxConcurrency,
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
       // Disable splash screen in tests
       sessionStorage.setItem('automaker-splash-shown', 'true');
     },
-    { maxConcurrency, runningTasks }
+    { maxConcurrency, runningTasks, versions: STORE_VERSIONS }
   );
 }
 
@@ -316,43 +446,69 @@ export async function setupMockProjectWithFeatures(
     }>;
   }
 ): Promise<void> {
-  await page.addInitScript((opts: typeof options) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ opts, versions }: { opts: typeof options; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockFeatures = opts?.features || [];
+      const mockFeatures = opts?.features || [];
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: opts?.maxConcurrency ?? 3,
+          isAutoModeRunning: false,
+          runningAutoTasks: opts?.runningTasks ?? [],
+          autoModeActivityLog: [],
+          features: mockFeatures,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: opts?.maxConcurrency ?? 3,
-        isAutoModeRunning: false,
-        runningAutoTasks: opts?.runningTasks ?? [],
-        autoModeActivityLog: [],
-        features: mockFeatures,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+      // Also store features in a global variable that the mock electron API can use
+      // This is needed because the board-view loads features from the file system
+      (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
 
-    // Also store features in a global variable that the mock electron API can use
-    // This is needed because the board-view loads features from the file system
-    (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
-
-    // Disable splash screen in tests
-    sessionStorage.setItem('automaker-splash-shown', 'true');
-  }, options);
+      // Disable splash screen in tests
+      sessionStorage.setItem('automaker-splash-shown', 'true');
+    },
+    { opts: options, versions: STORE_VERSIONS }
+  );
 }
 
 /**
@@ -365,7 +521,15 @@ export async function setupMockProjectWithContextFile(
   contextContent: string = '# Agent Context\n\nPrevious implementation work...'
 ): Promise<void> {
   await page.addInitScript(
-    ({ featureId, contextContent }: { featureId: string; contextContent: string }) => {
+    ({
+      featureId,
+      contextContent,
+      versions,
+    }: {
+      featureId: string;
+      contextContent: string;
+      versions: typeof STORE_VERSIONS;
+    }) => {
       const mockProject = {
         id: 'test-project-1',
         name: 'Test Project',
@@ -384,10 +548,33 @@ export async function setupMockProjectWithContextFile(
           chatHistoryOpen: false,
           maxConcurrency: 3,
         },
-        version: 2, // Must match app-store.ts persist version
+        version: versions.APP_STORE,
       };
 
       localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
+        theme: 'dark',
+        sidebarOpen: true,
+        maxConcurrency: 3,
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
       // Disable splash screen in tests
       sessionStorage.setItem('automaker-splash-shown', 'true');
@@ -403,7 +590,7 @@ export async function setupMockProjectWithContextFile(
         content: contextContent,
       };
     },
-    { featureId, contextContent }
+    { featureId, contextContent, versions: STORE_VERSIONS }
   );
 }
 
@@ -425,78 +612,130 @@ export async function setupMockProjectWithInProgressFeatures(
     }>;
   }
 ): Promise<void> {
-  await page.addInitScript((opts: typeof options) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ opts, versions }: { opts: typeof options; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockFeatures = opts?.features || [];
+      const mockFeatures = opts?.features || [];
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: opts?.maxConcurrency ?? 3,
+          isAutoModeRunning: false,
+          runningAutoTasks: opts?.runningTasks ?? [],
+          autoModeActivityLog: [],
+          features: mockFeatures,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: opts?.maxConcurrency ?? 3,
-        isAutoModeRunning: false,
-        runningAutoTasks: opts?.runningTasks ?? [],
-        autoModeActivityLog: [],
-        features: mockFeatures,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-
-    // Also store features in a global variable that the mock electron API can use
-    // This is needed because the board-view loads features from the file system
-    (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
-  }, options);
+      // Also store features in a global variable that the mock electron API can use
+      // This is needed because the board-view loads features from the file system
+      (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
+    },
+    { opts: options, versions: STORE_VERSIONS }
+  );
 }
 
 /**
  * Set up a mock project with a specific current view for route persistence testing
  */
 export async function setupMockProjectWithView(page: Page, view: string): Promise<void> {
-  await page.addInitScript((currentView: string) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ currentView, versions }: { currentView: string; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
-        currentView: currentView,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          currentView: currentView,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: 3,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: 3,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
-
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-  }, view);
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+    },
+    { currentView: view, versions: STORE_VERSIONS }
+  );
 }
 
 /**
  * Set up an empty localStorage (no projects) to show welcome screen
  */
 export async function setupEmptyLocalStorage(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((versions: typeof STORE_VERSIONS) => {
     const mockState = {
       state: {
         projects: [],
@@ -509,20 +748,36 @@ export async function setupEmptyLocalStorage(page: Page): Promise<void> {
         chatHistoryOpen: false,
         maxConcurrency: 3,
       },
-      version: 2, // Must match app-store.ts persist version
+      version: versions.APP_STORE,
     };
     localStorage.setItem('automaker-storage', JSON.stringify(mockState));
 
+    const setupState = {
+      state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+      version: versions.SETUP_STORE,
+    };
+    localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+    const settingsCache = {
+      setupComplete: true,
+      isFirstRun: false,
+      projects: [],
+      theme: 'dark',
+      sidebarOpen: true,
+      maxConcurrency: 3,
+    };
+    localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
     // Disable splash screen in tests
     sessionStorage.setItem('automaker-splash-shown', 'true');
-  });
+  }, STORE_VERSIONS);
 }
 
 /**
  * Set up mock projects in localStorage but with no current project (for recent projects list)
  */
 export async function setupMockProjectsWithoutCurrent(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((versions: typeof STORE_VERSIONS) => {
     const mockProjects = [
       {
         id: 'test-project-1',
@@ -550,14 +805,35 @@ export async function setupMockProjectsWithoutCurrent(page: Page): Promise<void>
         chatHistoryOpen: false,
         maxConcurrency: 3,
       },
-      version: 2, // Must match app-store.ts persist version
+      version: versions.APP_STORE,
     };
 
     localStorage.setItem('automaker-storage', JSON.stringify(mockState));
 
+    const setupState = {
+      state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+      version: versions.SETUP_STORE,
+    };
+    localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+    const settingsCache = {
+      setupComplete: true,
+      isFirstRun: false,
+      projects: mockProjects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        path: p.path,
+        lastOpened: p.lastOpened,
+      })),
+      theme: 'dark',
+      sidebarOpen: true,
+      maxConcurrency: 3,
+    };
+    localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
     // Disable splash screen in tests
     sessionStorage.setItem('automaker-splash-shown', 'true');
-  });
+  }, STORE_VERSIONS);
 }
 
 /**
@@ -579,39 +855,65 @@ export async function setupMockProjectWithSkipTestsFeatures(
     }>;
   }
 ): Promise<void> {
-  await page.addInitScript((opts: typeof options) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ opts, versions }: { opts: typeof options; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockFeatures = opts?.features || [];
+      const mockFeatures = opts?.features || [];
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: opts?.maxConcurrency ?? 3,
+          isAutoModeRunning: false,
+          runningAutoTasks: opts?.runningTasks ?? [],
+          autoModeActivityLog: [],
+          features: mockFeatures,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: opts?.maxConcurrency ?? 3,
-        isAutoModeRunning: false,
-        runningAutoTasks: opts?.runningTasks ?? [],
-        autoModeActivityLog: [],
-        features: mockFeatures,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-
-    // Disable splash screen in tests
-    sessionStorage.setItem('automaker-splash-shown', 'true');
-  }, options);
+      // Disable splash screen in tests
+      sessionStorage.setItem('automaker-splash-shown', 'true');
+    },
+    { opts: options, versions: STORE_VERSIONS }
+  );
 }
 
 /**
@@ -621,34 +923,72 @@ export async function setupMockMultipleProjects(
   page: Page,
   projectCount: number = 3
 ): Promise<void> {
-  await page.addInitScript((count: number) => {
-    const mockProjects: TestProject[] = [];
-    for (let i = 0; i < count; i++) {
-      mockProjects.push({
-        id: `test-project-${i + 1}`,
-        name: `Test Project ${i + 1}`,
-        path: `/mock/test-project-${i + 1}`,
-        lastOpened: new Date(Date.now() - i * 86400000).toISOString(),
-      });
-    }
+  await page.addInitScript(
+    ({ count, versions }: { count: number; versions: typeof STORE_VERSIONS }) => {
+      const mockProjects: TestProject[] = [];
+      for (let i = 0; i < count; i++) {
+        mockProjects.push({
+          id: `test-project-${i + 1}`,
+          name: `Test Project ${i + 1}`,
+          path: `/mock/test-project-${i + 1}`,
+          lastOpened: new Date(Date.now() - i * 86400000).toISOString(),
+        });
+      }
 
-    const mockState = {
-      state: {
-        projects: mockProjects,
-        currentProject: mockProjects[0],
-        currentView: 'board',
+      const mockState = {
+        state: {
+          projects: mockProjects,
+          currentProject: mockProjects[0],
+          currentView: 'board',
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: 3,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      // Mark setup as complete to prevent redirect to /setup
+      const setupState = {
+        state: {
+          isFirstRun: false,
+          setupComplete: true,
+          skipClaudeSetup: false,
+        },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      // Set settings cache so the fast hydrate path is taken on page load.
+      // This prevents the server's setupComplete value (which may be false on fresh CI)
+      // from overwriting the setup store and causing a redirect to /setup.
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: mockProjects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          path: p.path,
+          lastOpened: p.lastOpened,
+        })),
+        // Include currentProjectId so hydrateStoreFromSettings can restore
+        // the current project directly (without relying on auto-open logic)
+        currentProjectId: mockProjects[0]?.id ?? null,
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: 3,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-  }, projectCount);
+      // Disable splash screen in tests
+      sessionStorage.setItem('automaker-splash-shown', 'true');
+    },
+    { count: projectCount, versions: STORE_VERSIONS }
+  );
 }
 
 /**
@@ -660,7 +1000,15 @@ export async function setupMockProjectWithAgentOutput(
   outputContent: string
 ): Promise<void> {
   await page.addInitScript(
-    ({ featureId, outputContent }: { featureId: string; outputContent: string }) => {
+    ({
+      featureId,
+      outputContent,
+      versions,
+    }: {
+      featureId: string;
+      outputContent: string;
+      versions: typeof STORE_VERSIONS;
+    }) => {
       const mockProject = {
         id: 'test-project-1',
         name: 'Test Project',
@@ -679,10 +1027,33 @@ export async function setupMockProjectWithAgentOutput(
           chatHistoryOpen: false,
           maxConcurrency: 3,
         },
-        version: 2, // Must match app-store.ts persist version
+        version: versions.APP_STORE,
       };
 
       localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
+        theme: 'dark',
+        sidebarOpen: true,
+        maxConcurrency: 3,
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
       // Disable splash screen in tests
       sessionStorage.setItem('automaker-splash-shown', 'true');
@@ -697,7 +1068,7 @@ export async function setupMockProjectWithAgentOutput(
         content: outputContent,
       };
     },
-    { featureId, outputContent }
+    { featureId, outputContent, versions: STORE_VERSIONS }
   );
 }
 
@@ -720,46 +1091,72 @@ export async function setupMockProjectWithWaitingApprovalFeatures(
     }>;
   }
 ): Promise<void> {
-  await page.addInitScript((opts: typeof options) => {
-    const mockProject = {
-      id: 'test-project-1',
-      name: 'Test Project',
-      path: '/mock/test-project',
-      lastOpened: new Date().toISOString(),
-    };
+  await page.addInitScript(
+    ({ opts, versions }: { opts: typeof options; versions: typeof STORE_VERSIONS }) => {
+      const mockProject = {
+        id: 'test-project-1',
+        name: 'Test Project',
+        path: '/mock/test-project',
+        lastOpened: new Date().toISOString(),
+      };
 
-    const mockFeatures = opts?.features || [];
+      const mockFeatures = opts?.features || [];
 
-    const mockState = {
-      state: {
-        projects: [mockProject],
-        currentProject: mockProject,
+      const mockState = {
+        state: {
+          projects: [mockProject],
+          currentProject: mockProject,
+          theme: 'dark',
+          sidebarOpen: true,
+          apiKeys: { anthropic: '', google: '' },
+          chatSessions: [],
+          chatHistoryOpen: false,
+          maxConcurrency: opts?.maxConcurrency ?? 3,
+          isAutoModeRunning: false,
+          runningAutoTasks: opts?.runningTasks ?? [],
+          autoModeActivityLog: [],
+          features: mockFeatures,
+        },
+        version: versions.APP_STORE,
+      };
+
+      localStorage.setItem('automaker-storage', JSON.stringify(mockState));
+
+      const setupState = {
+        state: { isFirstRun: false, setupComplete: true, skipClaudeSetup: false },
+        version: versions.SETUP_STORE,
+      };
+      localStorage.setItem('automaker-setup', JSON.stringify(setupState));
+
+      const settingsCache = {
+        setupComplete: true,
+        isFirstRun: false,
+        projects: [
+          {
+            id: mockProject.id,
+            name: mockProject.name,
+            path: mockProject.path,
+            lastOpened: mockProject.lastOpened,
+          },
+        ],
         theme: 'dark',
         sidebarOpen: true,
-        apiKeys: { anthropic: '', google: '' },
-        chatSessions: [],
-        chatHistoryOpen: false,
         maxConcurrency: opts?.maxConcurrency ?? 3,
-        isAutoModeRunning: false,
-        runningAutoTasks: opts?.runningTasks ?? [],
-        autoModeActivityLog: [],
-        features: mockFeatures,
-      },
-      version: 2, // Must match app-store.ts persist version
-    };
+      };
+      localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
 
-    localStorage.setItem('automaker-storage', JSON.stringify(mockState));
-
-    // Also store features in a global variable that the mock electron API can use
-    (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
-  }, options);
+      // Also store features in a global variable that the mock electron API can use
+      (window as { __mockFeatures?: unknown[] }).__mockFeatures = mockFeatures;
+    },
+    { opts: options, versions: STORE_VERSIONS }
+  );
 }
 
 /**
  * Set up the app store to show setup view (simulate first run)
  */
 export async function setupFirstRun(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((versions: typeof STORE_VERSIONS) => {
     // Clear any existing setup state to simulate first run
     localStorage.removeItem('automaker-setup');
     localStorage.removeItem('automaker-storage');
@@ -780,7 +1177,7 @@ export async function setupFirstRun(page: Page): Promise<void> {
         },
         skipClaudeSetup: false,
       },
-      version: 2, // Must match app-store.ts persist version
+      version: versions.SETUP_STORE, // Must match setup-store.ts persist version
     };
 
     localStorage.setItem('automaker-setup', JSON.stringify(setupState));
@@ -801,14 +1198,25 @@ export async function setupFirstRun(page: Page): Promise<void> {
         autoModeActivityLog: [],
         currentView: 'setup',
       },
-      version: 2, // Must match app-store.ts persist version
+      version: versions.APP_STORE, // Must match app-store.ts persist version
     };
 
     localStorage.setItem('automaker-storage', JSON.stringify(appState));
 
+    // Anchor the settings cache so CI cannot hydrate a conflicting setupComplete value.
+    const settingsCache = {
+      setupComplete: false,
+      isFirstRun: true,
+      projects: [],
+      theme: 'dark',
+      sidebarOpen: true,
+      maxConcurrency: 3,
+    };
+    localStorage.setItem('automaker-settings-cache', JSON.stringify(settingsCache));
+
     // Disable splash screen in tests
     sessionStorage.setItem('automaker-splash-shown', 'true');
-  });
+  }, STORE_VERSIONS);
 }
 
 /**

@@ -10,12 +10,15 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { LoadingState } from '@/components/ui/loading-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { cn, pathsEqual, generateUUID } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-media-query';
 import { toast } from 'sonner';
 import { queryKeys } from '@/lib/query-keys';
 import { useGithubIssues, useIssueValidation, useIssuesFilter } from './github-issues-view/hooks';
 import { IssueRow, IssueDetailPanel, IssuesListHeader } from './github-issues-view/components';
 import { ValidationDialog } from './github-issues-view/dialogs';
+import { AddFeatureDialog } from './board-view/dialogs';
 import { formatDate, getFeaturePriority } from './github-issues-view/utils';
+import { resolveModelString } from '@automaker/model-resolver';
 import { useModelOverride } from '@/components/shared';
 import type {
   ValidateIssueOptions,
@@ -34,14 +37,21 @@ export function GitHubIssuesView() {
   const [pendingRevalidateOptions, setPendingRevalidateOptions] =
     useState<ValidateIssueOptions | null>(null);
 
+  // Add Feature dialog state
+  const [showAddFeatureDialog, setShowAddFeatureDialog] = useState(false);
+  const [createFeatureIssue, setCreateFeatureIssue] = useState<GitHubIssue | null>(null);
+
   // Filter state
   const [filterState, setFilterState] = useState<IssuesFilterState>(DEFAULT_ISSUES_FILTER_STATE);
 
-  const { currentProject, getCurrentWorktree, worktreesByProject } = useAppStore();
+  const { currentProject, getCurrentWorktree, worktreesByProject, defaultSkipTests } =
+    useAppStore();
   const queryClient = useQueryClient();
 
   // Model override for validation
   const validationModelOverride = useModelOverride({ phase: 'validationModel' });
+
+  const isMobile = useIsMobile();
 
   const { openIssues, closedIssues, loading, refreshing, error, refresh } = useGithubIssues();
 
@@ -108,6 +118,132 @@ export function GitHubIssuesView() {
     api.openExternalLink(url);
   }, []);
 
+  // Build a prefilled description from a GitHub issue for the feature dialog
+  const buildIssueDescription = useCallback(
+    (issue: GitHubIssue) => {
+      const parts = [
+        `**From GitHub Issue #${issue.number}**`,
+        '',
+        issue.body || 'No description provided.',
+      ];
+
+      // Include labels if present
+      if (issue.labels.length > 0) {
+        parts.push('', `**Labels:** ${issue.labels.map((l) => l.name).join(', ')}`);
+      }
+
+      // Include linked PRs info if present
+      if (issue.linkedPRs && issue.linkedPRs.length > 0) {
+        parts.push(
+          '',
+          '**Linked Pull Requests:**',
+          ...issue.linkedPRs.map((pr) => `- #${pr.number}: ${pr.title} (${pr.state})`)
+        );
+      }
+
+      // Include cached validation analysis if available
+      const cached = cachedValidations.get(issue.number);
+      if (cached?.result) {
+        const validation = cached.result;
+        parts.push('', '---', '', '**AI Validation Analysis:**', validation.reasoning);
+        if (validation.suggestedFix) {
+          parts.push('', `**Suggested Approach:**`, validation.suggestedFix);
+        }
+        if (validation.relatedFiles?.length) {
+          parts.push('', '**Related Files:**', ...validation.relatedFiles.map((f) => `- \`${f}\``));
+        }
+      }
+
+      return parts.join('\n');
+    },
+    [cachedValidations]
+  );
+
+  // Memoize the prefilled description to avoid recomputing on every render
+  const prefilledDescription = useMemo(
+    () => (createFeatureIssue ? buildIssueDescription(createFeatureIssue) : undefined),
+    [createFeatureIssue, buildIssueDescription]
+  );
+
+  // Open the Add Feature dialog with pre-filled data from a GitHub issue
+  const handleCreateFeature = useCallback((issue: GitHubIssue) => {
+    setCreateFeatureIssue(issue);
+    setShowAddFeatureDialog(true);
+  }, []);
+
+  // Handle feature creation from the AddFeatureDialog
+  const handleAddFeatureFromIssue = useCallback(
+    async (featureData: {
+      title: string;
+      category: string;
+      description: string;
+      priority: number;
+      model: string;
+      thinkingLevel: string;
+      reasoningEffort: string;
+      skipTests: boolean;
+      branchName: string;
+      planningMode: string;
+      requirePlanApproval: boolean;
+      excludedPipelineSteps?: string[];
+      workMode: string;
+      imagePaths?: Array<{ id: string; path: string; description?: string }>;
+      textFilePaths?: Array<{ id: string; path: string; description?: string }>;
+    }) => {
+      if (!currentProject?.path) {
+        toast.error('No project selected');
+        return;
+      }
+
+      try {
+        const api = getElectronAPI();
+        if (api.features?.create) {
+          const feature = {
+            id: `issue-${createFeatureIssue?.number || 'new'}-${generateUUID()}`,
+            title: featureData.title,
+            description: featureData.description,
+            category: featureData.category,
+            status: 'backlog' as const,
+            passes: false,
+            priority: featureData.priority,
+            model: featureData.model,
+            thinkingLevel: featureData.thinkingLevel,
+            reasoningEffort: featureData.reasoningEffort,
+            skipTests: featureData.skipTests,
+            branchName: featureData.workMode === 'current' ? currentBranch : featureData.branchName,
+            planningMode: featureData.planningMode,
+            requirePlanApproval: featureData.requirePlanApproval,
+            excludedPipelineSteps: featureData.excludedPipelineSteps,
+            ...(featureData.imagePaths?.length ? { imagePaths: featureData.imagePaths } : {}),
+            ...(featureData.textFilePaths?.length
+              ? { textFilePaths: featureData.textFilePaths }
+              : {}),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          const result = await api.features.create(currentProject.path, feature);
+          if (result.success) {
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.features.all(currentProject.path),
+            });
+            toast.success(
+              `Created feature: ${featureData.title || featureData.description.slice(0, 50)}`
+            );
+            setShowAddFeatureDialog(false);
+            setCreateFeatureIssue(null);
+          } else {
+            toast.error(result.error || 'Failed to create feature');
+          }
+        }
+      } catch (err) {
+        logger.error('Create feature from issue error:', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to create feature');
+      }
+    },
+    [currentProject?.path, currentBranch, queryClient, createFeatureIssue]
+  );
+
   const handleConvertToTask = useCallback(
     async (issue: GitHubIssue, validation: IssueValidationResult) => {
       if (!currentProject?.path) {
@@ -119,7 +255,7 @@ export function GitHubIssuesView() {
         const api = getElectronAPI();
         if (api.features?.create) {
           // Build description from issue body + validation info
-          const description = [
+          const parts = [
             `**From GitHub Issue #${issue.number}**`,
             '',
             issue.body || 'No description provided.',
@@ -128,13 +264,18 @@ export function GitHubIssuesView() {
             '',
             '**AI Validation Analysis:**',
             validation.reasoning,
-            validation.suggestedFix ? `\n**Suggested Approach:**\n${validation.suggestedFix}` : '',
-            validation.relatedFiles?.length
-              ? `\n**Related Files:**\n${validation.relatedFiles.map((f) => `- \`${f}\``).join('\n')}`
-              : '',
-          ]
-            .filter(Boolean)
-            .join('\n');
+          ];
+          if (validation.suggestedFix) {
+            parts.push('', `**Suggested Approach:**`, validation.suggestedFix);
+          }
+          if (validation.relatedFiles?.length) {
+            parts.push(
+              '',
+              '**Related Files:**',
+              ...validation.relatedFiles.map((f) => `- \`${f}\``)
+            );
+          }
+          const description = parts.join('\n');
 
           const feature = {
             id: `issue-${issue.number}-${generateUUID()}`,
@@ -144,7 +285,7 @@ export function GitHubIssuesView() {
             status: 'backlog' as const,
             passes: false,
             priority: getFeaturePriority(validation.estimatedComplexity),
-            model: 'opus',
+            model: resolveModelString('opus'),
             thinkingLevel: 'none' as const,
             branchName: currentBranch,
             createdAt: new Date().toISOString(),
@@ -185,11 +326,12 @@ export function GitHubIssuesView() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Issues List */}
+      {/* Issues List - hidden on mobile when an issue is selected */}
       <div
         className={cn(
           'flex flex-col overflow-hidden border-r border-border',
-          selectedIssue ? 'w-80' : 'flex-1'
+          selectedIssue ? 'w-80' : 'flex-1',
+          isMobile && selectedIssue && 'hidden'
         )}
       >
         {/* Header */}
@@ -296,8 +438,10 @@ export function GitHubIssuesView() {
             setPendingRevalidateOptions(options);
             setShowRevalidateConfirm(true);
           }}
+          onCreateFeature={handleCreateFeature}
           formatDate={formatDate}
           modelOverride={validationModelOverride}
+          isMobile={isMobile}
         />
       )}
 
@@ -308,6 +452,28 @@ export function GitHubIssuesView() {
         issue={selectedIssue}
         validationResult={validationResult}
         onConvertToTask={handleConvertToTask}
+      />
+
+      {/* Add Feature Dialog - opened from issue detail panel */}
+      <AddFeatureDialog
+        open={showAddFeatureDialog}
+        onOpenChange={(open) => {
+          setShowAddFeatureDialog(open);
+          if (!open) {
+            setCreateFeatureIssue(null);
+          }
+        }}
+        onAdd={handleAddFeatureFromIssue}
+        categorySuggestions={['From GitHub']}
+        branchSuggestions={[]}
+        defaultSkipTests={defaultSkipTests}
+        defaultBranch={currentBranch}
+        currentBranch={currentBranch || undefined}
+        isMaximized={false}
+        projectPath={currentProject?.path}
+        prefilledTitle={createFeatureIssue?.title}
+        prefilledDescription={prefilledDescription}
+        prefilledCategory="From GitHub"
       />
 
       {/* Revalidate Confirmation Dialog */}

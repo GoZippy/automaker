@@ -30,6 +30,7 @@ import {
   type CopilotRuntimeModel,
 } from '@automaker/types';
 import { createLogger, isAbortError } from '@automaker/utils';
+import { resolveModelString } from '@automaker/model-resolver';
 import { CopilotClient, type PermissionRequest } from '@github/copilot-sdk';
 import {
   normalizeTodos,
@@ -42,7 +43,7 @@ import {
 const logger = createLogger('CopilotProvider');
 
 // Default bare model (without copilot- prefix) for SDK calls
-const DEFAULT_BARE_MODEL = 'claude-sonnet-4.5';
+const DEFAULT_BARE_MODEL = 'claude-sonnet-4.6';
 
 // =============================================================================
 // SDK Event Types (from @github/copilot-sdk)
@@ -85,10 +86,6 @@ interface SdkToolExecutionEndEvent extends SdkEvent {
   };
 }
 
-interface SdkSessionIdleEvent extends SdkEvent {
-  type: 'session.idle';
-}
-
 interface SdkSessionErrorEvent extends SdkEvent {
   type: 'session.error';
   data: {
@@ -119,6 +116,12 @@ export interface CopilotError extends Error {
   recoverable: boolean;
   suggestion?: string;
 }
+
+type CopilotSession = Awaited<ReturnType<CopilotClient['createSession']>>;
+type CopilotSessionOptions = Parameters<CopilotClient['createSession']>[0];
+type ResumableCopilotClient = CopilotClient & {
+  resumeSession?: (sessionId: string, options: CopilotSessionOptions) => Promise<CopilotSession>;
+};
 
 // =============================================================================
 // Tool Name Normalization
@@ -386,9 +389,14 @@ export class CopilotProvider extends CliProvider {
 
       case 'session.error': {
         const errorEvent = sdkEvent as SdkSessionErrorEvent;
+        const enrichedError =
+          errorEvent.data.message ||
+          (errorEvent.data.code
+            ? `Copilot agent error (code: ${errorEvent.data.code})`
+            : 'Copilot agent error');
         return {
           type: 'error',
-          error: errorEvent.data.message || 'Unknown error',
+          error: enrichedError,
         };
       }
 
@@ -520,7 +528,11 @@ export class CopilotProvider extends CliProvider {
     }
 
     const promptText = this.extractPromptText(options);
-    const bareModel = options.model || DEFAULT_BARE_MODEL;
+    // resolveModelString may return dash-separated canonical names (e.g. "claude-sonnet-4-6"),
+    // but the Copilot SDK expects dot-separated version suffixes (e.g. "claude-sonnet-4.6").
+    // Normalize by converting the last dash-separated numeric pair to dot notation.
+    const resolvedModel = resolveModelString(options.model || DEFAULT_BARE_MODEL);
+    const bareModel = resolvedModel.replace(/-(\d+)-(\d+)$/, '-$1.$2');
     const workingDirectory = options.cwd || process.cwd();
 
     logger.debug(
@@ -558,12 +570,14 @@ export class CopilotProvider extends CliProvider {
       });
     };
 
+    // Declare session outside try so it's accessible in the catch block for cleanup.
+    let session: CopilotSession | undefined;
+
     try {
       await client.start();
       logger.debug(`CopilotClient started with cwd: ${workingDirectory}`);
 
-      // Create session with streaming enabled for real-time events
-      const session = await client.createSession({
+      const sessionOptions: CopilotSessionOptions = {
         model: bareModel,
         streaming: true,
         // AUTONOMOUS MODE: Auto-approve all permission requests.
@@ -576,13 +590,33 @@ export class CopilotProvider extends CliProvider {
           logger.debug(`Permission request: ${request.kind}`);
           return { kind: 'approved' };
         },
-      });
+      };
 
-      const sessionId = session.sessionId;
-      logger.debug(`Session created: ${sessionId}`);
+      // Resume the previous Copilot session when possible; otherwise create a fresh one.
+      const resumableClient = client as ResumableCopilotClient;
+      let sessionResumed = false;
+      if (options.sdkSessionId && typeof resumableClient.resumeSession === 'function') {
+        try {
+          session = await resumableClient.resumeSession(options.sdkSessionId, sessionOptions);
+          sessionResumed = true;
+          logger.debug(`Resumed Copilot session: ${session.sessionId}`);
+        } catch (resumeError) {
+          logger.warn(
+            `Failed to resume Copilot session "${options.sdkSessionId}", creating a new session: ${resumeError}`
+          );
+          session = await client.createSession(sessionOptions);
+        }
+      } else {
+        session = await client.createSession(sessionOptions);
+      }
+
+      // session is always assigned by this point (both branches above assign it)
+      const activeSession = session!;
+      const sessionId = activeSession.sessionId;
+      logger.debug(`Session ${sessionResumed ? 'resumed' : 'created'}: ${sessionId}`);
 
       // Set up event handler to push events to queue
-      session.on((event: SdkEvent) => {
+      activeSession.on((event: SdkEvent) => {
         logger.debug(`SDK event: ${event.type}`);
 
         if (event.type === 'session.idle') {
@@ -600,7 +634,7 @@ export class CopilotProvider extends CliProvider {
       });
 
       // Send the prompt (non-blocking)
-      await session.send({ prompt: promptText });
+      await activeSession.send({ prompt: promptText });
 
       // Process events as they arrive
       while (!sessionComplete || eventQueue.length > 0) {
@@ -608,7 +642,7 @@ export class CopilotProvider extends CliProvider {
 
         // Check for errors first (before processing events to avoid race condition)
         if (sessionError) {
-          await session.destroy();
+          await activeSession.destroy();
           await client.stop();
           throw sessionError;
         }
@@ -628,11 +662,19 @@ export class CopilotProvider extends CliProvider {
       }
 
       // Cleanup
-      await session.destroy();
+      await activeSession.destroy();
       await client.stop();
       logger.debug('CopilotClient stopped successfully');
     } catch (error) {
-      // Ensure client is stopped on error
+      // Ensure session is destroyed and client is stopped on error to prevent leaks.
+      // The session may have been created/resumed before the error occurred.
+      if (session) {
+        try {
+          await session.destroy();
+        } catch (sessionCleanupError) {
+          logger.debug(`Failed to destroy session during cleanup: ${sessionCleanupError}`);
+        }
+      }
       try {
         await client.stop();
       } catch (cleanupError) {

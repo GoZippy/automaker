@@ -46,6 +46,8 @@ export {
   useCommitWorktree,
   usePushWorktree,
   usePullWorktree,
+  useSyncWorktree,
+  useSetTracking,
   useCreatePullRequest,
   useMergeWorktree,
   useSwitchBranch,
@@ -62,6 +64,7 @@ export {
   useValidateIssue,
   useMarkValidationViewed,
   useGetValidationStatus,
+  useResolveReviewThread,
 } from './use-github-mutations';
 
 // Ideation mutations

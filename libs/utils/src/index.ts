@@ -10,10 +10,13 @@ export {
   isAuthenticationError,
   isRateLimitError,
   isQuotaExhaustedError,
+  isModelNotFoundError,
+  isStreamDisconnectedError,
   extractRetryAfter,
   classifyError,
   getUserFriendlyErrorMessage,
   getErrorMessage,
+  logError,
 } from './error-handler.js';
 
 // Conversation utilities
@@ -114,3 +117,6 @@ export {
   type ThrottleOptions,
   type DebouncedFunction,
 } from './debounce.js';
+
+// Git validation utilities
+export { isValidBranchName, isValidRemoteName, MAX_BRANCH_NAME_LENGTH } from './git-validation.js';

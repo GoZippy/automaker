@@ -1,67 +1,29 @@
 /**
  * POST /switch-branch endpoint - Switch to an existing branch
  *
- * Simple branch switching.
- * If there are uncommitted changes, the switch will fail and
- * the user should commit first.
+ * Handles branch switching with automatic stash/reapply of local changes.
+ * If there are uncommitted changes, they are stashed before switching and
+ * reapplied after. If the stash pop results in merge conflicts, returns
+ * a special response code so the UI can create a conflict resolution task.
+ *
+ * For remote branches (e.g., "origin/feature"), automatically creates a
+ * local tracking branch and checks it out.
+ *
+ * Also fetches the latest remote refs before switching to ensure accurate branch detection.
+ *
+ * Git business logic is delegated to worktree-branch-service.ts.
+ * Events are emitted at key lifecycle points for WebSocket subscribers.
  *
  * Note: Git repository validation (isGitRepo, hasCommits) is handled by
  * the requireValidWorktree middleware in index.ts
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { getErrorMessage, logError } from '../common.js';
+import { getErrorMessage, logError, isValidBranchName } from '../common.js';
+import type { EventEmitter } from '../../../lib/events.js';
+import { performSwitchBranch } from '../../../services/worktree-branch-service.js';
 
-const execAsync = promisify(exec);
-
-function isUntrackedLine(line: string): boolean {
-  return line.startsWith('?? ');
-}
-
-function isExcludedWorktreeLine(line: string): boolean {
-  return line.includes('.worktrees/') || line.endsWith('.worktrees');
-}
-
-function isBlockingChangeLine(line: string): boolean {
-  if (!line.trim()) return false;
-  if (isExcludedWorktreeLine(line)) return false;
-  if (isUntrackedLine(line)) return false;
-  return true;
-}
-
-/**
- * Check if there are uncommitted changes in the working directory
- * Excludes .worktrees/ directory which is created by automaker
- */
-async function hasUncommittedChanges(cwd: string): Promise<boolean> {
-  try {
-    const { stdout } = await execAsync('git status --porcelain', { cwd });
-    const lines = stdout.trim().split('\n').filter(isBlockingChangeLine);
-    return lines.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Get a summary of uncommitted changes for user feedback
- * Excludes .worktrees/ directory
- */
-async function getChangesSummary(cwd: string): Promise<string> {
-  try {
-    const { stdout } = await execAsync('git status --short', { cwd });
-    const lines = stdout.trim().split('\n').filter(isBlockingChangeLine);
-    if (lines.length === 0) return '';
-    if (lines.length <= 5) return lines.join(', ');
-    return `${lines.slice(0, 5).join(', ')} and ${lines.length - 5} more files`;
-  } catch {
-    return 'unknown changes';
-  }
-}
-
-export function createSwitchBranchHandler() {
+export function createSwitchBranchHandler(events?: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { worktreePath, branchName } = req.body as {
@@ -85,62 +47,58 @@ export function createSwitchBranchHandler() {
         return;
       }
 
-      // Get current branch
-      const { stdout: currentBranchOutput } = await execAsync('git rev-parse --abbrev-ref HEAD', {
-        cwd: worktreePath,
-      });
-      const previousBranch = currentBranchOutput.trim();
-
-      if (previousBranch === branchName) {
-        res.json({
-          success: true,
-          result: {
-            previousBranch,
-            currentBranch: branchName,
-            message: `Already on branch '${branchName}'`,
-          },
-        });
-        return;
-      }
-
-      // Check if branch exists
-      try {
-        await execAsync(`git rev-parse --verify ${branchName}`, {
-          cwd: worktreePath,
-        });
-      } catch {
+      // Validate branch name using shared allowlist to prevent Git option injection
+      if (!isValidBranchName(branchName)) {
         res.status(400).json({
           success: false,
-          error: `Branch '${branchName}' does not exist`,
+          error: 'Invalid branch name',
         });
         return;
       }
 
-      // Check for uncommitted changes
-      if (await hasUncommittedChanges(worktreePath)) {
-        const summary = await getChangesSummary(worktreePath);
-        res.status(400).json({
+      // Execute the branch switch via the service
+      const result = await performSwitchBranch(worktreePath, branchName, events);
+
+      // Map service result to HTTP response
+      if (!result.success) {
+        // Determine status code based on error type
+        const statusCode = isBranchNotFoundError(result.error) ? 400 : 500;
+        res.status(statusCode).json({
           success: false,
-          error: `Cannot switch branches: you have uncommitted changes (${summary}). Please commit your changes first.`,
-          code: 'UNCOMMITTED_CHANGES',
+          error: result.error,
+          ...(result.stashPopConflicts !== undefined && {
+            stashPopConflicts: result.stashPopConflicts,
+          }),
+          ...(result.stashPopConflictMessage && {
+            stashPopConflictMessage: result.stashPopConflictMessage,
+          }),
         });
         return;
       }
-
-      // Switch to the target branch
-      await execAsync(`git checkout "${branchName}"`, { cwd: worktreePath });
 
       res.json({
         success: true,
-        result: {
-          previousBranch,
-          currentBranch: branchName,
-          message: `Switched to branch '${branchName}'`,
-        },
+        result: result.result,
       });
     } catch (error) {
+      events?.emit('switch:error', {
+        error: getErrorMessage(error),
+      });
+
       logError(error, 'Switch branch failed');
       res.status(500).json({ success: false, error: getErrorMessage(error) });
     }
   };
+}
+
+/**
+ * Determine whether an error message represents a client error (400)
+ * vs a server error (500).
+ *
+ * Client errors are validation issues like non-existent branches or
+ * unparseable remote branch names.
+ */
+function isBranchNotFoundError(error?: string): boolean {
+  if (!error) return false;
+  return error.includes('does not exist') || error.includes('Failed to parse remote branch name');
 }

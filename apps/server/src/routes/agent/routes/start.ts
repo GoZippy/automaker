@@ -6,7 +6,7 @@ import type { Request, Response } from 'express';
 import { AgentService } from '../../../services/agent-service.js';
 import { createLogger } from '@automaker/utils';
 import { getErrorMessage, logError } from '../common.js';
-const logger = createLogger('Agent');
+const _logger = createLogger('Agent');
 
 export function createStartHandler(agentService: AgentService) {
   return async (req: Request, res: Response): Promise<void> => {

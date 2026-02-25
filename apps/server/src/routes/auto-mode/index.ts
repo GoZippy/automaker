@@ -1,11 +1,12 @@
 /**
  * Auto Mode routes - HTTP API for autonomous feature implementation
  *
- * Uses the AutoModeService for real feature execution with Claude Agent SDK
+ * Uses AutoModeServiceCompat which provides the old interface while
+ * delegating to GlobalAutoModeService and per-project facades.
  */
 
 import { Router } from 'express';
-import type { AutoModeService } from '../../services/auto-mode-service.js';
+import type { AutoModeServiceCompat } from '../../services/auto-mode/index.js';
 import { validatePathParams } from '../../middleware/validate-paths.js';
 import { createStopFeatureHandler } from './routes/stop-feature.js';
 import { createStatusHandler } from './routes/status.js';
@@ -20,8 +21,14 @@ import { createFollowUpFeatureHandler } from './routes/follow-up-feature.js';
 import { createCommitFeatureHandler } from './routes/commit-feature.js';
 import { createApprovePlanHandler } from './routes/approve-plan.js';
 import { createResumeInterruptedHandler } from './routes/resume-interrupted.js';
+import { createReconcileHandler } from './routes/reconcile.js';
 
-export function createAutoModeRoutes(autoModeService: AutoModeService): Router {
+/**
+ * Create auto-mode routes.
+ *
+ * @param autoModeService - AutoModeServiceCompat instance
+ */
+export function createAutoModeRoutes(autoModeService: AutoModeServiceCompat): Router {
   const router = Router();
 
   // Auto loop control routes
@@ -74,6 +81,11 @@ export function createAutoModeRoutes(autoModeService: AutoModeService): Router {
     '/resume-interrupted',
     validatePathParams('projectPath'),
     createResumeInterruptedHandler(autoModeService)
+  );
+  router.post(
+    '/reconcile',
+    validatePathParams('projectPath'),
+    createReconcileHandler(autoModeService)
   );
 
   return router;

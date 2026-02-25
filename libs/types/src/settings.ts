@@ -209,11 +209,92 @@ export type TerminalPromptTheme =
 /** PlanningMode - Planning levels for feature generation workflows */
 export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full';
 
+/**
+ * FeatureTemplate - Pre-configured task prompts for quick feature creation
+ *
+ * Templates allow users to quickly create features with pre-written prompts.
+ * Built-in templates are protected from deletion but can be disabled.
+ */
+export interface FeatureTemplate {
+  /** Unique identifier */
+  id: string;
+  /** Display name (shown in dropdown) */
+  name: string;
+  /** Pre-written prompt/task description */
+  prompt: string;
+  /** Optional preferred model for this template */
+  model?: PhaseModelEntry;
+  /** Whether this is a built-in template (protected from deletion) */
+  isBuiltIn?: boolean;
+  /** Whether this template is enabled (hidden if false) */
+  enabled?: boolean;
+  /** Sort order (lower = higher in list) */
+  order?: number;
+}
+
+/** Default built-in feature templates */
+export const DEFAULT_FEATURE_TEMPLATES: FeatureTemplate[] = [
+  {
+    id: 'run-tests-lint-format',
+    name: 'Run tests, lint, and format',
+    prompt:
+      'Run all tests, lint checks, and format the codebase. Fix any issues found. Ensure the code passes all quality checks before marking complete.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 0,
+  },
+  {
+    id: 'write-tests-for-changes',
+    name: 'Write tests for current changes',
+    prompt:
+      'Analyze the current uncommitted changes and write comprehensive tests for the modified code. Focus on edge cases and ensure good test coverage.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 1,
+  },
+  {
+    id: 'review-recent-changes',
+    name: 'Review and summarize recent changes',
+    prompt:
+      'Review the recent commits and changes in this codebase. Provide a summary of what was changed, identify any potential issues, and suggest improvements.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 2,
+  },
+  {
+    id: 'fix-lint-errors',
+    name: 'Fix lint errors',
+    prompt:
+      'Run the linter and fix all reported errors. Ensure the codebase passes lint checks without warnings.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 3,
+  },
+  {
+    id: 'update-dependencies',
+    name: 'Update and test dependencies',
+    prompt:
+      'Check for outdated dependencies, update them to their latest stable versions, and run tests to ensure nothing breaks. Document any breaking changes or migration steps required.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 4,
+  },
+  {
+    id: 'code-review-and-fix',
+    name: 'Code review and fix issues',
+    prompt:
+      'Perform a thorough code review of the current codebase. Identify and fix any issues found, including: code quality problems, potential bugs, security vulnerabilities, performance bottlenecks, and violations of best practices. After fixing all issues, run tests and lint to verify everything passes.',
+    isBuiltIn: true,
+    enabled: true,
+    order: 5,
+  },
+];
+
 /** ServerLogLevel - Log verbosity level for the API server */
 export type ServerLogLevel = 'error' | 'warn' | 'info' | 'debug';
 
 /** ThinkingLevel - Extended thinking levels for Claude models (reasoning intensity) */
-export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
+export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high' | 'ultrathink' | 'adaptive';
 
 /**
  * SidebarStyle - Sidebar layout style options
@@ -237,6 +318,7 @@ export const THINKING_TOKEN_BUDGET: Record<ThinkingLevel, number | undefined> = 
   medium: 10000, // Light reasoning
   high: 16000, // Complex tasks (recommended starting point)
   ultrathink: 32000, // Maximum safe (above this risks timeouts)
+  adaptive: undefined, // Adaptive thinking (Opus 4.6) - SDK handles token allocation
 };
 
 /**
@@ -245,6 +327,61 @@ export const THINKING_TOKEN_BUDGET: Record<ThinkingLevel, number | undefined> = 
 export function getThinkingTokenBudget(level: ThinkingLevel | undefined): number | undefined {
   if (!level || level === 'none') return undefined;
   return THINKING_TOKEN_BUDGET[level];
+}
+
+/**
+ * Check if a model uses adaptive thinking (Opus 4.6+)
+ * Adaptive thinking models let the SDK decide token allocation automatically.
+ */
+export function isAdaptiveThinkingModel(model: string): boolean {
+  return model.includes('opus-4-6') || model === 'claude-opus';
+}
+
+/**
+ * Get the available thinking levels for a given model.
+ * - Opus 4.6: Only 'none' and 'adaptive' (SDK handles token allocation)
+ * - Others: Full range of manual thinking levels
+ */
+export function getThinkingLevelsForModel(model: string): ThinkingLevel[] {
+  if (isAdaptiveThinkingModel(model)) {
+    return ['none', 'adaptive'];
+  }
+  return ['none', 'low', 'medium', 'high', 'ultrathink'];
+}
+
+/**
+ * Normalize a selected thinking level to a value supported by the target model.
+ * Prefers preserving the selected level, falls back to 'none' when available.
+ */
+export function normalizeThinkingLevelForModel(
+  model: string,
+  thinkingLevel: ThinkingLevel | undefined
+): ThinkingLevel {
+  const availableLevels = getThinkingLevelsForModel(model);
+  const currentLevel = thinkingLevel || 'none';
+
+  if (availableLevels.includes(currentLevel)) {
+    return currentLevel;
+  }
+
+  if (availableLevels.includes('none')) {
+    return 'none';
+  }
+
+  return availableLevels[0];
+}
+
+/**
+ * Get the default thinking level for a given model.
+ * Used when selecting a model via the primary button in the two-stage selector.
+ * Returns 'adaptive' for Opus models (which support adaptive thinking),
+ * and 'none' for all other models.
+ */
+export function getDefaultThinkingLevel(model: string): ThinkingLevel {
+  if (isAdaptiveThinkingModel(model)) {
+    return 'adaptive';
+  }
+  return 'none';
 }
 
 /** ModelProvider - AI model provider for credentials and API key management */
@@ -466,7 +603,7 @@ export const CLAUDE_PROVIDER_TEMPLATES: ClaudeCompatibleProviderTemplate[] = [
     defaultModels: [
       { id: 'GLM-4.5-Air', displayName: 'GLM 4.5 Air', mapsToClaudeModel: 'haiku' },
       { id: 'GLM-4.7', displayName: 'GLM 4.7', mapsToClaudeModel: 'sonnet' },
-      { id: 'GLM-4.7', displayName: 'GLM 4.7', mapsToClaudeModel: 'opus' },
+      { id: 'GLM-5', displayName: 'GLM 5', mapsToClaudeModel: 'opus' },
     ],
   },
   {
@@ -549,7 +686,7 @@ export const CLAUDE_API_PROFILE_TEMPLATES: ClaudeApiProfileTemplate[] = [
     modelMappings: {
       haiku: 'GLM-4.5-Air',
       sonnet: 'GLM-4.7',
-      opus: 'GLM-4.7',
+      opus: 'GLM-5',
     },
     disableNonessentialTraffic: true,
     description: '3× usage at fraction of cost via GLM Coding Plan',
@@ -757,6 +894,8 @@ export interface PhaseModelConfig {
   // Quick tasks - commit messages
   /** Model for generating git commit messages from diffs */
   commitMessageModel: PhaseModelEntry;
+  /** Model for generating pull request descriptions from branch diffs */
+  prDescriptionModel: PhaseModelEntry;
 }
 
 /** Keys of PhaseModelConfig for type-safe access */
@@ -974,6 +1113,16 @@ export interface GlobalSettings {
   /** Terminal font family (undefined = use default Menlo/Monaco) */
   terminalFontFamily?: string;
 
+  // File Editor Configuration
+  /** File editor font size in pixels (default: 13) */
+  editorFontSize?: number;
+  /** File editor font family CSS value (default: 'default' = use theme mono font) */
+  editorFontFamily?: string;
+  /** Enable auto-save for file editor (default: false) */
+  editorAutoSave?: boolean;
+  /** Auto-save delay in milliseconds (default: 1000) */
+  editorAutoSaveDelay?: number;
+
   // Terminal Configuration
   /** How to open terminals from "Open in Terminal" worktree action */
   openTerminalMode?: 'newTab' | 'split';
@@ -1030,6 +1179,8 @@ export interface GlobalSettings {
   enableDependencyBlocking: boolean;
   /** Skip verification requirement in auto-mode (treat 'completed' same as 'verified') */
   skipVerificationInAutoMode: boolean;
+  /** User's preferred action after a clean merge (null = ask every time) */
+  mergePostAction: 'commit' | 'manual' | null;
   /** Default: use git worktrees for feature branches */
   useWorktrees: boolean;
   /** Default: planning approach (skip/lite/spec/full) */
@@ -1064,6 +1215,24 @@ export interface GlobalSettings {
   // AI Model Selection (per-phase configuration)
   /** Phase-specific AI model configuration */
   phaseModels: PhaseModelConfig;
+
+  /** Default thinking level applied when selecting a model via the primary button
+   * in the two-stage model selector. Users can still adjust per-model via the expand arrow.
+   * Defaults to 'none' (no extended thinking). */
+  defaultThinkingLevel?: ThinkingLevel;
+
+  /** Default reasoning effort applied when selecting a Codex model via the primary button
+   * in the two-stage model selector. Defaults to 'none'. */
+  defaultReasoningEffort?: ReasoningEffort;
+
+  /** Default maximum number of agent turns (tool call round-trips) for feature execution.
+   * Controls how many iterations the AI agent can perform before stopping.
+   * Higher values allow more complex tasks but use more API credits.
+   * Defaults to 10000. Range: 1-10000.
+   *
+   * Note: Currently supported by Claude (via SDK) and Codex (via CLI config).
+   * Gemini and OpenCode CLI providers do not support max turns configuration. */
+  defaultMaxTurns?: number;
 
   // Legacy AI Model Selection (deprecated - use phaseModels instead)
   /** @deprecated Use phaseModels.enhancementModel instead */
@@ -1128,6 +1297,12 @@ export interface GlobalSettings {
   // Session Tracking
   /** Maps project path -> last selected session ID in that project */
   lastSelectedSessionByProject: Record<string, string>;
+  /** Maps session ID -> persisted model selection for that session */
+  agentModelBySession?: Record<string, PhaseModelEntry>;
+
+  // Worktree Selection Tracking
+  /** Maps project path -> last selected worktree (path + branch) for restoring on PWA reload */
+  currentWorktreeByProject?: Record<string, { path: string | null; branch: string }>;
 
   // Window State (Electron only)
   /** Persisted window bounds for restoring position/size across sessions */
@@ -1136,6 +1311,8 @@ export interface GlobalSettings {
   // Claude Agent SDK Settings
   /** Auto-load CLAUDE.md files using SDK's settingSources option */
   autoLoadClaudeMd?: boolean;
+  /** Use Claude Code's built-in system prompt (claude_code preset) as the base prompt */
+  useClaudeCodeSystemPrompt?: boolean;
   /** Skip the sandbox environment warning dialog on startup */
   skipSandboxWarning?: boolean;
 
@@ -1215,6 +1392,13 @@ export interface GlobalSettings {
    */
   eventHooks?: EventHook[];
 
+  // Feature Templates Configuration
+  /**
+   * Feature templates for quick task creation from the Add Feature dropdown
+   * Built-in templates are protected from deletion but can be disabled
+   */
+  featureTemplates?: FeatureTemplate[];
+
   // Claude-Compatible Providers Configuration
   /**
    * Claude-compatible provider configurations.
@@ -1266,6 +1450,8 @@ export interface Credentials {
     google: string;
     /** OpenAI API key (for compatibility or alternative providers) */
     openai: string;
+    /** z.ai API key (for GLM models and usage tracking) */
+    zai: string;
   };
 }
 
@@ -1360,6 +1546,29 @@ export interface ProjectSettings {
   defaultDeleteBranchWithWorktree?: boolean;
   /** Auto-dismiss init script indicator after completion (default: true) */
   autoDismissInitScriptIndicator?: boolean;
+  /**
+   * List of file/directory paths (relative to project root) to copy into new worktrees.
+   * Useful for files not tracked by git, like .env, local config files, etc.
+   * Each entry is a relative path from the project root (e.g., ".env", ".env.local", "config/local.json").
+   */
+  worktreeCopyFiles?: string[];
+
+  // Worktree Display Settings
+  /**
+   * Number of non-main worktrees to pin as tabs in the UI.
+   * The main worktree is always shown separately. Default: 0.
+   */
+  pinnedWorktreesCount?: number;
+  /**
+   * Minimum number of worktrees before the list collapses into a compact dropdown selector.
+   * Must be >= pinnedWorktreesCount to avoid conflicting configurations. Default: 3.
+   */
+  worktreeDropdownThreshold?: number;
+  /**
+   * When true, always show worktrees in a combined dropdown regardless of count.
+   * Overrides the dropdown threshold. Default: true.
+   */
+  alwaysUseWorktreeDropdown?: boolean;
 
   // Session Tracking
   /** Last chat session selected in this project */
@@ -1368,6 +1577,8 @@ export interface ProjectSettings {
   // Claude Agent SDK Settings
   /** Auto-load CLAUDE.md files using SDK's settingSources option (project override) */
   autoLoadClaudeMd?: boolean;
+  /** Use Claude Code's built-in system prompt (claude_code preset) as the base prompt (project override) */
+  useClaudeCodeSystemPrompt?: boolean;
 
   // Subagents Configuration
   /**
@@ -1414,6 +1625,21 @@ export interface ProjectSettings {
    * If not specified, falls back to the global defaultFeatureModel setting.
    */
   defaultFeatureModel?: PhaseModelEntry;
+
+  // Terminal Quick Scripts (per-project)
+  /**
+   * Quick-access terminal scripts shown in the terminal header dropdown.
+   * Each script is a command that can be run with one click.
+   * Examples: "npm run dev", "npm run test", "npm run lint", "npm run format"
+   */
+  terminalScripts?: Array<{
+    /** Unique identifier for this script */
+    id: string;
+    /** Display name shown in the dropdown menu */
+    name: string;
+    /** The command to execute in the terminal */
+    command: string;
+  }>;
 
   // Terminal Configuration Override (per-project)
   /** Project-specific terminal config overrides */
@@ -1468,7 +1694,7 @@ export const DEFAULT_PHASE_MODELS: PhaseModelConfig = {
   validationModel: { model: 'claude-sonnet' },
 
   // Generation - use powerful models for quality
-  specGenerationModel: { model: 'claude-opus' },
+  specGenerationModel: { model: 'claude-opus', thinkingLevel: 'adaptive' },
   featureGenerationModel: { model: 'claude-sonnet' },
   backlogPlanningModel: { model: 'claude-sonnet' },
   projectAnalysisModel: { model: 'claude-sonnet' },
@@ -1479,14 +1705,16 @@ export const DEFAULT_PHASE_MODELS: PhaseModelConfig = {
 
   // Commit messages - use fast model for speed
   commitMessageModel: { model: 'claude-haiku' },
+  // PR descriptions - use balanced model for better quality descriptions
+  prDescriptionModel: { model: 'claude-sonnet' },
 };
 
 /** Current version of the global settings schema */
 export const SETTINGS_VERSION = 6;
 /** Current version of the credentials schema */
 export const CREDENTIALS_VERSION = 1;
-/** Current version of the project settings schema */
-export const PROJECT_SETTINGS_VERSION = 1;
+/** Current version of the project settings schema (bumped for terminalScripts field) */
+export const PROJECT_SETTINGS_VERSION = 2;
 
 /** Default maximum concurrent agents for auto mode */
 export const DEFAULT_MAX_CONCURRENCY = 1;
@@ -1530,10 +1758,11 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   defaultSkipTests: true,
   enableDependencyBlocking: true,
   skipVerificationInAutoMode: false,
+  mergePostAction: null,
   useWorktrees: true,
   defaultPlanningMode: 'skip',
   defaultRequirePlanApproval: false,
-  defaultFeatureModel: { model: 'claude-opus' }, // Use canonical ID
+  defaultFeatureModel: { model: 'claude-opus', thinkingLevel: 'adaptive' }, // Use canonical ID with adaptive thinking
   muteDoneSound: false,
   disableSplashScreen: false,
   serverLogLevel: 'info',
@@ -1541,6 +1770,9 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   showQueryDevtools: true,
   enableAiCommitMessages: true,
   phaseModels: DEFAULT_PHASE_MODELS,
+  defaultThinkingLevel: 'adaptive',
+  defaultReasoningEffort: 'none',
+  defaultMaxTurns: 10000,
   enhancementModel: 'sonnet', // Legacy alias still supported
   validationModel: 'opus', // Legacy alias still supported
   enabledCursorModels: getAllCursorModelIds(), // Returns prefixed IDs
@@ -1563,7 +1795,9 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   recentFolders: [],
   worktreePanelCollapsed: false,
   lastSelectedSessionByProject: {},
+  currentWorktreeByProject: {},
   autoLoadClaudeMd: true,
+  useClaudeCodeSystemPrompt: true,
   skipSandboxWarning: false,
   codexAutoLoadAgents: DEFAULT_CODEX_AUTO_LOAD_AGENTS,
   codexSandboxMode: DEFAULT_CODEX_SANDBOX_MODE,
@@ -1579,6 +1813,10 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   skillsSources: ['user', 'project'],
   enableSubagents: true,
   subagentsSources: ['user', 'project'],
+  // Event hooks
+  eventHooks: [],
+  // Feature templates
+  featureTemplates: DEFAULT_FEATURE_TEMPLATES,
   // New provider system
   claudeCompatibleProviders: [],
   // Deprecated - kept for migration
@@ -1594,6 +1832,7 @@ export const DEFAULT_CREDENTIALS: Credentials = {
     anthropic: '',
     google: '',
     openai: '',
+    zai: '',
   },
 };
 

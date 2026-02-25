@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, startTransition } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '@/store/app-store';
 import { useWorktrees as useWorktreesQuery } from '@/hooks/queries';
@@ -28,10 +28,21 @@ export function useWorktrees({
   const { data, isLoading, refetch } = useWorktreesQuery(projectPath);
   const worktrees = (data?.worktrees ?? []) as WorktreeInfo[];
 
-  // Sync worktrees to Zustand store when they change
+  // Sync worktrees to Zustand store when they change.
+  // Use a ref to track the previous worktrees and skip the store update when the
+  // data hasn't structurally changed. Without this check, every React Query refetch
+  // (triggered by WebSocket event invalidations) would update the store even when
+  // the worktree list is identical, causing a cascade of re-renders in BoardView →
+  // selectedWorktree → useAutoMode → refreshStatus that can trigger React error #185.
+  const prevWorktreesJsonRef = useRef<string>('');
   useEffect(() => {
     if (worktrees.length > 0) {
-      setWorktreesInStore(projectPath, worktrees);
+      // Compare serialized worktrees to skip no-op store updates
+      const json = JSON.stringify(worktrees);
+      if (json !== prevWorktreesJsonRef.current) {
+        prevWorktreesJsonRef.current = json;
+        setWorktreesInStore(projectPath, worktrees);
+      }
     }
   }, [worktrees, projectPath, setWorktreesInStore]);
 
@@ -82,16 +93,54 @@ export function useWorktrees({
         // Fallback to "main" only if worktrees haven't loaded yet
         const mainWorktree = worktrees.find((w) => w.isMain);
         const mainBranch = mainWorktree?.branch || 'main';
-        setCurrentWorktree(projectPath, null, mainBranch);
+        // Note: Zustand uses useSyncExternalStore so setCurrentWorktree updates
+        // are flushed synchronously. The real guard against React error #185 is
+        // dependency isolation — currentWorktree is intentionally excluded from
+        // the validation effect deps below (via currentWorktreeRef) so we don't
+        // create a feedback loop. startTransition may still help batch unrelated
+        // React state updates but does NOT defer or prevent Zustand-driven cascades.
+        startTransition(() => {
+          setCurrentWorktree(projectPath, null, mainBranch);
+        });
       }
     }
   }, [worktrees, projectPath, setCurrentWorktree]);
 
+  const currentWorktreePath = currentWorktree?.path ?? null;
+
   const handleSelectWorktree = useCallback(
     (worktree: WorktreeInfo) => {
-      setCurrentWorktree(projectPath, worktree.isMain ? null : worktree.path, worktree.branch);
+      // Skip invalidation when re-selecting the already-active worktree
+      const isSameWorktree = worktree.isMain
+        ? currentWorktreePath === null
+        : pathsEqual(worktree.path, currentWorktreePath ?? '');
+
+      if (isSameWorktree) return;
+
+      // Note: Zustand uses useSyncExternalStore so setCurrentWorktree updates are
+      // flushed synchronously — startTransition does NOT prevent Zustand-driven
+      // cascades. The actual protection against React error #185 is dependency
+      // isolation via currentWorktreeRef (currentWorktree is excluded from the
+      // validation effect's dependency array). startTransition may still help
+      // batch unrelated concurrent React state updates but should not be relied
+      // upon for Zustand update ordering.
+      startTransition(() => {
+        setCurrentWorktree(projectPath, worktree.isMain ? null : worktree.path, worktree.branch);
+      });
+
+      // Defer feature query invalidation so the store update and client-side
+      // re-filtering happen in the current render cycle first. The features
+      // list is the same regardless of worktree (filtering is client-side),
+      // so the board updates instantly. The deferred invalidation ensures
+      // feature card details (planSpec, todo lists) are refreshed in the
+      // background without blocking the worktree switch.
+      setTimeout(() => {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.features.all(projectPath),
+        });
+      }, 100);
     },
-    [projectPath, setCurrentWorktree]
+    [projectPath, setCurrentWorktree, queryClient, currentWorktreePath]
   );
 
   // fetchWorktrees for backward compatibility - now just triggers a refetch
@@ -110,7 +159,6 @@ export function useWorktrees({
     [projectPath, queryClient, refetch]
   );
 
-  const currentWorktreePath = currentWorktree?.path ?? null;
   const selectedWorktree = currentWorktreePath
     ? worktrees.find((w) => pathsEqual(w.path, currentWorktreePath))
     : worktrees.find((w) => w.isMain);

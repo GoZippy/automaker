@@ -1,6 +1,11 @@
 // Type definitions for Electron IPC API
 import type { SessionListItem, Message } from '@/types/electron';
-import type { ClaudeUsageResponse, CodexUsageResponse } from '@/store/app-store';
+import type {
+  ClaudeUsageResponse,
+  CodexUsageResponse,
+  ZaiUsageResponse,
+  GeminiUsageResponse,
+} from '@/store/app-store';
 import type {
   IssueValidationVerdict,
   IssueValidationConfidence,
@@ -197,6 +202,9 @@ export interface CreatePROptions {
   prBody?: string;
   baseBranch?: string;
   draft?: boolean;
+  remote?: string;
+  /** Remote to create the PR against (e.g. upstream). If not specified, inferred from repo setup. */
+  targetRemote?: string;
 }
 
 // Re-export types from electron.d.ts for external use
@@ -305,6 +313,36 @@ export interface GitHubRemoteStatus {
   repo: string | null;
 }
 
+/** A review comment on a pull request (inline code comment or general PR comment) */
+export interface PRReviewComment {
+  id: string;
+  author: string;
+  avatarUrl?: string;
+  body: string;
+  /** File path for inline review comments */
+  path?: string;
+  /** Line number for inline review comments */
+  line?: number;
+  createdAt: string;
+  updatedAt?: string;
+  /** Whether this is an inline code review comment (vs general PR comment) */
+  isReviewComment: boolean;
+  /** Whether this comment is outdated (code has changed since) */
+  isOutdated?: boolean;
+  /** Whether the review thread containing this comment has been resolved */
+  isResolved?: boolean;
+  /** The GraphQL node ID of the review thread (used for resolve/unresolve mutations) */
+  threadId?: string;
+  /** The diff hunk context for the comment */
+  diffHunk?: string;
+  /** The side of the diff (LEFT or RIGHT) */
+  side?: string;
+  /** The commit ID the comment was made on */
+  commitId?: string;
+  /** Whether the comment author is a bot/app account */
+  isBot?: boolean;
+}
+
 export interface GitHubAPI {
   checkRemote: (projectPath: string) => Promise<{
     success: boolean;
@@ -379,6 +417,26 @@ export interface GitHubAPI {
     totalCount?: number;
     hasNextPage?: boolean;
     endCursor?: string;
+    error?: string;
+  }>;
+  /** Fetch review comments for a specific pull request */
+  getPRReviewComments: (
+    projectPath: string,
+    prNumber: number
+  ) => Promise<{
+    success: boolean;
+    comments?: PRReviewComment[];
+    totalCount?: number;
+    error?: string;
+  }>;
+  /** Resolve or unresolve a PR review thread */
+  resolveReviewThread: (
+    projectPath: string,
+    threadId: string,
+    resolve: boolean
+  ) => Promise<{
+    success: boolean;
+    isResolved?: boolean;
     error?: string;
   }>;
 }
@@ -639,6 +697,17 @@ export interface ElectronAPI {
   stat: (filePath: string) => Promise<StatResult>;
   deleteFile: (filePath: string) => Promise<WriteResult>;
   trashItem?: (filePath: string) => Promise<WriteResult>;
+  copyItem?: (
+    sourcePath: string,
+    destinationPath: string,
+    overwrite?: boolean
+  ) => Promise<WriteResult & { exists?: boolean }>;
+  moveItem?: (
+    sourcePath: string,
+    destinationPath: string,
+    overwrite?: boolean
+  ) => Promise<WriteResult & { exists?: boolean }>;
+  downloadItem?: (filePath: string) => Promise<void>;
   getPath: (name: string) => Promise<string>;
   openInEditor?: (
     filePath: string,
@@ -710,7 +779,8 @@ export interface ElectronAPI {
     generate: (
       projectPath: string,
       prompt: string,
-      model?: string
+      model?: string,
+      branchName?: string
     ) => Promise<{ success: boolean; error?: string }>;
     stop: () => Promise<{ success: boolean; error?: string }>;
     status: (projectPath: string) => Promise<{
@@ -864,6 +934,18 @@ export interface ElectronAPI {
       cachedAt?: number;
       error?: string;
     }>;
+  };
+  zai?: {
+    getUsage: () => Promise<ZaiUsageResponse>;
+    verify: (apiKey: string) => Promise<{
+      success: boolean;
+      authenticated: boolean;
+      message?: string;
+      error?: string;
+    }>;
+  };
+  gemini?: {
+    getUsage: () => Promise<GeminiUsageResponse>;
   };
   settings?: {
     getStatus: () => Promise<{
@@ -1062,7 +1144,6 @@ if (typeof window !== 'undefined') {
 }
 
 // Mock API for development/fallback when no backend is available
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _getMockElectronAPI = (): ElectronAPI => {
   return {
     ping: async () => 'pong (mock)',
@@ -1364,6 +1445,65 @@ const _getMockElectronAPI = (): ElectronAPI => {
         };
       },
     },
+
+    // Mock z.ai API
+    zai: {
+      getUsage: async () => {
+        console.log('[Mock] Getting z.ai usage');
+        return {
+          quotaLimits: {
+            tokens: {
+              limitType: 'TOKENS_LIMIT',
+              limit: 1000000,
+              used: 250000,
+              remaining: 750000,
+              usedPercent: 25,
+              nextResetTime: Date.now() + 86400000,
+            },
+            time: {
+              limitType: 'TIME_LIMIT',
+              limit: 3600,
+              used: 900,
+              remaining: 2700,
+              usedPercent: 25,
+              nextResetTime: Date.now() + 3600000,
+            },
+            planType: 'standard',
+          },
+          lastUpdated: new Date().toISOString(),
+        };
+      },
+      verify: async (apiKey: string) => {
+        console.log('[Mock] Verifying z.ai API key');
+        // Mock successful verification if key is provided
+        if (apiKey && apiKey.trim().length > 0) {
+          return {
+            success: true,
+            authenticated: true,
+            message: 'Connection successful! z.ai API responded.',
+          };
+        }
+        return {
+          success: false,
+          authenticated: false,
+          error: 'Please provide an API key to test.',
+        };
+      },
+    },
+
+    // Mock Gemini API
+    gemini: {
+      getUsage: async () => {
+        console.log('[Mock] Getting Gemini usage');
+        return {
+          authenticated: true,
+          authMethod: 'cli_login',
+          usedPercent: 0,
+          remainingPercent: 100,
+          lastUpdated: new Date().toISOString(),
+        };
+      },
+    },
   };
 };
 
@@ -1442,6 +1582,7 @@ interface SetupAPI {
   verifyClaudeAuth: (authMethod?: 'cli' | 'api_key') => Promise<{
     success: boolean;
     authenticated: boolean;
+    authType?: 'oauth' | 'api_key' | 'cli';
     error?: string;
   }>;
   getGhStatus?: () => Promise<{
@@ -2098,8 +2239,8 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    commit: async (worktreePath: string, message: string) => {
-      console.log('[Mock] Committing changes:', { worktreePath, message });
+    commit: async (worktreePath: string, message: string, files?: string[]) => {
+      console.log('[Mock] Committing changes:', { worktreePath, message, files });
       return {
         success: true,
         result: {
@@ -2119,7 +2260,21 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    push: async (worktreePath: string, force?: boolean, remote?: string) => {
+    generatePRDescription: async (worktreePath: string, baseBranch?: string) => {
+      console.log('[Mock] Generating PR description for:', { worktreePath, baseBranch });
+      return {
+        success: true,
+        title: 'Add new feature implementation',
+        body: '## Summary\n- Added new feature\n\n## Changes\n- Implementation details here',
+      };
+    },
+
+    push: async (
+      worktreePath: string,
+      force?: boolean,
+      remote?: string,
+      _autoResolve?: boolean
+    ) => {
       const targetRemote = remote || 'origin';
       console.log('[Mock] Pushing worktree:', { worktreePath, force, remote: targetRemote });
       return {
@@ -2128,6 +2283,38 @@ function createMockWorktreeAPI(): WorktreeAPI {
           branch: 'feature-branch',
           pushed: true,
           message: `Successfully pushed to ${targetRemote}/feature-branch`,
+        },
+      };
+    },
+
+    sync: async (worktreePath: string, remote?: string) => {
+      const targetRemote = remote || 'origin';
+      console.log('[Mock] Syncing worktree:', { worktreePath, remote: targetRemote });
+      return {
+        success: true,
+        result: {
+          branch: 'feature-branch',
+          pulled: true,
+          pushed: true,
+          message: `Synced with ${targetRemote}`,
+        },
+      };
+    },
+
+    setTracking: async (worktreePath: string, remote: string, branch?: string) => {
+      const targetBranch = branch || 'feature-branch';
+      console.log('[Mock] Setting tracking branch:', {
+        worktreePath,
+        remote,
+        branch: targetBranch,
+      });
+      return {
+        success: true,
+        result: {
+          branch: targetBranch,
+          remote,
+          upstream: `${remote}/${targetBranch}`,
+          message: `Set tracking branch to ${remote}/${targetBranch}`,
         },
       };
     },
@@ -2143,6 +2330,23 @@ function createMockWorktreeAPI(): WorktreeAPI {
           pushed: true,
           prUrl: 'https://github.com/example/repo/pull/1',
           prCreated: true,
+        },
+      };
+    },
+
+    updatePRNumber: async (worktreePath: string, prNumber: number, projectPath?: string) => {
+      console.log('[Mock] Updating PR number:', { worktreePath, prNumber, projectPath });
+      return {
+        success: true,
+        result: {
+          branch: 'feature-branch',
+          prInfo: {
+            number: prNumber,
+            url: `https://github.com/example/repo/pull/${prNumber}`,
+            title: `PR #${prNumber}`,
+            state: 'OPEN',
+            createdAt: new Date().toISOString(),
+          },
         },
       };
     },
@@ -2173,22 +2377,50 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    pull: async (worktreePath: string) => {
-      console.log('[Mock] Pulling latest changes for:', worktreePath);
+    stageFiles: async (worktreePath: string, files: string[], operation: 'stage' | 'unstage') => {
+      console.log('[Mock] Stage files:', { worktreePath, files, operation });
+      return {
+        success: true,
+        result: {
+          operation,
+          filesCount: files.length,
+        },
+      };
+    },
+
+    pull: async (worktreePath: string, remote?: string, stashIfNeeded?: boolean) => {
+      const targetRemote = remote || 'origin';
+      console.log('[Mock] Pulling latest changes for:', {
+        worktreePath,
+        remote: targetRemote,
+        stashIfNeeded,
+      });
       return {
         success: true,
         result: {
           branch: 'main',
           pulled: true,
-          message: 'Pulled latest changes',
+          message: `Pulled latest changes from ${targetRemote}`,
+          hasLocalChanges: false,
+          hasConflicts: false,
+          stashed: false,
+          stashRestored: false,
         },
       };
     },
 
-    checkoutBranch: async (worktreePath: string, branchName: string) => {
+    checkoutBranch: async (
+      worktreePath: string,
+      branchName: string,
+      baseBranch?: string,
+      stashChanges?: boolean,
+      _includeUntracked?: boolean
+    ) => {
       console.log('[Mock] Creating and checking out branch:', {
         worktreePath,
         branchName,
+        baseBranch,
+        stashChanges,
       });
       return {
         success: true,
@@ -2196,6 +2428,22 @@ function createMockWorktreeAPI(): WorktreeAPI {
           previousBranch: 'main',
           newBranch: branchName,
           message: `Created and checked out branch '${branchName}'`,
+          hasConflicts: false,
+          stashedChanges: stashChanges ?? false,
+        },
+      };
+    },
+
+    checkChanges: async (worktreePath: string) => {
+      console.log('[Mock] Checking for uncommitted changes:', worktreePath);
+      return {
+        success: true,
+        result: {
+          hasChanges: false,
+          staged: [],
+          unstaged: [],
+          untracked: [],
+          totalFiles: 0,
         },
       };
     },
@@ -2227,6 +2475,8 @@ function createMockWorktreeAPI(): WorktreeAPI {
           previousBranch: 'main',
           currentBranch: branchName,
           message: `Switched to branch '${branchName}'`,
+          hasConflicts: false,
+          stashedChanges: false,
         },
       };
     },
@@ -2496,8 +2746,8 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
-    discardChanges: async (worktreePath: string) => {
-      console.log('[Mock] Discarding changes:', { worktreePath });
+    discardChanges: async (worktreePath: string, files?: string[]) => {
+      console.log('[Mock] Discarding changes:', { worktreePath, files });
       return {
         success: true,
         result: {
@@ -2555,6 +2805,135 @@ function createMockWorktreeAPI(): WorktreeAPI {
         console.log('[Mock] Unsubscribing from test runner events');
       };
     },
+
+    getCommitLog: async (worktreePath: string, limit?: number) => {
+      console.log('[Mock] Getting commit log:', { worktreePath, limit });
+      return {
+        success: true,
+        result: {
+          branch: 'main',
+          commits: [
+            {
+              hash: 'abc1234567890',
+              shortHash: 'abc1234',
+              author: 'Mock User',
+              authorEmail: 'mock@example.com',
+              date: new Date().toISOString(),
+              subject: 'Mock commit message',
+              body: '',
+              files: ['src/index.ts', 'package.json'],
+            },
+          ],
+          total: 1,
+        },
+      };
+    },
+    stashPush: async (worktreePath: string, message?: string, files?: string[]) => {
+      console.log('[Mock] Stash push:', { worktreePath, message, files });
+      return {
+        success: true,
+        result: {
+          stashed: true,
+          branch: 'main',
+          message: message || 'WIP on main',
+        },
+      };
+    },
+    stashList: async (worktreePath: string) => {
+      console.log('[Mock] Stash list:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          stashes: [],
+          total: 0,
+        },
+      };
+    },
+    stashApply: async (worktreePath: string, stashIndex: number, pop?: boolean) => {
+      console.log('[Mock] Stash apply:', { worktreePath, stashIndex, pop });
+      return {
+        success: true,
+        result: {
+          applied: true,
+          hasConflicts: false,
+          conflictFiles: [] as string[],
+          operation: pop ? ('pop' as const) : ('apply' as const),
+          stashIndex,
+          message: `Stash ${pop ? 'popped' : 'applied'} successfully`,
+        },
+      };
+    },
+    stashDrop: async (worktreePath: string, stashIndex: number) => {
+      console.log('[Mock] Stash drop:', { worktreePath, stashIndex });
+      return {
+        success: true,
+        result: {
+          dropped: true,
+          stashIndex,
+          message: `Stash stash@{${stashIndex}} dropped successfully`,
+        },
+      };
+    },
+    cherryPick: async (
+      worktreePath: string,
+      commitHashes: string[],
+      options?: { noCommit?: boolean }
+    ) => {
+      console.log('[Mock] Cherry-pick:', { worktreePath, commitHashes, options });
+      return {
+        success: true,
+        result: {
+          cherryPicked: true,
+          commitHashes,
+          branch: 'main',
+          message: `Cherry-picked ${commitHashes.length} commit(s) successfully`,
+        },
+      };
+    },
+    getBranchCommitLog: async (worktreePath: string, branchName?: string, limit?: number) => {
+      console.log('[Mock] Get branch commit log:', { worktreePath, branchName, limit });
+      return {
+        success: true,
+        result: {
+          branch: branchName || 'main',
+          commits: [],
+          total: 0,
+        },
+      };
+    },
+    rebase: async (worktreePath: string, ontoBranch: string) => {
+      console.log('[Mock] Rebase:', { worktreePath, ontoBranch });
+      return {
+        success: true,
+        result: {
+          branch: 'current-branch',
+          ontoBranch,
+          message: `Successfully rebased onto ${ontoBranch}`,
+        },
+      };
+    },
+
+    abortOperation: async (worktreePath: string) => {
+      console.log('[Mock] Abort operation:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          operation: 'merge',
+          message: 'Merge aborted successfully',
+        },
+      };
+    },
+
+    continueOperation: async (worktreePath: string) => {
+      console.log('[Mock] Continue operation:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          operation: 'merge',
+          message: 'Merge continued successfully',
+        },
+      };
+    },
   };
 }
 
@@ -2580,6 +2959,58 @@ function createMockGitAPI(): GitAPI {
         success: true,
         diff: `diff --git a/${filePath} b/${filePath}\n+++ new file\n@@ -0,0 +1,5 @@\n+// New content`,
         filePath,
+      };
+    },
+
+    stageFiles: async (projectPath: string, files: string[], operation: 'stage' | 'unstage') => {
+      console.log('[Mock] Git stage files:', { projectPath, files, operation });
+      return {
+        success: true,
+        result: {
+          operation,
+          filesCount: files.length,
+        },
+      };
+    },
+
+    getDetails: async (projectPath: string, filePath?: string) => {
+      console.log('[Mock] Git details:', { projectPath, filePath });
+      return {
+        success: true,
+        details: {
+          branch: 'main',
+          lastCommitHash: 'abc1234567890',
+          lastCommitMessage: 'Initial commit',
+          lastCommitAuthor: 'Developer',
+          lastCommitTimestamp: new Date().toISOString(),
+          linesAdded: 5,
+          linesRemoved: 2,
+          isConflicted: false,
+          isStaged: false,
+          isUnstaged: true,
+          statusLabel: 'Modified',
+        },
+      };
+    },
+
+    getEnhancedStatus: async (projectPath: string) => {
+      console.log('[Mock] Git enhanced status:', { projectPath });
+      return {
+        success: true,
+        branch: 'main',
+        files: [
+          {
+            path: 'src/feature.ts',
+            indexStatus: ' ',
+            workTreeStatus: 'M',
+            isConflicted: false,
+            isStaged: false,
+            isUnstaged: true,
+            linesAdded: 10,
+            linesRemoved: 3,
+            statusLabel: 'Modified',
+          },
+        ],
       };
     },
   };
@@ -3652,6 +4083,21 @@ function createMockGitHubAPI(): GitHubAPI {
         comments: [],
         totalCount: 0,
         hasNextPage: false,
+      };
+    },
+    getPRReviewComments: async (projectPath: string, prNumber: number) => {
+      console.log('[Mock] Getting PR review comments:', { projectPath, prNumber });
+      return {
+        success: true,
+        comments: [],
+        totalCount: 0,
+      };
+    },
+    resolveReviewThread: async (projectPath: string, threadId: string, resolve: boolean) => {
+      console.log('[Mock] Resolving review thread:', { projectPath, threadId, resolve });
+      return {
+        success: true,
+        isResolved: resolve,
       };
     },
   };

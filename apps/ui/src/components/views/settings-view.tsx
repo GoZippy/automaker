@@ -10,6 +10,7 @@ import { SettingsNavigation } from './settings-view/components/settings-navigati
 import { ApiKeysSection } from './settings-view/api-keys/api-keys-section';
 import { ModelDefaultsSection } from './settings-view/model-defaults';
 import { AppearanceSection } from './settings-view/appearance/appearance-section';
+import { EditorSection } from './settings-view/editor';
 import { TerminalSection } from './settings-view/terminal/terminal-section';
 import { AudioSection } from './settings-view/audio/audio-section';
 import { KeyboardShortcutsSection } from './settings-view/keyboard-shortcuts/keyboard-shortcuts-section';
@@ -29,6 +30,7 @@ import {
 import { MCPServersSection } from './settings-view/mcp-servers';
 import { PromptCustomizationSection } from './settings-view/prompts';
 import { EventHooksSection } from './settings-view/event-hooks';
+import { TemplatesSection } from './settings-view/templates/templates-section';
 import { ImportExportDialog } from './settings-view/components/import-export-dialog';
 import type { Theme } from './settings-view/shared/types';
 
@@ -62,6 +64,14 @@ export function SettingsView() {
     setPromptCustomization,
     skipSandboxWarning,
     setSkipSandboxWarning,
+    defaultMaxTurns,
+    setDefaultMaxTurns,
+    featureTemplates,
+    setFeatureTemplates,
+    addFeatureTemplate,
+    updateFeatureTemplate,
+    deleteFeatureTemplate,
+    reorderFeatureTemplates,
   } = useAppStore();
 
   // Global theme (project-specific themes are managed in Project Settings)
@@ -139,6 +149,16 @@ export function SettingsView() {
             onPromptCustomizationChange={setPromptCustomization}
           />
         );
+      case 'templates':
+        return (
+          <TemplatesSection
+            templates={featureTemplates}
+            onAddTemplate={addFeatureTemplate}
+            onUpdateTemplate={updateFeatureTemplate}
+            onDeleteTemplate={deleteFeatureTemplate}
+            onReorderTemplates={reorderFeatureTemplates}
+          />
+        );
       case 'model-defaults':
         return <ModelDefaultsSection />;
       case 'appearance':
@@ -148,6 +168,8 @@ export function SettingsView() {
             onThemeChange={(newTheme) => setTheme(newTheme as typeof theme)}
           />
         );
+      case 'editor':
+        return <EditorSection />;
       case 'terminal':
         return <TerminalSection />;
       case 'keyboard':
@@ -170,6 +192,7 @@ export function SettingsView() {
             defaultRequirePlanApproval={defaultRequirePlanApproval}
             enableAiCommitMessages={enableAiCommitMessages}
             defaultFeatureModel={defaultFeatureModel}
+            defaultMaxTurns={defaultMaxTurns}
             onDefaultSkipTestsChange={setDefaultSkipTests}
             onEnableDependencyBlockingChange={setEnableDependencyBlocking}
             onSkipVerificationInAutoModeChange={setSkipVerificationInAutoMode}
@@ -177,6 +200,7 @@ export function SettingsView() {
             onDefaultRequirePlanApprovalChange={setDefaultRequirePlanApproval}
             onEnableAiCommitMessagesChange={setEnableAiCommitMessages}
             onDefaultFeatureModelChange={setDefaultFeatureModel}
+            onDefaultMaxTurnsChange={setDefaultMaxTurns}
           />
         );
       case 'worktrees':

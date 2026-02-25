@@ -83,12 +83,25 @@ export type DialogContentProps = Omit<
 > & {
   showCloseButton?: boolean;
   compact?: boolean;
+  /** When true, the default sm:max-w-2xl is not applied, allowing className to set max-width. */
+  noDefaultMaxWidth?: boolean;
 };
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, children, showCloseButton = true, compact = false, ...props }, ref) => {
-    // Check if className contains a custom max-width
-    const hasCustomMaxWidth = typeof className === 'string' && className.includes('max-w-');
+  (
+    {
+      className,
+      children,
+      showCloseButton = true,
+      compact = false,
+      noDefaultMaxWidth = false,
+      ...props
+    },
+    ref
+  ) => {
+    // Check if className contains a custom max-width (fallback heuristic)
+    const hasCustomMaxWidth =
+      noDefaultMaxWidth || (typeof className === 'string' && className.includes('max-w-'));
 
     return (
       <DialogPortal data-slot="dialog-portal">
@@ -97,8 +110,10 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
           ref={ref}
           data-slot="dialog-content"
           className={cn(
-            'fixed top-[50%] left-[50%] z-50 translate-x-[-50%] translate-y-[-50%]',
-            'flex flex-col w-full max-w-[calc(100%-2rem)] max-h-[calc(100vh-4rem)]',
+            'fixed left-[50%] z-50 translate-x-[-50%] translate-y-[-50%]',
+            'top-[calc(50%_+_(env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))_/_2)]',
+            'flex flex-col w-full max-w-[calc(100%-2rem)]',
+            'max-h-[calc(100dvh_-_4rem_-_env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))]',
             'bg-card border border-border rounded-xl shadow-2xl',
             // Premium shadow
             'shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)]',
@@ -108,7 +123,11 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
             'data-[state=closed]:slide-out-to-top-[2%] data-[state=open]:slide-in-from-top-[2%]',
             'duration-200',
-            compact ? 'max-w-4xl p-4' : !hasCustomMaxWidth ? 'sm:max-w-2xl p-6' : 'p-6',
+            compact
+              ? 'max-w-[min(56rem,calc(100%-2rem))] p-4'
+              : !hasCustomMaxWidth
+                ? 'sm:max-w-2xl p-6'
+                : 'p-6',
             className
           )}
           {...props}
@@ -118,13 +137,13 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
             <DialogClosePrimitive
               data-slot="dialog-close"
               className={cn(
-                'absolute rounded-lg opacity-60 transition-all duration-200 cursor-pointer',
+                'absolute z-10 rounded-lg opacity-60 transition-all duration-200 cursor-pointer',
                 'hover:opacity-100 hover:bg-muted',
                 'focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-none',
                 'disabled:pointer-events-none disabled:cursor-not-allowed',
                 '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4',
-                'p-1.5',
-                compact ? 'top-2 right-3' : 'top-4 right-4'
+                'p-2 min-w-[2.5rem] min-h-[2.5rem] flex items-center justify-center',
+                compact ? 'top-2 right-2' : 'top-3 right-3'
               )}
             >
               <XIcon />

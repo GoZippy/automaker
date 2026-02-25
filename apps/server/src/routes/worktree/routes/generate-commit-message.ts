@@ -6,7 +6,7 @@
  */
 
 import type { Request, Response } from 'express';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -20,7 +20,7 @@ import { getErrorMessage, logError } from '../common.js';
 import { getPhaseModelWithOverrides } from '../../../lib/settings-helpers.js';
 
 const logger = createLogger('GenerateCommitMessage');
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /** Timeout for AI provider calls in milliseconds (30 seconds) */
 const AI_TIMEOUT_MS = 30_000;
@@ -33,20 +33,39 @@ async function* withTimeout<T>(
   generator: AsyncIterable<T>,
   timeoutMs: number
 ): AsyncGenerator<T, void, unknown> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error(`AI provider timed out after ${timeoutMs}ms`)), timeoutMs);
+    timerId = setTimeout(
+      () => reject(new Error(`AI provider timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
   });
 
   const iterator = generator[Symbol.asyncIterator]();
   let done = false;
 
-  while (!done) {
-    const result = await Promise.race([iterator.next(), timeoutPromise]);
-    if (result.done) {
-      done = true;
-    } else {
-      yield result.value;
+  try {
+    while (!done) {
+      const result = await Promise.race([iterator.next(), timeoutPromise]).catch(async (err) => {
+        // Capture the original error, then attempt to close the iterator.
+        // If iterator.return() throws, log it but rethrow the original error
+        // so the timeout error (not the teardown error) is preserved.
+        try {
+          await iterator.return?.();
+        } catch (teardownErr) {
+          logger.warn('Error during iterator cleanup after timeout:', teardownErr);
+        }
+        throw err;
+      });
+      if (result.done) {
+        done = true;
+      } else {
+        yield result.value;
+      }
     }
+  } finally {
+    clearTimeout(timerId);
   }
 }
 
@@ -117,14 +136,14 @@ export function createGenerateCommitMessageHandler(
       let diff = '';
       try {
         // First try to get staged changes
-        const { stdout: stagedDiff } = await execAsync('git diff --cached', {
+        const { stdout: stagedDiff } = await execFileAsync('git', ['diff', '--cached'], {
           cwd: worktreePath,
           maxBuffer: 1024 * 1024 * 5, // 5MB buffer
         });
 
         // If no staged changes, get unstaged changes
         if (!stagedDiff.trim()) {
-          const { stdout: unstagedDiff } = await execAsync('git diff', {
+          const { stdout: unstagedDiff } = await execFileAsync('git', ['diff'], {
             cwd: worktreePath,
             maxBuffer: 1024 * 1024 * 5, // 5MB buffer
           });
@@ -213,14 +232,16 @@ export function createGenerateCommitMessageHandler(
             }
           }
         } else if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
-          // Use result if available (some providers return final text here)
-          responseText = msg.result;
+          // Use result text if longer than accumulated text (consistent with simpleQuery pattern)
+          if (msg.result.length > responseText.length) {
+            responseText = msg.result;
+          }
         }
       }
 
       const message = responseText.trim();
 
-      if (!message || message.trim().length === 0) {
+      if (!message) {
         logger.warn('Received empty response from model');
         const response: GenerateCommitMessageErrorResponse = {
           success: false,

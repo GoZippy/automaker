@@ -3,13 +3,13 @@
  */
 
 import type { Request, Response } from 'express';
-import type { AutoModeService } from '../../../services/auto-mode-service.js';
+import type { AutoModeServiceCompat } from '../../../services/auto-mode/index.js';
 import { createLogger } from '@automaker/utils';
 import { getErrorMessage, logError } from '../common.js';
 
 const logger = createLogger('AutoMode');
 
-export function createAnalyzeProjectHandler(autoModeService: AutoModeService) {
+export function createAnalyzeProjectHandler(autoModeService: AutoModeServiceCompat) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath } = req.body as { projectPath: string };
@@ -19,10 +19,11 @@ export function createAnalyzeProjectHandler(autoModeService: AutoModeService) {
         return;
       }
 
-      // Start analysis in background
-      autoModeService.analyzeProject(projectPath).catch((error) => {
-        logger.error(`[AutoMode] Project analysis error:`, error);
-      });
+      // Kick off analysis in the background; attach a rejection handler so
+      // unhandled-promise warnings don't surface and errors are at least logged.
+      // Synchronous throws (e.g. "not implemented") still propagate here.
+      const analysisPromise = autoModeService.analyzeProject(projectPath);
+      analysisPromise.catch((err) => logError(err, 'Background analyzeProject failed'));
 
       res.json({ success: true, message: 'Project analysis started' });
     } catch (error) {

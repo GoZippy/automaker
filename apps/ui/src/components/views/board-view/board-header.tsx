@@ -81,6 +81,8 @@ export function BoardHeader({
     (state) => state.setAddFeatureUseSelectedWorktreeBranch
   );
   const codexAuthStatus = useSetupStore((state) => state.codexAuthStatus);
+  const zaiAuthStatus = useSetupStore((state) => state.zaiAuthStatus);
+  const geminiAuthStatus = useSetupStore((state) => state.geminiAuthStatus);
 
   // Worktree panel visibility (per-project)
   const worktreePanelVisibleByProject = useAppStore((state) => state.worktreePanelVisibleByProject);
@@ -112,6 +114,12 @@ export function BoardHeader({
   // Show if Codex is authenticated (CLI or API key)
   const showCodexUsage = !!codexAuthStatus?.authenticated;
 
+  // z.ai usage tracking visibility logic
+  const showZaiUsage = !!zaiAuthStatus?.authenticated;
+
+  // Gemini usage tracking visibility logic
+  const showGeminiUsage = !!geminiAuthStatus?.authenticated;
+
   // State for mobile actions panel
   const [showActionsPanel, setShowActionsPanel] = useState(false);
   const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
@@ -129,7 +137,7 @@ export function BoardHeader({
   }, [isRefreshingBoard, onRefreshBoard]);
 
   return (
-    <div className="flex items-center justify-between gap-5 p-4 border-b border-border bg-glass backdrop-blur-md">
+    <div className="flex items-center justify-between gap-5 px-4 py-2 sm:p-4 border-b border-border bg-glass backdrop-blur-md">
       <div className="flex items-center gap-4">
         <BoardSearchBar
           searchQuery={searchQuery}
@@ -158,8 +166,12 @@ export function BoardHeader({
             <TooltipContent side="bottom">Refresh board state from server</TooltipContent>
           </Tooltip>
         )}
-        {/* Usage Popover - show if either provider is authenticated, only on desktop */}
-        {isMounted && !isTablet && (showClaudeUsage || showCodexUsage) && <UsagePopover />}
+        {/* Usage Popover - show if any provider is authenticated, only on desktop */}
+        {isMounted &&
+          !isTablet &&
+          (showClaudeUsage || showCodexUsage || showZaiUsage || showGeminiUsage) && (
+            <UsagePopover />
+          )}
 
         {/* Tablet/Mobile view: show hamburger menu with all controls */}
         {isMounted && isTablet && (
@@ -178,6 +190,8 @@ export function BoardHeader({
             onOpenPlanDialog={onOpenPlanDialog}
             showClaudeUsage={showClaudeUsage}
             showCodexUsage={showCodexUsage}
+            showZaiUsage={showZaiUsage}
+            showGeminiUsage={showGeminiUsage}
           />
         )}
 

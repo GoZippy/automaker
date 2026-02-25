@@ -5,6 +5,7 @@
 import type { Request, Response } from 'express';
 import { FeatureLoader } from '../../../services/feature-loader.js';
 import type { Feature, FeatureStatus } from '@automaker/types';
+import type { EventEmitter } from '../../../lib/events.js';
 import { getErrorMessage, logError } from '../common.js';
 import { createLogger } from '@automaker/utils';
 
@@ -13,7 +14,7 @@ const logger = createLogger('features/update');
 // Statuses that should trigger syncing to app_spec.txt
 const SYNC_TRIGGER_STATUSES: FeatureStatus[] = ['verified', 'completed'];
 
-export function createUpdateHandler(featureLoader: FeatureLoader) {
+export function createUpdateHandler(featureLoader: FeatureLoader, events?: EventEmitter) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const {
@@ -40,23 +41,6 @@ export function createUpdateHandler(featureLoader: FeatureLoader) {
         return;
       }
 
-      // Check for duplicate title if title is being updated
-      if (updates.title && updates.title.trim()) {
-        const duplicate = await featureLoader.findDuplicateTitle(
-          projectPath,
-          updates.title,
-          featureId // Exclude the current feature from duplicate check
-        );
-        if (duplicate) {
-          res.status(409).json({
-            success: false,
-            error: `A feature with title "${updates.title}" already exists`,
-            duplicateFeatureId: duplicate.id,
-          });
-          return;
-        }
-      }
-
       // Get the current feature to detect status changes
       const currentFeature = await featureLoader.get(projectPath, featureId);
       const previousStatus = currentFeature?.status as FeatureStatus | undefined;
@@ -71,8 +55,18 @@ export function createUpdateHandler(featureLoader: FeatureLoader) {
         preEnhancementDescription
       );
 
-      // Trigger sync to app_spec.txt when status changes to verified or completed
+      // Emit completion event and sync to app_spec.txt when status transitions to verified/completed
       if (newStatus && SYNC_TRIGGER_STATUSES.includes(newStatus) && previousStatus !== newStatus) {
+        events?.emit('feature:completed', {
+          featureId,
+          featureName: updated.title,
+          projectPath,
+          passes: true,
+          message:
+            newStatus === 'verified' ? 'Feature verified manually' : 'Feature completed manually',
+          executionMode: 'manual',
+        });
+
         try {
           const synced = await featureLoader.syncFeatureToAppSpec(projectPath, updated);
           if (synced) {

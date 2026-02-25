@@ -5,6 +5,8 @@ import {
   isAuthenticationError,
   isRateLimitError,
   isQuotaExhaustedError,
+  isModelNotFoundError,
+  isStreamDisconnectedError,
   extractRetryAfter,
   classifyError,
   getUserFriendlyErrorMessage,
@@ -179,6 +181,76 @@ describe('error-handler.ts', () => {
     });
   });
 
+  describe('isModelNotFoundError', () => {
+    it('should return true for "does not exist or you do not have access" errors', () => {
+      expect(
+        isModelNotFoundError(
+          new Error('The model `gpt-5.3-codex` does not exist or you do not have access to it.')
+        )
+      ).toBe(true);
+    });
+
+    it('should return true for model_not_found errors', () => {
+      expect(isModelNotFoundError(new Error('model_not_found: gpt-5.3-codex'))).toBe(true);
+    });
+
+    it('should return true for invalid_model errors', () => {
+      expect(isModelNotFoundError(new Error('invalid_model: unknown model'))).toBe(true);
+    });
+
+    it('should return true for "model does not exist" errors', () => {
+      expect(isModelNotFoundError(new Error('The model does not exist'))).toBe(true);
+    });
+
+    it('should return true for "model not found" errors', () => {
+      expect(isModelNotFoundError(new Error('model not found'))).toBe(true);
+    });
+
+    it('should return false for regular errors', () => {
+      expect(isModelNotFoundError(new Error('Something went wrong'))).toBe(false);
+      expect(isModelNotFoundError(new Error('Network error'))).toBe(false);
+    });
+
+    it('should return false for null/undefined', () => {
+      expect(isModelNotFoundError(null)).toBe(false);
+      expect(isModelNotFoundError(undefined)).toBe(false);
+    });
+  });
+
+  describe('isStreamDisconnectedError', () => {
+    it('should return true for "stream disconnected" errors', () => {
+      expect(isStreamDisconnectedError(new Error('stream disconnected before completion'))).toBe(
+        true
+      );
+    });
+
+    it('should return true for "stream ended" errors', () => {
+      expect(isStreamDisconnectedError(new Error('stream ended unexpectedly'))).toBe(true);
+    });
+
+    it('should return true for "connection reset" errors', () => {
+      expect(isStreamDisconnectedError(new Error('connection reset by peer'))).toBe(true);
+    });
+
+    it('should return true for "socket hang up" errors', () => {
+      expect(isStreamDisconnectedError(new Error('socket hang up'))).toBe(true);
+    });
+
+    it('should return true for ECONNRESET errors', () => {
+      expect(isStreamDisconnectedError(new Error('ECONNRESET'))).toBe(true);
+    });
+
+    it('should return false for regular errors', () => {
+      expect(isStreamDisconnectedError(new Error('Something went wrong'))).toBe(false);
+      expect(isStreamDisconnectedError(new Error('Network error'))).toBe(false);
+    });
+
+    it('should return false for null/undefined', () => {
+      expect(isStreamDisconnectedError(null)).toBe(false);
+      expect(isStreamDisconnectedError(undefined)).toBe(false);
+    });
+  });
+
   describe('extractRetryAfter', () => {
     it('should extract retry-after from error message', () => {
       const error = new Error('Rate limit exceeded. retry-after: 60');
@@ -298,6 +370,28 @@ describe('error-handler.ts', () => {
       expect(result.isAbort).toBe(false);
     });
 
+    it('should classify model not found errors', () => {
+      const error = new Error(
+        'The model `gpt-5.3-codex` does not exist or you do not have access to it.'
+      );
+      const result = classifyError(error);
+
+      expect(result.type).toBe('model_not_found');
+      expect(result.isModelNotFound).toBe(true);
+      expect(result.isStreamDisconnected).toBe(false);
+      expect(result.isAuth).toBe(false);
+    });
+
+    it('should classify stream disconnected errors', () => {
+      const error = new Error('stream disconnected before completion');
+      const result = classifyError(error);
+
+      expect(result.type).toBe('stream_disconnected');
+      expect(result.isStreamDisconnected).toBe(true);
+      expect(result.isModelNotFound).toBe(false);
+      expect(result.isAuth).toBe(false);
+    });
+
     it('should classify execution errors (regular Error)', () => {
       const error = new Error('Something went wrong');
       const result = classifyError(error);
@@ -395,6 +489,24 @@ describe('error-handler.ts', () => {
       const message = getUserFriendlyErrorMessage(error);
 
       expect(message).toBe('Authentication failed. Please check your API key.');
+    });
+
+    it('should return friendly message for model not found errors', () => {
+      const error = new Error(
+        'The model `gpt-5.3-codex` does not exist or you do not have access to it.'
+      );
+      const message = getUserFriendlyErrorMessage(error);
+
+      expect(message).toContain('Model not available');
+      expect(message).toContain('codex login');
+    });
+
+    it('should return friendly message for stream disconnected errors', () => {
+      const error = new Error('stream disconnected before completion');
+      const message = getUserFriendlyErrorMessage(error);
+
+      expect(message).toContain('Connection interrupted');
+      expect(message).toContain('stream was disconnected');
     });
 
     it('should return friendly message for quota exhausted errors', () => {

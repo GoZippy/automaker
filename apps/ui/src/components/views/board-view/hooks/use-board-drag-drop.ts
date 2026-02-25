@@ -3,6 +3,7 @@ import { createLogger } from '@automaker/utils/logger';
 import { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { Feature } from '@/store/app-store';
 import { useAppStore } from '@/store/app-store';
+import { useAutoMode } from '@/hooks/use-auto-mode';
 import { toast } from 'sonner';
 import { COLUMNS, ColumnId } from '../constants';
 
@@ -32,7 +33,13 @@ export function useBoardDragDrop({
   const [pendingDependencyLink, setPendingDependencyLink] = useState<PendingDependencyLink | null>(
     null
   );
-  const { moveFeature, updateFeature } = useAppStore();
+  // IMPORTANT: Use individual selectors instead of bare useAppStore() to prevent
+  // subscribing to the entire store. Bare useAppStore() causes the host component
+  // (BoardView) to re-render on EVERY store change, which cascades through effects
+  // and triggers React error #185 (maximum update depth exceeded).
+  const moveFeature = useAppStore((s) => s.moveFeature);
+  const updateFeature = useAppStore((s) => s.updateFeature);
+  const autoMode = useAutoMode();
 
   // Note: getOrCreateWorktreeForFeature removed - worktrees are now created server-side
   // at execution time based on feature.branchName
@@ -155,29 +162,28 @@ export function useBoardDragDrop({
         }
       }
 
-      // Determine if dragging is allowed based on status and skipTests
-      // - Backlog items can always be dragged
-      // - waiting_approval items can always be dragged (to allow manual verification via drag)
-      // - verified items can always be dragged (to allow moving back to waiting_approval)
-      // - in_progress items can be dragged (but not if they're currently running)
-      // - Non-skipTests (TDD) items that are in progress cannot be dragged if they are running
-      if (draggedFeature.status === 'in_progress') {
-        // Only allow dragging in_progress if it's not currently running
-        if (isRunningTask) {
-          logger.debug('Cannot drag feature - currently running');
-          return;
-        }
-      }
+      // Determine if dragging is allowed based on status
+      // Running in_progress features CAN be dragged to backlog (stops the agent)
+      // but cannot be dragged to other columns
 
       let targetStatus: ColumnId | null = null;
 
+      // Normalize the over ID: strip 'column-header-' prefix if the card was dropped
+      // directly onto the column header droppable zone (e.g. 'column-header-backlog' → 'backlog')
+      const effectiveOverId = overId.startsWith('column-header-')
+        ? overId.replace('column-header-', '')
+        : overId;
+
       // Check if we dropped on a column
-      const column = COLUMNS.find((c) => c.id === overId);
+      const column = COLUMNS.find((c) => c.id === effectiveOverId);
       if (column) {
         targetStatus = column.id;
+      } else if (effectiveOverId.startsWith('pipeline_')) {
+        // Pipeline step column (not in static COLUMNS list)
+        targetStatus = effectiveOverId as ColumnId;
       } else {
         // Dropped on another feature - find its column
-        const overFeature = features.find((f) => f.id === overId);
+        const overFeature = features.find((f) => f.id === effectiveOverId);
         if (overFeature) {
           targetStatus = overFeature.status;
         }
@@ -235,15 +241,38 @@ export function useBoardDragDrop({
       } else if (draggedFeature.status === 'in_progress') {
         // Handle in_progress features being moved
         if (targetStatus === 'backlog') {
-          // Allow moving in_progress cards back to backlog
+          // If the feature is currently running, stop it first
+          if (isRunningTask) {
+            try {
+              await autoMode.stopFeature(featureId);
+              logger.info('Stopped running feature via drag to backlog:', featureId);
+            } catch (error) {
+              logger.error('Error stopping feature during drag to backlog:', error);
+              toast.error('Failed to stop agent', {
+                description: 'The feature will still be moved to backlog.',
+              });
+            }
+          }
           moveFeature(featureId, 'backlog');
           persistFeatureUpdate(featureId, { status: 'backlog' });
-          toast.info('Feature moved to backlog', {
-            description: `Moved to Backlog: ${draggedFeature.description.slice(
-              0,
-              50
-            )}${draggedFeature.description.length > 50 ? '...' : ''}`,
+          toast.info(
+            isRunningTask
+              ? 'Agent stopped and feature moved to backlog'
+              : 'Feature moved to backlog',
+            {
+              description: `Moved to Backlog: ${draggedFeature.description.slice(
+                0,
+                50
+              )}${draggedFeature.description.length > 50 ? '...' : ''}`,
+            }
+          );
+        } else if (isRunningTask) {
+          // Running features can only be dragged to backlog, not other columns
+          logger.debug('Cannot drag running feature to', targetStatus);
+          toast.error('Cannot move running feature', {
+            description: 'Stop the agent first or drag to Backlog to stop and move.',
           });
+          return;
         } else if (targetStatus === 'verified' && draggedFeature.skipTests) {
           // Manual verify via drag (only for skipTests features)
           moveFeature(featureId, 'verified');
@@ -310,6 +339,7 @@ export function useBoardDragDrop({
       updateFeature,
       persistFeatureUpdate,
       handleStartImplementation,
+      autoMode,
     ]
   );
 
