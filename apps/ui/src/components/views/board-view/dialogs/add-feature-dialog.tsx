@@ -26,11 +26,12 @@ import { useNavigate } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { modelSupportsThinking } from '@/lib/utils';
-import { useAppStore, ThinkingLevel, FeatureImage, PlanningMode, Feature } from '@/store/app-store';
+import { useAppStore } from '@/store/app-store';
+import type { ThinkingLevel, PlanningMode, Feature, FeatureImage } from '@/store/types';
 import type { ReasoningEffort, PhaseModelEntry, AgentModel } from '@automaker/types';
 import {
   supportsReasoningEffort,
-  isAdaptiveThinkingModel,
+  normalizeThinkingLevelForModel,
   getThinkingLevelsForModel,
 } from '@automaker/types';
 import {
@@ -308,20 +309,10 @@ export function AddFeatureDialog({
   }, [planningMode]);
 
   const handleModelChange = (entry: PhaseModelEntry) => {
-    // Normalize thinking level when switching between adaptive and non-adaptive models
-    const isNewModelAdaptive =
-      typeof entry.model === 'string' && isAdaptiveThinkingModel(entry.model);
-    const currentLevel = entry.thinkingLevel || 'none';
+    const modelId = typeof entry.model === 'string' ? entry.model : '';
+    const normalizedThinkingLevel = normalizeThinkingLevelForModel(modelId, entry.thinkingLevel);
 
-    if (isNewModelAdaptive && currentLevel !== 'none' && currentLevel !== 'adaptive') {
-      // Switching TO Opus 4.6 with a manual level -> auto-switch to 'adaptive'
-      setModelEntry({ ...entry, thinkingLevel: 'adaptive' });
-    } else if (!isNewModelAdaptive && currentLevel === 'adaptive') {
-      // Switching FROM Opus 4.6 with adaptive -> auto-switch to 'high'
-      setModelEntry({ ...entry, thinkingLevel: 'high' });
-    } else {
-      setModelEntry(entry);
-    }
+    setModelEntry({ ...entry, thinkingLevel: normalizedThinkingLevel });
   };
 
   const buildFeatureData = (): FeatureData | null => {

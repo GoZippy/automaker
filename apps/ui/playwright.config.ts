@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const port = process.env.TEST_PORT || 3007;
-const serverPort = process.env.TEST_SERVER_PORT || 3008;
+const port = process.env.TEST_PORT || 3107;
+const serverPort = process.env.TEST_SERVER_PORT || 3108;
 const reuseServer = process.env.TEST_REUSE_SERVER === 'true';
 const useExternalBackend = !!process.env.VITE_SERVER_URL;
 // Always use mock agent for tests (disables rate limiting, uses mock Claude responses)
@@ -70,6 +70,10 @@ export default defineConfig({
             timeout: 120000,
             env: {
               ...process.env,
+              // Must set AUTOMAKER_WEB_PORT to match the port Playwright waits for
+              AUTOMAKER_WEB_PORT: String(port),
+              // Must set AUTOMAKER_SERVER_PORT so Vite proxy forwards to the correct backend port
+              AUTOMAKER_SERVER_PORT: String(serverPort),
               VITE_SKIP_SETUP: 'true',
               // Always skip electron plugin during tests - prevents duplicate server spawning
               VITE_SKIP_ELECTRON: 'true',
