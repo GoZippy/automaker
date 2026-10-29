@@ -33,13 +33,13 @@
     "@automaker/types": "1.0.0",
     "@automaker/utils": "1.0.0",
     "@github/copilot-sdk": "^0.1.16",
-    "@modelcontextprotocol/sdk": "1.25.2",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@openai/codex-sdk": "^0.98.0",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
     "dotenv": "17.2.3",
     "express": "5.2.1",
-    "morgan": "1.10.1",
+    "morgan": "1.12.1",
     "node-pty": "1.1.0-beta41",
     "ws": "8.18.3",
     "yaml": "2.7.0"
@@ -57,6 +57,6 @@
     "@vitest/ui": "4.0.16",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
-    "vitest": "4.0.16"
+    "vitest": "5.0.5"
   }
 }
